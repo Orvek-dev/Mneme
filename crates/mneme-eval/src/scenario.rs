@@ -13,6 +13,8 @@ pub(crate) struct Scenario {
     pub(crate) tags: Vec<String>,
     #[serde(default)]
     pub(crate) budget: Budget,
+    #[serde(default)]
+    pub(crate) persistence: Option<Persistence>,
     pub(crate) events: Vec<InputEvent>,
     pub(crate) expected: Expected,
 }
@@ -29,6 +31,12 @@ impl Default for Budget {
             daily_cloud_tokens: 100_000,
         }
     }
+}
+
+#[derive(Debug, Clone, Deserialize)]
+#[serde(deny_unknown_fields)]
+pub(crate) struct Persistence {
+    pub(crate) restart_after_event: usize,
 }
 
 #[derive(Debug, Clone, Deserialize)]
@@ -128,6 +136,20 @@ fn validate_scenario(scenario: &Scenario, path: &Path) -> Result<(), EvalError> 
             "scenario {} has no events",
             scenario.id
         )));
+    }
+    if let Some(persistence) = &scenario.persistence {
+        if persistence.restart_after_event == 0 {
+            return Err(EvalError::scenario(format!(
+                "scenario {} persistence restart_after_event must be greater than zero",
+                scenario.id
+            )));
+        }
+        if persistence.restart_after_event > scenario.events.len() {
+            return Err(EvalError::scenario(format!(
+                "scenario {} persistence restart_after_event exceeds event count",
+                scenario.id
+            )));
+        }
     }
     for (idx, event) in scenario.events.iter().enumerate() {
         if event.speaker_id.trim().is_empty() {

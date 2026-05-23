@@ -3,7 +3,8 @@
 ## Scope
 
 Mneme v1 personal core provides the first product runtime that can be exercised
-by the eval harness. It is deterministic and in-memory.
+by the eval harness. It is deterministic and exposes a small persistence
+boundary for restart verification.
 
 ## Authority
 
@@ -11,6 +12,8 @@ by the eval harness. It is deterministic and in-memory.
 - Budget checks happen before extraction.
 - Secret-like data must not become active context.
 - Every context item must preserve source event provenance.
+- Persisted state must round-trip without changing claim, event, budget, or
+  audit semantics.
 
 ## Requirements
 
@@ -28,6 +31,10 @@ by the eval harness. It is deterministic and in-memory.
   claim write, context read, and budget block operations.
 - [REQ-V1-008][Ports-and-adapters] The eval harness shall expose `mneme-v1` as a
   target adapter over `mneme-core`.
+- [REQ-V1-009][Ports-and-adapters] The v1 core shall expose a storage port for
+  loading and saving complete state snapshots.
+- [REQ-V1-010][Event-driven] The `mneme-v1` eval target shall prove recall still
+  works after file-backed persistence and reload.
 
 ## Verification Map
 
@@ -41,3 +48,5 @@ by the eval harness. It is deterministic and in-memory.
 | REQ-V1-006 | citation checks in core suite | verified |
 | REQ-V1-007 | audit checks in core suite | verified |
 | REQ-V1-008 | `mneme-eval acceptance --suite core --target mneme-v1` | verified |
+| REQ-V1-009 | JSON file store round-trip unit test | verified |
+| REQ-V1-010 | `restart-persistence` core scenario through `mneme-v1` target | verified |

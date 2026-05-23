@@ -1,0 +1,33 @@
+id: restart-persistence
+tags:
+  - persistence
+  - recall
+  - context-pack
+budget:
+  daily_cloud_tokens: 100
+persistence:
+  restart_after_event: 1
+events:
+  - speaker_id: user
+    actor_agent_id: codex
+    scope: private
+    trust_level: trusted_user
+    text: "remember: user prefers durable memory"
+expected:
+  event_append:
+    count: 1
+  claims:
+    - subject: user
+      predicate: prefers
+      object: durable memory
+      status: active
+      scope: private
+  context_pack:
+    query: "user durable"
+    must_include:
+      - durable memory
+    citation_required: true
+  budget:
+    hard_cap_violations: 0
+  audit:
+    read_write_events_required: true

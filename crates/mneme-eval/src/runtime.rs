@@ -235,6 +235,7 @@ mod tests {
             budget: Budget {
                 daily_cloud_tokens: 100,
             },
+            persistence: None,
             events: vec![InputEvent {
                 speaker_id: "user".to_owned(),
                 actor_agent_id: Some("codex".to_owned()),
@@ -283,6 +284,7 @@ mod tests {
             budget: Budget {
                 daily_cloud_tokens: 100,
             },
+            persistence: None,
             events: vec![InputEvent {
                 speaker_id: "user".to_owned(),
                 actor_agent_id: None,
