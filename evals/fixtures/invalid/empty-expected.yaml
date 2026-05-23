@@ -1,0 +1,5 @@
+id: invalid-empty-expected
+events:
+  - speaker_id: user
+    text: "remember: user prefers deterministic tests"
+expected: {}

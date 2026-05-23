@@ -25,6 +25,63 @@ impl EvalReport {
 }
 
 #[derive(Debug, Clone, Serialize)]
+pub(crate) struct ValidationReport {
+    pub(crate) ok: bool,
+    pub(crate) scenario_count: usize,
+    pub(crate) valid: usize,
+    pub(crate) invalid: usize,
+    pub(crate) results: Vec<ScenarioValidationReport>,
+}
+
+impl ValidationReport {
+    pub(crate) fn from_results(results: Vec<ScenarioValidationReport>) -> Self {
+        let scenario_count = results.len();
+        let valid = results.iter().filter(|result| result.ok).count();
+        let invalid = scenario_count.saturating_sub(valid);
+        Self {
+            ok: invalid == 0,
+            scenario_count,
+            valid,
+            invalid,
+            results,
+        }
+    }
+}
+
+#[derive(Debug, Clone, Serialize)]
+pub(crate) struct ScenarioValidationReport {
+    pub(crate) path: String,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub(crate) scenario_id: Option<String>,
+    pub(crate) tags: Vec<String>,
+    pub(crate) ok: bool,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub(crate) error: Option<String>,
+}
+
+impl ScenarioValidationReport {
+    pub(crate) fn pass(path: String, scenario_id: String, tags: Vec<String>) -> Self {
+        Self {
+            path,
+            scenario_id: Some(scenario_id),
+            tags,
+            ok: true,
+            error: None,
+        }
+    }
+
+    pub(crate) fn fail(path: String, error: String) -> Self {
+        Self {
+            path,
+            scenario_id: None,
+            tags: Vec::new(),
+            ok: false,
+            error: Some(error),
+        }
+    }
+}
+
+#[derive(Debug, Clone, Serialize)]
 pub(crate) struct ScenarioReport {
     pub(crate) scenario_id: String,
     pub(crate) tags: Vec<String>,

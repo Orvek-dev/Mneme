@@ -38,6 +38,10 @@ reports.
   unless they are explicitly committed as fixtures.
 - [REQ-EVAL-006][Event-driven] When a seeded critical fault is active, the
   harness shall fail the affected scenario instead of reporting success.
+- [REQ-EVAL-007][Ubiquitous] The public scenario format shall be documented with
+  required fields, optional fields, report conventions, and seeded fault modes.
+- [REQ-EVAL-008][Ubiquitous] The eval harness shall validate scenario structure
+  without replaying runtime behavior and shall fail malformed fixtures.
 
 ## Verification Map
 
@@ -49,3 +53,5 @@ reports.
 | REQ-EVAL-004 | failure report fields in replay output | verified |
 | REQ-EVAL-005 | `.gitignore` rules for `evals/reports/*` | verified |
 | REQ-EVAL-006 | `--seeded-fault skip-claims` / `leak-secrets` tests | verified |
+| REQ-EVAL-007 | `docs/eval-scenario-format.md` | verified |
+| REQ-EVAL-008 | `mneme-eval validate --suite core` and invalid fixture CI check | verified |
