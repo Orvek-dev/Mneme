@@ -89,6 +89,11 @@ impl MnemeEngine {
         }
         self.budget.spent_tokens = self.budget.spent_tokens.saturating_add(token_estimate);
 
+        if self.apply_lifecycle_event(&event) {
+            self.events.push(event);
+            return;
+        }
+
         if let Some(claim) = extract_claim(&event, self.claims.len() + 1) {
             self.audit.push(AuditRecord {
                 kind: AuditKind::ClaimWrite,
@@ -98,6 +103,57 @@ impl MnemeEngine {
         }
 
         self.events.push(event);
+    }
+
+    fn apply_lifecycle_event(&mut self, event: &EventRecord) -> bool {
+        if let Some(target) = find_forget_marker(&event.text) {
+            self.forget_claims(target);
+            return true;
+        }
+        if let Some((old_text, new_text)) = find_correct_marker(&event.text) {
+            self.correct_claims(event, old_text, new_text);
+            return true;
+        }
+        false
+    }
+
+    fn forget_claims(&mut self, target: &str) {
+        for claim in &mut self.claims {
+            if claim.status == ClaimStatus::Active && claim_matches_text(claim, target) {
+                claim.status = ClaimStatus::Forgotten;
+                self.audit.push(AuditRecord {
+                    kind: AuditKind::ClaimUpdate,
+                    target_id: claim.id.clone(),
+                });
+            }
+        }
+    }
+
+    fn correct_claims(&mut self, event: &EventRecord, old_text: &str, new_text: &str) {
+        let mut source_event_ids = Vec::new();
+        for claim in &mut self.claims {
+            if claim.status == ClaimStatus::Active && claim_matches_text(claim, old_text) {
+                claim.status = ClaimStatus::Superseded;
+                source_event_ids.extend(claim.source_event_ids.clone());
+                self.audit.push(AuditRecord {
+                    kind: AuditKind::ClaimUpdate,
+                    target_id: claim.id.clone(),
+                });
+            }
+        }
+
+        if source_event_ids.is_empty() {
+            return;
+        }
+        source_event_ids.push(event.id.clone());
+        dedupe_ids(&mut source_event_ids);
+
+        let claim = claim_from_marker(event, self.claims.len() + 1, new_text, source_event_ids);
+        self.audit.push(AuditRecord {
+            kind: AuditKind::ClaimWrite,
+            target_id: claim.id.clone(),
+        });
+        self.claims.push(claim);
     }
 
     /// Builds a context pack over active claims and records a read audit event.
@@ -384,6 +440,10 @@ pub enum ClaimStatus {
     Active,
     /// Claim resembles a secret and is excluded from context retrieval.
     BlockedSecret,
+    /// Claim was replaced by a later correction.
+    Superseded,
+    /// Claim was intentionally forgotten by a later event.
+    Forgotten,
 }
 
 impl ClaimStatus {
@@ -393,6 +453,8 @@ impl ClaimStatus {
         match self {
             Self::Active => "active",
             Self::BlockedSecret => "blocked_secret",
+            Self::Superseded => "superseded",
+            Self::Forgotten => "forgotten",
         }
     }
 }
@@ -454,6 +516,8 @@ pub enum AuditKind {
     EventAppend,
     /// Claim write operation.
     ClaimWrite,
+    /// Claim lifecycle update operation.
+    ClaimUpdate,
     /// Context read operation.
     ContextRead,
     /// Budget hard-cap block.
@@ -467,6 +531,7 @@ impl AuditKind {
         match self {
             Self::EventAppend => "event.append",
             Self::ClaimWrite => "claim.write",
+            Self::ClaimUpdate => "claim.update",
             Self::ContextRead => "context.read",
             Self::BudgetBlock => "budget.block",
         }
@@ -488,7 +553,20 @@ pub struct EngineSnapshot {
 
 fn extract_claim(event: &EventRecord, next_claim_number: usize) -> Option<ClaimRecord> {
     let marker = find_remember_marker(&event.text)?;
-    let source_event_ids = vec![event.id.clone()];
+    Some(claim_from_marker(
+        event,
+        next_claim_number,
+        marker,
+        vec![event.id.clone()],
+    ))
+}
+
+fn claim_from_marker(
+    event: &EventRecord,
+    next_claim_number: usize,
+    marker: &str,
+    source_event_ids: Vec<String>,
+) -> ClaimRecord {
     let mut parts = marker.split_whitespace();
     let first = parts.next();
     let second = parts.next();
@@ -506,7 +584,7 @@ fn extract_claim(event: &EventRecord, next_claim_number: usize) -> Option<ClaimR
     } else {
         ClaimStatus::Active
     };
-    Some(ClaimRecord {
+    ClaimRecord {
         id: next_id("claim", next_claim_number),
         subject,
         predicate,
@@ -514,7 +592,21 @@ fn extract_claim(event: &EventRecord, next_claim_number: usize) -> Option<ClaimR
         status,
         scope: event.scope.clone(),
         source_event_ids,
-    })
+    }
+}
+
+fn claim_matches_text(claim: &ClaimRecord, target: &str) -> bool {
+    claim.text().eq_ignore_ascii_case(target.trim())
+}
+
+fn dedupe_ids(ids: &mut Vec<String>) {
+    let mut deduped = Vec::new();
+    for id in ids.drain(..) {
+        if !deduped.contains(&id) {
+            deduped.push(id);
+        }
+    }
+    *ids = deduped;
 }
 
 fn find_remember_marker(text: &str) -> Option<&str> {
@@ -523,6 +615,32 @@ fn find_remember_marker(text: &str) -> Option<&str> {
             let trimmed = rest.trim();
             if !trimmed.is_empty() {
                 return Some(trimmed);
+            }
+        }
+    }
+    None
+}
+
+fn find_forget_marker(text: &str) -> Option<&str> {
+    for marker in ["forget:", "잊어줘:"] {
+        if let Some((_, rest)) = text.split_once(marker) {
+            let trimmed = rest.trim();
+            if !trimmed.is_empty() {
+                return Some(trimmed);
+            }
+        }
+    }
+    None
+}
+
+fn find_correct_marker(text: &str) -> Option<(&str, &str)> {
+    for marker in ["correct:", "수정:"] {
+        if let Some((_, rest)) = text.split_once(marker) {
+            let (old_text, new_text) = rest.split_once("->")?;
+            let old_text = old_text.trim();
+            let new_text = new_text.trim();
+            if !old_text.is_empty() && !new_text.is_empty() {
+                return Some((old_text, new_text));
             }
         }
     }
@@ -619,6 +737,71 @@ mod tests {
         assert_eq!(snapshot.claims[0].status, ClaimStatus::BlockedSecret);
         assert!(context.items.is_empty());
         assert_eq!(context.omitted.len(), 1);
+    }
+
+    #[test]
+    fn correction_supersedes_old_claim_and_writes_replacement() {
+        let mut engine = MnemeEngine::new(MnemeConfig {
+            daily_cloud_tokens: 100,
+        });
+        engine.ingest_event(EventInput {
+            speaker_id: "user".to_owned(),
+            actor_agent_id: Some("codex".to_owned()),
+            text: "remember: user prefers local-first tools".to_owned(),
+            scope: "private".to_owned(),
+            trust_level: "trusted_user".to_owned(),
+        });
+        engine.ingest_event(EventInput {
+            speaker_id: "user".to_owned(),
+            actor_agent_id: Some("codex".to_owned()),
+            text: "correct: user prefers local-first tools -> user prefers desktop IDE".to_owned(),
+            scope: "private".to_owned(),
+            trust_level: "trusted_user".to_owned(),
+        });
+        let context = engine.build_context_pack("desktop IDE");
+        let snapshot = engine.snapshot();
+
+        assert_eq!(snapshot.claims.len(), 2);
+        assert_eq!(snapshot.claims[0].status, ClaimStatus::Superseded);
+        assert_eq!(snapshot.claims[1].status, ClaimStatus::Active);
+        assert_eq!(
+            snapshot.claims[1].source_event_ids,
+            vec!["event-001", "event-002"]
+        );
+        assert_eq!(context.items.len(), 1);
+        assert_eq!(context.items[0].claim_text, "user prefers desktop IDE");
+        assert!(snapshot
+            .audit
+            .iter()
+            .any(|event| event.kind == AuditKind::ClaimUpdate));
+    }
+
+    #[test]
+    fn forgotten_claims_are_omitted_from_context() {
+        let mut engine = MnemeEngine::new(MnemeConfig {
+            daily_cloud_tokens: 100,
+        });
+        engine.ingest_event(EventInput {
+            speaker_id: "user".to_owned(),
+            actor_agent_id: None,
+            text: "remember: user prefers local-first tools".to_owned(),
+            scope: "private".to_owned(),
+            trust_level: "trusted_user".to_owned(),
+        });
+        engine.ingest_event(EventInput {
+            speaker_id: "user".to_owned(),
+            actor_agent_id: None,
+            text: "forget: user prefers local-first tools".to_owned(),
+            scope: "private".to_owned(),
+            trust_level: "trusted_user".to_owned(),
+        });
+        let context = engine.build_context_pack("local-first");
+        let snapshot = engine.snapshot();
+
+        assert_eq!(snapshot.claims.len(), 1);
+        assert_eq!(snapshot.claims[0].status, ClaimStatus::Forgotten);
+        assert!(context.items.is_empty());
+        assert_eq!(context.omitted[0].reason, "forgotten");
     }
 
     #[test]

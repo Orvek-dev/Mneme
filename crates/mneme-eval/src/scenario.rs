@@ -108,6 +108,7 @@ pub(crate) struct BudgetExpected {
 #[serde(default, deny_unknown_fields)]
 pub(crate) struct AuditExpected {
     pub(crate) read_write_events_required: bool,
+    pub(crate) claim_update_required: bool,
 }
 
 pub(crate) fn load_scenario(path: &Path) -> Result<Scenario, EvalError> {
