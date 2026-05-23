@@ -1,11 +1,14 @@
 use serde::Serialize;
 
+use crate::target::EvalTargetMetadata;
+
 const REPORT_SCHEMA_VERSION: u32 = 1;
 
 #[derive(Debug, Clone, Serialize)]
 pub(crate) struct EvalReport {
     pub(crate) report_schema_version: u32,
     pub(crate) target: String,
+    pub(crate) target_metadata: EvalTargetMetadata,
     pub(crate) ok: bool,
     pub(crate) scenario_count: usize,
     pub(crate) passed: usize,
@@ -14,13 +17,18 @@ pub(crate) struct EvalReport {
 }
 
 impl EvalReport {
-    pub(crate) fn from_results(target: impl Into<String>, results: Vec<ScenarioReport>) -> Self {
+    pub(crate) fn from_results(
+        target: impl Into<String>,
+        target_metadata: EvalTargetMetadata,
+        results: Vec<ScenarioReport>,
+    ) -> Self {
         let scenario_count = results.len();
         let passed = results.iter().filter(|result| result.ok).count();
         let failed = scenario_count.saturating_sub(passed);
         Self {
             report_schema_version: REPORT_SCHEMA_VERSION,
             target: target.into(),
+            target_metadata,
             ok: failed == 0,
             scenario_count,
             passed,
@@ -225,11 +233,13 @@ mod tests {
             vec![CheckReport::pass("check", "expected", "expected")],
         );
 
-        let report = EvalReport::from_results("fake", vec![scenario]);
+        let report = EvalReport::from_results("fake", EvalTargetMetadata::fake(), vec![scenario]);
         let json = serde_json::to_value(&report)?;
 
         assert_eq!(json["report_schema_version"], REPORT_SCHEMA_VERSION);
         assert_eq!(json["target"], "fake");
+        assert_eq!(json["target_metadata"]["extractor"], "fixture");
+        assert_eq!(json["target_metadata"]["opt_in"], false);
         assert_eq!(json["ok"], true);
         assert_eq!(json["scenario_count"], 1);
         assert_eq!(json["passed"], 1);

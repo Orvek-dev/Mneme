@@ -1,20 +1,25 @@
 use std::path::{Path, PathBuf};
 use std::time::{SystemTime, UNIX_EPOCH};
 
-use mneme_core::{EventInput, JsonFileStore, MnemeConfig, MnemeEngine};
+use mneme_core::{CommandExtractor, EventInput, JsonFileStore, MnemeConfig, MnemeEngine};
 
 use crate::error::EvalError;
 use crate::scenario::Scenario;
 use crate::target::{
-    ActualState, AuditEvent, BudgetActual, Claim, ContextItem, ContextPack, EvalTarget, FaultMode,
-    OmittedItem, RecordedEvent, TargetRunOptions,
+    ActualState, AuditEvent, BudgetActual, Claim, ContextItem, ContextPack, EvalTarget,
+    EvalTargetMetadata, FaultMode, OmittedItem, RecordedEvent, TargetRunOptions,
 };
 
 pub(crate) struct MnemeV1EvalTarget;
+pub(crate) struct MnemeV1CommandEvalTarget;
 
 impl EvalTarget for MnemeV1EvalTarget {
     fn name(&self) -> &'static str {
         "mneme-v1"
+    }
+
+    fn metadata(&self, _options: &TargetRunOptions) -> EvalTargetMetadata {
+        EvalTargetMetadata::rule_based()
     }
 
     fn run(
@@ -26,7 +31,12 @@ impl EvalTarget for MnemeV1EvalTarget {
             .persistence
             .as_ref()
             .map(|_| temp_store_path(&scenario.id));
-        let result = run_with_optional_persistence(scenario, options, persistence_path.as_deref());
+        let result = run_with_optional_persistence(
+            scenario,
+            options,
+            persistence_path.as_deref(),
+            ExtractorMode::Rule,
+        );
         if let Some(path) = persistence_path {
             let _ = std::fs::remove_file(path);
         }
@@ -34,31 +44,84 @@ impl EvalTarget for MnemeV1EvalTarget {
     }
 }
 
+impl EvalTarget for MnemeV1CommandEvalTarget {
+    fn name(&self) -> &'static str {
+        "mneme-v1-command"
+    }
+
+    fn metadata(&self, options: &TargetRunOptions) -> EvalTargetMetadata {
+        EvalTargetMetadata::command(options.command_extractor.is_some())
+    }
+
+    fn run(
+        &self,
+        scenario: &Scenario,
+        options: TargetRunOptions,
+    ) -> Result<ActualState, EvalError> {
+        let persistence_path = scenario
+            .persistence
+            .as_ref()
+            .map(|_| temp_store_path(&scenario.id));
+        let result = run_with_optional_persistence(
+            scenario,
+            options,
+            persistence_path.as_deref(),
+            ExtractorMode::Command,
+        );
+        if let Some(path) = persistence_path {
+            let _ = std::fs::remove_file(path);
+        }
+        result
+    }
+}
+
+#[derive(Debug, Clone, Copy)]
+enum ExtractorMode {
+    Rule,
+    Command,
+}
+
 fn run_with_optional_persistence(
     scenario: &Scenario,
     options: TargetRunOptions,
     persistence_path: Option<&Path>,
+    extractor_mode: ExtractorMode,
 ) -> Result<ActualState, EvalError> {
     let config = MnemeConfig {
         daily_cloud_tokens: scenario.budget.daily_cloud_tokens,
     };
     let mut engine = MnemeEngine::new(config);
-    for (idx, input) in scenario.events.iter().enumerate() {
-        engine
-            .ingest_event(EventInput {
-                speaker_id: input.speaker_id.clone(),
-                actor_agent_id: input.actor_agent_id.clone(),
-                text: input.text.clone(),
-                scope: input.scope.clone(),
-                trust_level: input.trust_level.clone(),
-            })
-            .map_err(|source| {
-                EvalError::scenario(format!(
-                    "scenario {} extractor failed for event {}: {source}",
-                    scenario.id,
-                    idx + 1
-                ))
+    let command_extractor = match extractor_mode {
+        ExtractorMode::Rule => None,
+        ExtractorMode::Command => {
+            let command = options.command_extractor.as_ref().ok_or_else(|| {
+                EvalError::invalid_cli("mneme-v1-command requires --extractor-command <program>")
             })?;
+            Some(CommandExtractor::new(
+                command.program.clone(),
+                command.args.clone(),
+            ))
+        }
+    };
+    for (idx, input) in scenario.events.iter().enumerate() {
+        let event = EventInput {
+            speaker_id: input.speaker_id.clone(),
+            actor_agent_id: input.actor_agent_id.clone(),
+            text: input.text.clone(),
+            scope: input.scope.clone(),
+            trust_level: input.trust_level.clone(),
+        };
+        match &command_extractor {
+            Some(extractor) => engine.ingest_event_with_extractor(event, extractor),
+            None => engine.ingest_event(event),
+        }
+        .map_err(|source| {
+            EvalError::scenario(format!(
+                "scenario {} extractor failed for event {}: {source}",
+                scenario.id,
+                idx + 1
+            ))
+        })?;
 
         if scenario
             .persistence

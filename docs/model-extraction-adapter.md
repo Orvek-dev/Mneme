@@ -57,3 +57,21 @@ event should be retained without a claim.
   records, and secret blocking.
 - Keep CI on `RuleBasedExtractor` unless a model wrapper is explicitly
   configured for an opt-in eval suite.
+
+## Eval Suite
+
+The `model` suite checks behavior that rule markers cannot cover, while still
+using a deterministic fixture command:
+
+```sh
+cargo run -p mneme-eval -- validate --suite model
+cargo run -p mneme-eval -- run --suite model \
+  --target mneme-v1-command \
+  --extractor-command evals/fixtures/command-extractor.sh \
+  --json
+```
+
+Provider-backed wrappers should use the same `mneme-v1-command` target. Keep
+provider credentials in the wrapper environment and pass the wrapper program
+with `--extractor-command`; extra wrapper arguments can be repeated with
+`--extractor-arg <arg>`.

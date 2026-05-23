@@ -1,8 +1,8 @@
 use crate::error::EvalError;
 use crate::scenario::{ContextPackExpected, Scenario};
 use crate::target::{
-    ActualState, AuditEvent, Claim, ContextItem, ContextPack, EvalTarget, FaultMode, OmittedItem,
-    RecordedEvent, TargetRunOptions,
+    ActualState, AuditEvent, Claim, ContextItem, ContextPack, EvalTarget, EvalTargetMetadata,
+    FaultMode, OmittedItem, RecordedEvent, TargetRunOptions,
 };
 
 pub(crate) struct FakeEvalTarget;
@@ -10,6 +10,10 @@ pub(crate) struct FakeEvalTarget;
 impl EvalTarget for FakeEvalTarget {
     fn name(&self) -> &'static str {
         "fake"
+    }
+
+    fn metadata(&self, _options: &TargetRunOptions) -> EvalTargetMetadata {
+        EvalTargetMetadata::fake()
     }
 
     fn run(

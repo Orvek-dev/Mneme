@@ -4,6 +4,18 @@ This project follows the spirit of Keep a Changelog.
 
 ## Unreleased
 
+## [0.3.0] - 2026-05-24
+
+### Added
+
+- Added the opt-in `mneme-v1-command` eval target for command-backed
+  extraction suites.
+- Added the public `model` eval suite for implicit preference, no-claim,
+  secret-blocking, and correction scenarios.
+- Added eval report target metadata for extractor and protocol visibility.
+- Added deterministic command-extractor fixture coverage to CI and release
+  verification.
+
 ## [0.2.0] - 2026-05-24
 
 ### Added
