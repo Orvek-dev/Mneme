@@ -13,6 +13,8 @@ This project follows the spirit of Keep a Changelog.
   secret blocking.
 - Added `mneme-eval validate` for scenario contract checks before replay.
 - Added public eval scenario format documentation and invalid fixture coverage.
+- Added eval target adapter boundary with explicit `--target fake` execution.
+- Added report schema version and target metadata to eval JSON reports.
 
 ## [0.0.1] - 2026-05-24
 

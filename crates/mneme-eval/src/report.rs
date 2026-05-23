@@ -1,7 +1,11 @@
 use serde::Serialize;
 
+const REPORT_SCHEMA_VERSION: u32 = 1;
+
 #[derive(Debug, Clone, Serialize)]
 pub(crate) struct EvalReport {
+    pub(crate) report_schema_version: u32,
+    pub(crate) target: String,
     pub(crate) ok: bool,
     pub(crate) scenario_count: usize,
     pub(crate) passed: usize,
@@ -10,11 +14,13 @@ pub(crate) struct EvalReport {
 }
 
 impl EvalReport {
-    pub(crate) fn from_results(results: Vec<ScenarioReport>) -> Self {
+    pub(crate) fn from_results(target: impl Into<String>, results: Vec<ScenarioReport>) -> Self {
         let scenario_count = results.len();
         let passed = results.iter().filter(|result| result.ok).count();
         let failed = scenario_count.saturating_sub(passed);
         Self {
+            report_schema_version: REPORT_SCHEMA_VERSION,
+            target: target.into(),
             ok: failed == 0,
             scenario_count,
             passed,
@@ -26,6 +32,7 @@ impl EvalReport {
 
 #[derive(Debug, Clone, Serialize)]
 pub(crate) struct ValidationReport {
+    pub(crate) report_schema_version: u32,
     pub(crate) ok: bool,
     pub(crate) scenario_count: usize,
     pub(crate) valid: usize,
@@ -39,6 +46,7 @@ impl ValidationReport {
         let valid = results.iter().filter(|result| result.ok).count();
         let invalid = scenario_count.saturating_sub(valid);
         Self {
+            report_schema_version: REPORT_SCHEMA_VERSION,
             ok: invalid == 0,
             scenario_count,
             valid,
@@ -147,4 +155,24 @@ impl CheckReport {
 pub(crate) enum CheckStatus {
     Pass,
     Fail,
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn eval_report_includes_schema_version_and_target() {
+        let scenario = ScenarioReport::new(
+            "example".to_owned(),
+            Vec::new(),
+            vec![CheckReport::pass("check", "expected", "expected")],
+        );
+
+        let report = EvalReport::from_results("fake", vec![scenario]);
+
+        assert_eq!(report.report_schema_version, REPORT_SCHEMA_VERSION);
+        assert_eq!(report.target, "fake");
+        assert!(report.ok);
+    }
 }

@@ -30,17 +30,20 @@ cargo run -p mneme-eval -- validate evals/scenarios/core/same-turn-explicit-reme
 Replay one scenario:
 
 ```sh
-cargo run -p mneme-eval -- replay evals/scenarios/core/same-turn-explicit-remember.yaml
+cargo run -p mneme-eval -- replay evals/scenarios/core/same-turn-explicit-remember.yaml --target fake
 ```
 
 Run a suite:
 
 ```sh
-cargo run -p mneme-eval -- run --suite core
+cargo run -p mneme-eval -- run --suite core --target fake
 ```
 
 Use `--json` for machine-readable output and `--report <path>` to write a JSON
 report.
+
+`fake` is the default target. It is still useful to pass `--target fake` in CI so
+future targets can be added without making the active adapter ambiguous.
 
 ## Schema
 
@@ -123,7 +126,7 @@ Seeded faults intentionally break the fake runtime so the harness can prove that
 critical regressions fail.
 
 ```sh
-cargo run -p mneme-eval -- run --suite core --seeded-fault skip-claims
+cargo run -p mneme-eval -- run --suite core --target fake --seeded-fault skip-claims
 ```
 
 Current seeded fault modes:
