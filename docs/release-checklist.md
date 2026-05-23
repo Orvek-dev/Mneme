@@ -52,4 +52,12 @@ git push origin vX.Y.Z
 ```
 
 The release workflow verifies the workspace again. Release publication requires
-`MNEME_RELEASE_TOKEN` to be configured with contents write permission.
+the workflow-scoped `GITHUB_TOKEN` to have `contents: write` permission. The
+workflow requests that permission explicitly and marks `v0.x` tags as GitHub
+prereleases.
+
+After the workflow completes, verify the public release:
+
+```sh
+gh release view vX.Y.Z --json tagName,isPrerelease,url
+```
