@@ -1,0 +1,455 @@
+//! Mneme v1 personal-memory core.
+//!
+//! This module intentionally starts as an in-memory, deterministic core. It is
+//! product code, not an eval fake: the eval harness can drive it through a
+//! target adapter, while this crate stays independent of eval fixture types.
+
+/// Personal-memory engine for Mneme v1.
+#[derive(Debug, Clone)]
+pub struct MnemeEngine {
+    budget: BudgetState,
+    events: Vec<EventRecord>,
+    claims: Vec<ClaimRecord>,
+    audit: Vec<AuditRecord>,
+}
+
+impl MnemeEngine {
+    /// Creates a new isolated personal-memory engine.
+    #[must_use]
+    pub fn new(config: MnemeConfig) -> Self {
+        Self {
+            budget: BudgetState {
+                daily_cloud_tokens: config.daily_cloud_tokens,
+                spent_tokens: 0,
+                hard_cap_violations: 0,
+            },
+            events: Vec::new(),
+            claims: Vec::new(),
+            audit: Vec::new(),
+        }
+    }
+
+    /// Appends one user event and extracts a claim when allowed by budget.
+    pub fn ingest_event(&mut self, input: EventInput) {
+        let event = EventRecord {
+            id: next_id("event", self.events.len() + 1),
+            speaker_id: input.speaker_id,
+            actor_agent_id: input.actor_agent_id,
+            text: input.text,
+            scope: input.scope,
+            trust_level: input.trust_level,
+        };
+        self.audit.push(AuditRecord {
+            kind: AuditKind::EventAppend,
+            target_id: format!(
+                "{}:{}:{}",
+                event.id,
+                event.actor_agent_id.as_deref().unwrap_or("no-agent"),
+                event.trust_level
+            ),
+        });
+
+        let token_estimate = estimate_tokens(&event.text);
+        if self.budget.spent_tokens.saturating_add(token_estimate) > self.budget.daily_cloud_tokens
+        {
+            self.budget.hard_cap_violations = self.budget.hard_cap_violations.saturating_add(1);
+            self.audit.push(AuditRecord {
+                kind: AuditKind::BudgetBlock,
+                target_id: event.id.clone(),
+            });
+            self.events.push(event);
+            return;
+        }
+        self.budget.spent_tokens = self.budget.spent_tokens.saturating_add(token_estimate);
+
+        if let Some(claim) = extract_claim(&event, self.claims.len() + 1) {
+            self.audit.push(AuditRecord {
+                kind: AuditKind::ClaimWrite,
+                target_id: claim.id.clone(),
+            });
+            self.claims.push(claim);
+        }
+
+        self.events.push(event);
+    }
+
+    /// Builds a context pack over active claims and records a read audit event.
+    pub fn build_context_pack(&mut self, query: impl Into<String>) -> ContextPack {
+        let query = query.into();
+        let query_terms = query
+            .split_whitespace()
+            .map(|term| term.to_ascii_lowercase())
+            .collect::<Vec<_>>();
+        let mut items = Vec::new();
+        let mut omitted = Vec::new();
+
+        for claim in &self.claims {
+            if claim.status != ClaimStatus::Active {
+                omitted.push(OmittedContextItem {
+                    claim_id: claim.id.clone(),
+                    reason: claim.status.as_str().to_owned(),
+                });
+                continue;
+            }
+
+            let claim_text = claim.text();
+            let claim_text_lower = claim_text.to_ascii_lowercase();
+            let matches_query = query_terms.is_empty()
+                || query_terms
+                    .iter()
+                    .any(|term| claim_text_lower.contains(term));
+            if matches_query {
+                items.push(ContextItem {
+                    claim_id: claim.id.clone(),
+                    claim_text,
+                    source_event_ids: claim.source_event_ids.clone(),
+                });
+            } else {
+                omitted.push(OmittedContextItem {
+                    claim_id: claim.id.clone(),
+                    reason: "low_relevance".to_owned(),
+                });
+            }
+        }
+
+        self.audit.push(AuditRecord {
+            kind: AuditKind::ContextRead,
+            target_id: if query.is_empty() {
+                "empty-query".to_owned()
+            } else {
+                query
+            },
+        });
+
+        ContextPack { items, omitted }
+    }
+
+    /// Returns a read-only snapshot of the engine state.
+    #[must_use]
+    pub fn snapshot(&self) -> EngineSnapshot {
+        EngineSnapshot {
+            events: self.events.clone(),
+            claims: self.claims.clone(),
+            budget: self.budget.clone(),
+            audit: self.audit.clone(),
+        }
+    }
+}
+
+/// Engine configuration for personal-memory v1.
+#[derive(Debug, Clone, Copy)]
+pub struct MnemeConfig {
+    /// Deterministic token cap used before cloud or model work is allowed.
+    pub daily_cloud_tokens: u32,
+}
+
+impl Default for MnemeConfig {
+    fn default() -> Self {
+        Self {
+            daily_cloud_tokens: 100_000,
+        }
+    }
+}
+
+/// Input event accepted by the v1 personal-memory core.
+#[derive(Debug, Clone)]
+pub struct EventInput {
+    /// Speaker that produced the event.
+    pub speaker_id: String,
+    /// Agent acting on behalf of the speaker, when available.
+    pub actor_agent_id: Option<String>,
+    /// Raw event text.
+    pub text: String,
+    /// Memory scope for extracted claims.
+    pub scope: String,
+    /// Trust tier assigned to this input.
+    pub trust_level: String,
+}
+
+/// Raw event appended by the engine.
+#[derive(Debug, Clone)]
+pub struct EventRecord {
+    /// Stable event identifier.
+    pub id: String,
+    /// Speaker that produced the event.
+    pub speaker_id: String,
+    /// Agent acting on behalf of the speaker, when available.
+    pub actor_agent_id: Option<String>,
+    /// Raw event text.
+    pub text: String,
+    /// Memory scope for extracted claims.
+    pub scope: String,
+    /// Trust tier assigned to this input.
+    pub trust_level: String,
+}
+
+/// Memory claim extracted from an event.
+#[derive(Debug, Clone)]
+pub struct ClaimRecord {
+    /// Stable claim identifier.
+    pub id: String,
+    /// Claim subject.
+    pub subject: String,
+    /// Claim predicate.
+    pub predicate: String,
+    /// Claim object.
+    pub object: String,
+    /// Claim lifecycle state.
+    pub status: ClaimStatus,
+    /// Memory scope inherited from the source event.
+    pub scope: String,
+    /// Source event IDs that support the claim.
+    pub source_event_ids: Vec<String>,
+}
+
+impl ClaimRecord {
+    /// Text form used by context-pack retrieval.
+    #[must_use]
+    pub fn text(&self) -> String {
+        format!("{} {} {}", self.subject, self.predicate, self.object)
+    }
+}
+
+/// Claim lifecycle state.
+#[derive(Debug, Clone, Copy, Eq, PartialEq)]
+pub enum ClaimStatus {
+    /// Claim is usable for context retrieval.
+    Active,
+    /// Claim resembles a secret and is excluded from context retrieval.
+    BlockedSecret,
+}
+
+impl ClaimStatus {
+    /// Stable status identifier.
+    #[must_use]
+    pub const fn as_str(self) -> &'static str {
+        match self {
+            Self::Active => "active",
+            Self::BlockedSecret => "blocked_secret",
+        }
+    }
+}
+
+/// Context-pack retrieval output.
+#[derive(Debug, Clone)]
+pub struct ContextPack {
+    /// Context items selected for use by an agent.
+    pub items: Vec<ContextItem>,
+    /// Candidate items omitted from the context pack.
+    pub omitted: Vec<OmittedContextItem>,
+}
+
+/// Context item returned to an agent.
+#[derive(Debug, Clone)]
+pub struct ContextItem {
+    /// Claim that produced this context item.
+    pub claim_id: String,
+    /// Text form of the claim.
+    pub claim_text: String,
+    /// Source event IDs cited by this context item.
+    pub source_event_ids: Vec<String>,
+}
+
+/// Context candidate intentionally omitted from the pack.
+#[derive(Debug, Clone)]
+pub struct OmittedContextItem {
+    /// Claim omitted from the context pack.
+    pub claim_id: String,
+    /// Stable omission reason.
+    pub reason: String,
+}
+
+/// Deterministic budget state.
+#[derive(Debug, Clone)]
+pub struct BudgetState {
+    /// Configured daily token cap.
+    pub daily_cloud_tokens: u32,
+    /// Tokens spent by accepted events.
+    pub spent_tokens: u32,
+    /// Number of hard-cap blocks.
+    pub hard_cap_violations: u32,
+}
+
+/// Audit event captured by the engine.
+#[derive(Debug, Clone)]
+pub struct AuditRecord {
+    /// Audit event kind.
+    pub kind: AuditKind,
+    /// Target entity for the audit event.
+    pub target_id: String,
+}
+
+/// Stable audit kind identifiers.
+#[derive(Debug, Clone, Copy, Eq, PartialEq)]
+pub enum AuditKind {
+    /// Event append operation.
+    EventAppend,
+    /// Claim write operation.
+    ClaimWrite,
+    /// Context read operation.
+    ContextRead,
+    /// Budget hard-cap block.
+    BudgetBlock,
+}
+
+impl AuditKind {
+    /// Stable audit kind string used by adapters and reports.
+    #[must_use]
+    pub const fn as_str(self) -> &'static str {
+        match self {
+            Self::EventAppend => "event.append",
+            Self::ClaimWrite => "claim.write",
+            Self::ContextRead => "context.read",
+            Self::BudgetBlock => "budget.block",
+        }
+    }
+}
+
+/// Snapshot returned to adapters after scenario execution.
+#[derive(Debug, Clone)]
+pub struct EngineSnapshot {
+    /// Events appended during the isolated run.
+    pub events: Vec<EventRecord>,
+    /// Claims extracted during the isolated run.
+    pub claims: Vec<ClaimRecord>,
+    /// Budget state at snapshot time.
+    pub budget: BudgetState,
+    /// Audit records captured during the isolated run.
+    pub audit: Vec<AuditRecord>,
+}
+
+fn extract_claim(event: &EventRecord, next_claim_number: usize) -> Option<ClaimRecord> {
+    let marker = find_remember_marker(&event.text)?;
+    let source_event_ids = vec![event.id.clone()];
+    let mut parts = marker.split_whitespace();
+    let first = parts.next();
+    let second = parts.next();
+    let rest = parts.collect::<Vec<_>>().join(" ");
+    let (subject, predicate, object) = match (first, second, rest.trim().is_empty()) {
+        (Some(subject), Some(predicate), false) => (subject.to_owned(), predicate.to_owned(), rest),
+        _ => (
+            event.speaker_id.clone(),
+            "note".to_owned(),
+            marker.to_owned(),
+        ),
+    };
+    let status = if looks_like_secret(&object) || looks_like_secret(&event.text) {
+        ClaimStatus::BlockedSecret
+    } else {
+        ClaimStatus::Active
+    };
+    Some(ClaimRecord {
+        id: next_id("claim", next_claim_number),
+        subject,
+        predicate,
+        object,
+        status,
+        scope: event.scope.clone(),
+        source_event_ids,
+    })
+}
+
+fn find_remember_marker(text: &str) -> Option<&str> {
+    for marker in ["remember:", "기억해줘:"] {
+        if let Some((_, rest)) = text.split_once(marker) {
+            let trimmed = rest.trim();
+            if !trimmed.is_empty() {
+                return Some(trimmed);
+            }
+        }
+    }
+    None
+}
+
+fn looks_like_secret(text: &str) -> bool {
+    let lower = text.to_ascii_lowercase();
+    lower.contains("api_key=")
+        || lower.contains("api key")
+        || lower.contains("secret=")
+        || lower.contains("password=")
+}
+
+fn estimate_tokens(text: &str) -> u32 {
+    let count = text.split_whitespace().count();
+    u32::try_from(count).unwrap_or(u32::MAX).max(1)
+}
+
+fn next_id(prefix: &str, number: usize) -> String {
+    format!("{prefix}-{number:03}")
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn captures_explicit_personal_memory() {
+        let mut engine = MnemeEngine::new(MnemeConfig {
+            daily_cloud_tokens: 100,
+        });
+        engine.ingest_event(EventInput {
+            speaker_id: "user".to_owned(),
+            actor_agent_id: Some("codex".to_owned()),
+            text: "remember: user prefers local-first tools".to_owned(),
+            scope: "private".to_owned(),
+            trust_level: "trusted_user".to_owned(),
+        });
+        let context = engine.build_context_pack("user preferences");
+        let snapshot = engine.snapshot();
+
+        assert_eq!(snapshot.events.len(), 1);
+        assert_eq!(snapshot.claims.len(), 1);
+        assert_eq!(snapshot.claims[0].status, ClaimStatus::Active);
+        assert_eq!(snapshot.claims[0].source_event_ids, vec!["event-001"]);
+        assert_eq!(context.items.len(), 1);
+        assert_eq!(context.items[0].source_event_ids, vec!["event-001"]);
+        assert!(snapshot
+            .audit
+            .iter()
+            .any(|event| event.kind == AuditKind::ClaimWrite));
+    }
+
+    #[test]
+    fn budget_hard_cap_blocks_claim_extraction() {
+        let mut engine = MnemeEngine::new(MnemeConfig {
+            daily_cloud_tokens: 2,
+        });
+        engine.ingest_event(EventInput {
+            speaker_id: "user".to_owned(),
+            actor_agent_id: None,
+            text: "remember: user prefers local-first tools".to_owned(),
+            scope: "private".to_owned(),
+            trust_level: "trusted_user".to_owned(),
+        });
+        let snapshot = engine.snapshot();
+
+        assert_eq!(snapshot.events.len(), 1);
+        assert!(snapshot.claims.is_empty());
+        assert_eq!(snapshot.budget.hard_cap_violations, 1);
+        assert!(snapshot
+            .audit
+            .iter()
+            .any(|event| event.kind == AuditKind::BudgetBlock));
+    }
+
+    #[test]
+    fn blocked_secret_claims_are_omitted_from_context() {
+        let mut engine = MnemeEngine::new(MnemeConfig {
+            daily_cloud_tokens: 100,
+        });
+        engine.ingest_event(EventInput {
+            speaker_id: "user".to_owned(),
+            actor_agent_id: None,
+            text: "remember: user note API_KEY=FAKE_TEST_VALUE".to_owned(),
+            scope: "private".to_owned(),
+            trust_level: "trusted_user".to_owned(),
+        });
+        let context = engine.build_context_pack("API key");
+        let snapshot = engine.snapshot();
+
+        assert_eq!(snapshot.claims.len(), 1);
+        assert_eq!(snapshot.claims[0].status, ClaimStatus::BlockedSecret);
+        assert!(context.items.is_empty());
+        assert_eq!(context.omitted.len(), 1);
+    }
+}
