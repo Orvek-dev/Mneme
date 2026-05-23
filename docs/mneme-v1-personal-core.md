@@ -2,7 +2,7 @@
 
 Mneme v1 starts as a deterministic personal-memory core with a small persistence
 boundary. The goal is to make the product runtime executable behind the eval
-harness before adding teams, UI, or model-backed extraction.
+harness before adding teams, UI, or production storage.
 
 ## Current Scope
 
@@ -21,7 +21,8 @@ The v1 core supports:
 - read/write audit records;
 - serializable state snapshots;
 - an in-memory store and local JSON file store for restart tests.
-- a rule-based extractor used by default for deterministic v1 behavior.
+- a rule-based extractor used by default for deterministic v1 behavior;
+- a command extractor protocol for opt-in model-backed experiments.
 
 ## Current Non-Goals
 
@@ -30,7 +31,7 @@ The v1 core does not yet provide:
 - production-grade storage, migrations, compaction, or concurrent writes;
 - concurrent sessions;
 - team/shared memory;
-- production LLM extraction adapters;
+- provider-specific production LLM extraction adapters;
 - vector search;
 - external API or UI.
 

@@ -11,9 +11,10 @@ between public fixtures and a concrete Mneme implementation.
 - `mneme-v1`: deterministic in-process adapter over the Mneme v1 personal core
   in `mneme-core`.
 
-`mneme-v1` uses `mneme-core`'s default `RuleBasedExtractor`. Future extraction
-adapters should still pass through `MnemeEngine::ingest_event_with_extractor`
-so eval reports remain comparable.
+`mneme-v1` uses `mneme-core`'s default `RuleBasedExtractor`. Model-backed
+experiments can use `CommandExtractor` through product code or a future opt-in
+eval target, but the default CI target stays deterministic so public checks do
+not require provider credentials.
 
 The fake target is the default. CI still passes `--target fake` explicitly so a
 future Mneme implementation cannot silently change what is being tested.
