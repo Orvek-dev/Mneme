@@ -4,6 +4,15 @@ This project follows the spirit of Keep a Changelog.
 
 ## Unreleased
 
+## [0.1.1] - 2026-05-24
+
+### Fixed
+
+- Made the tag release workflow publish GitHub releases with the
+  workflow-scoped token instead of silently skipping publication when a custom
+  secret is missing.
+- Marked `v0.x` tag releases as GitHub prereleases.
+
 ## [0.1.0] - 2026-05-24
 
 ### Added
