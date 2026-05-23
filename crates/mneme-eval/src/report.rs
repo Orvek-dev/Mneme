@@ -57,6 +57,62 @@ impl ValidationReport {
 }
 
 #[derive(Debug, Clone, Serialize)]
+pub(crate) struct AcceptanceReport {
+    pub(crate) report_schema_version: u32,
+    pub(crate) target: String,
+    pub(crate) ok: bool,
+    pub(crate) gate_count: usize,
+    pub(crate) passed: usize,
+    pub(crate) failed: usize,
+    pub(crate) gates: Vec<AcceptanceGateReport>,
+}
+
+impl AcceptanceReport {
+    pub(crate) fn from_gates(target: impl Into<String>, gates: Vec<AcceptanceGateReport>) -> Self {
+        let gate_count = gates.len();
+        let passed = gates
+            .iter()
+            .filter(|gate| gate.status == CheckStatus::Pass)
+            .count();
+        let failed = gate_count.saturating_sub(passed);
+        Self {
+            report_schema_version: REPORT_SCHEMA_VERSION,
+            target: target.into(),
+            ok: failed == 0,
+            gate_count,
+            passed,
+            failed,
+            gates,
+        }
+    }
+}
+
+#[derive(Debug, Clone, Serialize)]
+pub(crate) struct AcceptanceGateReport {
+    pub(crate) name: String,
+    pub(crate) status: CheckStatus,
+    pub(crate) detail: String,
+}
+
+impl AcceptanceGateReport {
+    pub(crate) fn pass(name: impl Into<String>, detail: impl Into<String>) -> Self {
+        Self {
+            name: name.into(),
+            status: CheckStatus::Pass,
+            detail: detail.into(),
+        }
+    }
+
+    pub(crate) fn fail(name: impl Into<String>, detail: impl Into<String>) -> Self {
+        Self {
+            name: name.into(),
+            status: CheckStatus::Fail,
+            detail: detail.into(),
+        }
+    }
+}
+
+#[derive(Debug, Clone, Serialize)]
 pub(crate) struct ScenarioValidationReport {
     pub(crate) path: String,
     #[serde(skip_serializing_if = "Option::is_none")]
@@ -162,7 +218,7 @@ mod tests {
     use super::*;
 
     #[test]
-    fn eval_report_includes_schema_version_and_target() {
+    fn eval_report_json_preserves_schema_contract() -> Result<(), serde_json::Error> {
         let scenario = ScenarioReport::new(
             "example".to_owned(),
             Vec::new(),
@@ -170,9 +226,35 @@ mod tests {
         );
 
         let report = EvalReport::from_results("fake", vec![scenario]);
+        let json = serde_json::to_value(&report)?;
 
-        assert_eq!(report.report_schema_version, REPORT_SCHEMA_VERSION);
-        assert_eq!(report.target, "fake");
-        assert!(report.ok);
+        assert_eq!(json["report_schema_version"], REPORT_SCHEMA_VERSION);
+        assert_eq!(json["target"], "fake");
+        assert_eq!(json["ok"], true);
+        assert_eq!(json["scenario_count"], 1);
+        assert_eq!(json["passed"], 1);
+        assert_eq!(json["failed"], 0);
+        assert_eq!(json["results"][0]["scenario_id"], "example");
+        assert_eq!(json["results"][0]["checks"][0]["status"], "pass");
+        assert!(json["results"][0]["checks"][0].get("artifact").is_none());
+        Ok(())
+    }
+
+    #[test]
+    fn acceptance_report_json_preserves_schema_contract() -> Result<(), serde_json::Error> {
+        let report =
+            AcceptanceReport::from_gates("fake", vec![AcceptanceGateReport::pass("gate", "ok")]);
+        let json = serde_json::to_value(&report)?;
+
+        assert_eq!(json["report_schema_version"], REPORT_SCHEMA_VERSION);
+        assert_eq!(json["target"], "fake");
+        assert_eq!(json["ok"], true);
+        assert_eq!(json["gate_count"], 1);
+        assert_eq!(json["passed"], 1);
+        assert_eq!(json["failed"], 0);
+        assert_eq!(json["gates"][0]["name"], "gate");
+        assert_eq!(json["gates"][0]["status"], "pass");
+        assert_eq!(json["gates"][0]["detail"], "ok");
+        Ok(())
     }
 }

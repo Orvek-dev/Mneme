@@ -47,6 +47,11 @@ reports.
   runtime implementation.
 - [REQ-EVAL-010][Ubiquitous] Eval reports shall include the target name and a
   report schema version for future compatibility checks.
+- [REQ-EVAL-011][Ubiquitous] The eval harness shall expose an acceptance gate
+  that validates fixtures, runs the core suite, verifies report metadata, and
+  proves critical seeded faults are detected.
+- [REQ-EVAL-012][Ubiquitous] The repository shall document what the core suite
+  does and does not cover before Mneme v1 implementation begins.
 
 ## Verification Map
 
@@ -62,3 +67,5 @@ reports.
 | REQ-EVAL-008 | `mneme-eval validate --suite core` and invalid fixture CI check | verified |
 | REQ-EVAL-009 | `--target fake`, `EvalTarget`, and `docs/eval-target-adapter-contract.md` | verified |
 | REQ-EVAL-010 | JSON report fields `target` and `report_schema_version` | verified |
+| REQ-EVAL-011 | `mneme-eval acceptance --suite core --target fake` in CI | verified |
+| REQ-EVAL-012 | `docs/eval-harness-acceptance.md` | verified |
