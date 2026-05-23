@@ -41,12 +41,13 @@ The current `core` suite covers:
 - source event citation checks;
 - budget hard-cap blocking;
 - blocked secret handling;
+- file-backed restart persistence for `mneme-v1`;
 - read/write audit evidence;
 - seeded fault detection for claims, secrets, and citations.
 
 The current `core` suite does not yet cover:
 
-- long-term persistence across process restarts;
+- production-grade storage migrations, compaction, or concurrent writes;
 - concurrent sessions or multi-agent conflict resolution;
 - team/shared memory scopes;
 - real LLM extraction quality;
@@ -80,4 +81,5 @@ The first Mneme v1 core slice is complete when all are true:
 - CI passes `cargo run -p mneme-eval -- run --suite core --target mneme-v1`.
 - CI passes
   `cargo run -p mneme-eval -- acceptance --suite core --target mneme-v1`.
-- `mneme-core` owns the personal-memory domain model and in-memory engine.
+- `mneme-core` owns the personal-memory domain model, engine, and persistence
+  boundary.

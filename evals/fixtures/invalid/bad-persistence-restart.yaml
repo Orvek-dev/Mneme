@@ -1,0 +1,11 @@
+id: bad-persistence-restart
+budget:
+  daily_cloud_tokens: 100
+persistence:
+  restart_after_event: 2
+events:
+  - speaker_id: user
+    text: "remember: user prefers durable memory"
+expected:
+  event_append:
+    count: 1

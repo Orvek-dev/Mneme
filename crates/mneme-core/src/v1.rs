@@ -1,8 +1,16 @@
 //! Mneme v1 personal-memory core.
 //!
-//! This module intentionally starts as an in-memory, deterministic core. It is
-//! product code, not an eval fake: the eval harness can drive it through a
-//! target adapter, while this crate stays independent of eval fixture types.
+//! This module intentionally starts as a deterministic core with a small
+//! persistence boundary. It is product code, not an eval fake: the eval harness
+//! can drive it through a target adapter, while this crate stays independent of
+//! eval fixture types.
+
+use std::fmt;
+use std::fs;
+use std::io;
+use std::path::{Path, PathBuf};
+
+use serde::{Deserialize, Serialize};
 
 /// Personal-memory engine for Mneme v1.
 #[derive(Debug, Clone)]
@@ -26,6 +34,25 @@ impl MnemeEngine {
             events: Vec::new(),
             claims: Vec::new(),
             audit: Vec::new(),
+        }
+    }
+
+    /// Restores an engine from persisted v1 state.
+    #[must_use]
+    pub fn from_state(state: MnemeState) -> Self {
+        Self {
+            budget: state.budget,
+            events: state.events,
+            claims: state.claims,
+            audit: state.audit,
+        }
+    }
+
+    /// Loads an engine from a store, or creates a new one when no state exists.
+    pub fn from_store(config: MnemeConfig, store: &impl MnemeStore) -> Result<Self, StoreError> {
+        match store.load()? {
+            Some(state) => Ok(Self::from_state(state)),
+            None => Ok(Self::new(config)),
         }
     }
 
@@ -124,6 +151,22 @@ impl MnemeEngine {
         ContextPack { items, omitted }
     }
 
+    /// Returns the serializable engine state.
+    #[must_use]
+    pub fn state(&self) -> MnemeState {
+        MnemeState {
+            budget: self.budget.clone(),
+            events: self.events.clone(),
+            claims: self.claims.clone(),
+            audit: self.audit.clone(),
+        }
+    }
+
+    /// Saves the current engine state through a storage adapter.
+    pub fn persist(&self, store: &mut impl MnemeStore) -> Result<(), StoreError> {
+        store.save(&self.state())
+    }
+
     /// Returns a read-only snapshot of the engine state.
     #[must_use]
     pub fn snapshot(&self) -> EngineSnapshot {
@@ -136,8 +179,131 @@ impl MnemeEngine {
     }
 }
 
+/// Serializable v1 engine state used by persistence adapters.
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct MnemeState {
+    /// Budget state at persistence time.
+    pub budget: BudgetState,
+    /// Events appended before persistence.
+    pub events: Vec<EventRecord>,
+    /// Claims extracted before persistence.
+    pub claims: Vec<ClaimRecord>,
+    /// Audit records captured before persistence.
+    pub audit: Vec<AuditRecord>,
+}
+
+/// Storage port for loading and saving v1 personal-memory state.
+pub trait MnemeStore {
+    /// Loads the latest persisted state, or `None` when the store is empty.
+    fn load(&self) -> Result<Option<MnemeState>, StoreError>;
+
+    /// Saves a complete v1 state snapshot.
+    fn save(&mut self, state: &MnemeState) -> Result<(), StoreError>;
+}
+
+/// In-memory store useful for tests and adapters that own persistence.
+#[derive(Debug, Clone, Default)]
+pub struct InMemoryStore {
+    state: Option<MnemeState>,
+}
+
+impl InMemoryStore {
+    /// Creates an empty in-memory store.
+    #[must_use]
+    pub fn new() -> Self {
+        Self::default()
+    }
+
+    /// Creates an in-memory store seeded with a state snapshot.
+    #[must_use]
+    pub fn with_state(state: MnemeState) -> Self {
+        Self { state: Some(state) }
+    }
+}
+
+impl MnemeStore for InMemoryStore {
+    fn load(&self) -> Result<Option<MnemeState>, StoreError> {
+        Ok(self.state.clone())
+    }
+
+    fn save(&mut self, state: &MnemeState) -> Result<(), StoreError> {
+        self.state = Some(state.clone());
+        Ok(())
+    }
+}
+
+/// JSON file-backed store for local v1 personal-memory state.
+#[derive(Debug, Clone)]
+pub struct JsonFileStore {
+    path: PathBuf,
+}
+
+impl JsonFileStore {
+    /// Creates a JSON file store at the provided path.
+    #[must_use]
+    pub fn new(path: impl Into<PathBuf>) -> Self {
+        Self { path: path.into() }
+    }
+
+    /// Returns the backing JSON file path.
+    #[must_use]
+    pub fn path(&self) -> &Path {
+        &self.path
+    }
+}
+
+impl MnemeStore for JsonFileStore {
+    fn load(&self) -> Result<Option<MnemeState>, StoreError> {
+        match fs::read_to_string(&self.path) {
+            Ok(text) => serde_json::from_str(&text)
+                .map(Some)
+                .map_err(|source| StoreError::new(format!("failed to parse state: {source}"))),
+            Err(source) if source.kind() == io::ErrorKind::NotFound => Ok(None),
+            Err(source) => Err(StoreError::new(format!("failed to read state: {source}"))),
+        }
+    }
+
+    fn save(&mut self, state: &MnemeState) -> Result<(), StoreError> {
+        if let Some(parent) = self
+            .path
+            .parent()
+            .filter(|path| !path.as_os_str().is_empty())
+        {
+            fs::create_dir_all(parent).map_err(|source| {
+                StoreError::new(format!("failed to create store dir: {source}"))
+            })?;
+        }
+        let text = serde_json::to_string_pretty(state)
+            .map_err(|source| StoreError::new(format!("failed to encode state: {source}")))?;
+        fs::write(&self.path, format!("{text}\n"))
+            .map_err(|source| StoreError::new(format!("failed to write state: {source}")))
+    }
+}
+
+/// Error returned by v1 persistence adapters.
+#[derive(Debug, Clone, Eq, PartialEq)]
+pub struct StoreError {
+    message: String,
+}
+
+impl StoreError {
+    fn new(message: impl Into<String>) -> Self {
+        Self {
+            message: message.into(),
+        }
+    }
+}
+
+impl fmt::Display for StoreError {
+    fn fmt(&self, formatter: &mut fmt::Formatter<'_>) -> fmt::Result {
+        formatter.write_str(&self.message)
+    }
+}
+
+impl std::error::Error for StoreError {}
+
 /// Engine configuration for personal-memory v1.
-#[derive(Debug, Clone, Copy)]
+#[derive(Debug, Clone, Copy, Serialize, Deserialize)]
 pub struct MnemeConfig {
     /// Deterministic token cap used before cloud or model work is allowed.
     pub daily_cloud_tokens: u32,
@@ -152,7 +318,7 @@ impl Default for MnemeConfig {
 }
 
 /// Input event accepted by the v1 personal-memory core.
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct EventInput {
     /// Speaker that produced the event.
     pub speaker_id: String,
@@ -167,7 +333,7 @@ pub struct EventInput {
 }
 
 /// Raw event appended by the engine.
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct EventRecord {
     /// Stable event identifier.
     pub id: String,
@@ -184,7 +350,7 @@ pub struct EventRecord {
 }
 
 /// Memory claim extracted from an event.
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct ClaimRecord {
     /// Stable claim identifier.
     pub id: String,
@@ -211,7 +377,8 @@ impl ClaimRecord {
 }
 
 /// Claim lifecycle state.
-#[derive(Debug, Clone, Copy, Eq, PartialEq)]
+#[derive(Debug, Clone, Copy, Eq, PartialEq, Serialize, Deserialize)]
+#[serde(rename_all = "snake_case")]
 pub enum ClaimStatus {
     /// Claim is usable for context retrieval.
     Active,
@@ -231,7 +398,7 @@ impl ClaimStatus {
 }
 
 /// Context-pack retrieval output.
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct ContextPack {
     /// Context items selected for use by an agent.
     pub items: Vec<ContextItem>,
@@ -240,7 +407,7 @@ pub struct ContextPack {
 }
 
 /// Context item returned to an agent.
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct ContextItem {
     /// Claim that produced this context item.
     pub claim_id: String,
@@ -251,7 +418,7 @@ pub struct ContextItem {
 }
 
 /// Context candidate intentionally omitted from the pack.
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct OmittedContextItem {
     /// Claim omitted from the context pack.
     pub claim_id: String,
@@ -260,7 +427,7 @@ pub struct OmittedContextItem {
 }
 
 /// Deterministic budget state.
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct BudgetState {
     /// Configured daily token cap.
     pub daily_cloud_tokens: u32,
@@ -271,7 +438,7 @@ pub struct BudgetState {
 }
 
 /// Audit event captured by the engine.
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct AuditRecord {
     /// Audit event kind.
     pub kind: AuditKind,
@@ -280,7 +447,8 @@ pub struct AuditRecord {
 }
 
 /// Stable audit kind identifiers.
-#[derive(Debug, Clone, Copy, Eq, PartialEq)]
+#[derive(Debug, Clone, Copy, Eq, PartialEq, Serialize, Deserialize)]
+#[serde(rename_all = "snake_case")]
 pub enum AuditKind {
     /// Event append operation.
     EventAppend,
@@ -306,7 +474,7 @@ impl AuditKind {
 }
 
 /// Snapshot returned to adapters after scenario execution.
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct EngineSnapshot {
     /// Events appended during the isolated run.
     pub events: Vec<EventRecord>,
@@ -451,5 +619,46 @@ mod tests {
         assert_eq!(snapshot.claims[0].status, ClaimStatus::BlockedSecret);
         assert!(context.items.is_empty());
         assert_eq!(context.omitted.len(), 1);
+    }
+
+    #[test]
+    fn json_file_store_round_trips_state_after_restart() -> Result<(), Box<dyn std::error::Error>> {
+        let path = std::env::temp_dir().join(format!(
+            "mneme-core-store-round-trip-{}.json",
+            std::process::id()
+        ));
+        let _ = std::fs::remove_file(&path);
+
+        let mut engine = MnemeEngine::new(MnemeConfig {
+            daily_cloud_tokens: 100,
+        });
+        engine.ingest_event(EventInput {
+            speaker_id: "user".to_owned(),
+            actor_agent_id: Some("codex".to_owned()),
+            text: "remember: user prefers durable memory".to_owned(),
+            scope: "private".to_owned(),
+            trust_level: "trusted_user".to_owned(),
+        });
+
+        let mut store = JsonFileStore::new(path.clone());
+        engine.persist(&mut store)?;
+
+        let mut reloaded = MnemeEngine::from_store(
+            MnemeConfig {
+                daily_cloud_tokens: 1,
+            },
+            &store,
+        )?;
+        let context = reloaded.build_context_pack("durable memory");
+        let snapshot = reloaded.snapshot();
+
+        assert_eq!(snapshot.events.len(), 1);
+        assert_eq!(snapshot.claims.len(), 1);
+        assert_eq!(snapshot.budget.daily_cloud_tokens, 100);
+        assert_eq!(context.items.len(), 1);
+        assert_eq!(context.items[0].source_event_ids, vec!["event-001"]);
+
+        let _ = std::fs::remove_file(&path);
+        Ok(())
     }
 }

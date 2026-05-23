@@ -21,6 +21,9 @@ This project follows the spirit of Keep a Changelog.
   budget, and audit state.
 - Added the `mneme-v1` eval target and CI coverage for the core suite and
   acceptance gate.
+- Added the v1 persistence boundary with in-memory and JSON file stores.
+- Added a `restart-persistence` core scenario that verifies `mneme-v1` recall
+  after file-backed reload.
 
 ## [0.0.1] - 2026-05-24
 
