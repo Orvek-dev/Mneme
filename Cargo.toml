@@ -1,0 +1,19 @@
+[workspace]
+members = [
+    "crates/mneme-core",
+    "crates/mneme-eval",
+]
+resolver = "2"
+
+[workspace.package]
+version = "0.0.1"
+edition = "2021"
+rust-version = "1.76"
+
+[workspace.lints.rust]
+unsafe_code = "forbid"
+missing_docs = "warn"
+
+[workspace.lints.clippy]
+panic = "warn"
+unwrap_used = "warn"

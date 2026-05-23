@@ -1,0 +1,11 @@
+[package]
+name = "mneme-eval"
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+
+[dependencies]
+mneme-core = { path = "../mneme-core" }
+
+[lints]
+workspace = true
