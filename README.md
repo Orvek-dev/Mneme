@@ -22,6 +22,8 @@ Mneme is pre-1.0. The useful surface today is local development and evaluation:
 - extraction and storage are behind adapter boundaries.
 - model-backed extraction experiments can use a provider-neutral command
   adapter without adding API keys to the repo.
+- a public OpenAI wrapper example can run through the same command protocol,
+  with CI using deterministic dry-run mode.
 
 See [docs/v1-stability.md](docs/v1-stability.md) for the current stability
 contract.
@@ -77,6 +79,14 @@ cargo run -p mneme-eval -- run --suite model \
   --extractor-command evals/fixtures/command-extractor.sh
 ```
 
+Run the OpenAI wrapper example without provider credentials:
+
+```sh
+MNEME_OPENAI_DRY_RUN=1 cargo run -p mneme-eval -- run --suite model \
+  --target mneme-v1-command \
+  --extractor-command wrappers/openai_extractor.py
+```
+
 Run the acceptance gate:
 
 ```sh
@@ -98,6 +108,7 @@ cargo run -p mneme-cli -- doctor
 cargo run -p mneme-eval -- acceptance --suite core --target fake
 cargo run -p mneme-eval -- acceptance --suite core --target mneme-v1
 cargo run -p mneme-eval -- acceptance --suite model --target mneme-v1-command --extractor-command evals/fixtures/command-extractor.sh
+MNEME_OPENAI_DRY_RUN=1 cargo run -p mneme-eval -- acceptance --suite model --target mneme-v1-command --extractor-command wrappers/openai_extractor.py
 ```
 
 Generated eval reports and local stores are ignored. Public scenarios under
@@ -122,6 +133,7 @@ spec/               feature specs and verification maps
 - [Eval Target Adapter Contract](docs/eval-target-adapter-contract.md)
 - [Extraction Adapter Contract](docs/extraction-adapter-contract.md)
 - [Model Extraction Adapter](docs/model-extraction-adapter.md)
+- [OpenAI Provider Wrapper](docs/openai-provider-wrapper.md)
 - [Mneme v1 Personal Core](docs/mneme-v1-personal-core.md)
 - [Mneme v1 Stability](docs/v1-stability.md)
 - [Release Checklist](docs/release-checklist.md)
