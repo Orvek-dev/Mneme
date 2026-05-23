@@ -75,3 +75,18 @@ Provider-backed wrappers should use the same `mneme-v1-command` target. Keep
 provider credentials in the wrapper environment and pass the wrapper program
 with `--extractor-command`; extra wrapper arguments can be repeated with
 `--extractor-arg <arg>`.
+
+## OpenAI Wrapper Example
+
+This repo includes `wrappers/openai_extractor.py` as a public example provider
+wrapper. CI runs it in deterministic dry-run mode so the command protocol stays
+covered without provider credentials:
+
+```sh
+MNEME_OPENAI_DRY_RUN=1 cargo run -p mneme-eval -- acceptance --suite model \
+  --target mneme-v1-command \
+  --extractor-command wrappers/openai_extractor.py
+```
+
+For live local use, set `OPENAI_API_KEY` and optionally `OPENAI_MODEL` in the
+environment. See [OpenAI Provider Wrapper](openai-provider-wrapper.md).
