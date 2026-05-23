@@ -24,6 +24,7 @@ This project follows the spirit of Keep a Changelog.
 - Added the v1 persistence boundary with in-memory and JSON file stores.
 - Added a `restart-persistence` core scenario that verifies `mneme-v1` recall
   after file-backed reload.
+- Added v1 correction and forget lifecycle handling with core eval coverage.
 
 ## [0.0.1] - 2026-05-24
 

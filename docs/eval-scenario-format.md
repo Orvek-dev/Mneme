@@ -88,6 +88,7 @@ expected:
     hard_cap_violations: 0
   audit:
     read_write_events_required: true
+    claim_update_required: false
 ```
 
 ## Required Fields
@@ -100,6 +101,13 @@ Each event requires:
 
 - `speaker_id`: source speaker. It must not be empty.
 - `text`: input text. It must not be empty.
+
+Current `mneme-v1` lifecycle markers are deterministic:
+
+- `remember: <claim>` or `기억해줘: <claim>` writes a claim.
+- `correct: <old claim> -> <new claim>` or `수정: <old claim> -> <new claim>`
+  supersedes an active claim and writes the replacement.
+- `forget: <claim>` or `잊어줘: <claim>` marks an active claim as forgotten.
 
 Each expected claim requires:
 
@@ -119,8 +127,8 @@ Each expected claim requires:
 - `events[].actor_agent_id`: agent acting on behalf of the speaker.
 - `events[].scope`: memory scope. Defaults to `private`.
 - `events[].trust_level`: input trust level. Defaults to `trusted_user`.
-- `claims[].status`: expected claim status, such as `active` or
-  `blocked_secret`.
+- `claims[].status`: expected claim status, such as `active`,
+  `blocked_secret`, `superseded`, or `forgotten`.
 - `claims[].scope`: expected claim scope.
 - `claims[].must_not_exist`: marks a claim as prohibited.
 - `context_pack.query`: deterministic context retrieval query.
@@ -130,6 +138,8 @@ Each expected claim requires:
 - `context_pack.citation_required`: requires source event citations.
 - `budget.hard_cap_violations`: expected budget hard-cap violation count.
 - `audit.read_write_events_required`: requires read/write audit evidence.
+- `audit.claim_update_required`: requires `claim.update` audit evidence for
+  correction or forget scenarios.
 
 Unknown fields are rejected. This keeps public fixtures strict enough for long
 term compatibility.

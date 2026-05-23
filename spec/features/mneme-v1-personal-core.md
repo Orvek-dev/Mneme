@@ -14,6 +14,8 @@ boundary for restart verification.
 - Every context item must preserve source event provenance.
 - Persisted state must round-trip without changing claim, event, budget, or
   audit semantics.
+- Corrections and forgets are new events; old claims remain auditable but stop
+  contributing to context.
 
 ## Requirements
 
@@ -35,6 +37,12 @@ boundary for restart verification.
   loading and saving complete state snapshots.
 - [REQ-V1-010][Event-driven] The `mneme-v1` eval target shall prove recall still
   works after file-backed persistence and reload.
+- [REQ-V1-011][Event-driven] The v1 core shall support explicit correction
+  events that supersede active claims and write replacement claims.
+- [REQ-V1-012][Event-driven] The v1 core shall support explicit forget events
+  that mark active claims as forgotten.
+- [REQ-V1-013][Ubiquitous] Superseded and forgotten claims shall be omitted from
+  context packs.
 
 ## Verification Map
 
@@ -50,3 +58,6 @@ boundary for restart verification.
 | REQ-V1-008 | `mneme-eval acceptance --suite core --target mneme-v1` | verified |
 | REQ-V1-009 | JSON file store round-trip unit test | verified |
 | REQ-V1-010 | `restart-persistence` core scenario through `mneme-v1` target | verified |
+| REQ-V1-011 | `correct-memory` core scenario | verified |
+| REQ-V1-012 | `forget-persists` core scenario | verified |
+| REQ-V1-013 | lifecycle context-pack checks in core suite | verified |

@@ -57,7 +57,7 @@ fn check_expected(scenario: &Scenario, actual: &ActualState) -> Vec<CheckReport>
         }
     }
     if let Some(expected) = &scenario.expected.audit {
-        checks.push(check_audit(expected, actual));
+        checks.extend(check_audit(expected, actual));
     }
     checks
 }
@@ -174,7 +174,16 @@ fn check_context_pack(expected: &ContextPackExpected, actual: &ActualState) -> V
     checks
 }
 
-fn check_audit(expected: &AuditExpected, actual: &ActualState) -> CheckReport {
+fn check_audit(expected: &AuditExpected, actual: &ActualState) -> Vec<CheckReport> {
+    let mut checks = Vec::new();
+    checks.push(check_read_write_audit(expected, actual));
+    if expected.claim_update_required {
+        checks.push(check_claim_update_audit(actual));
+    }
+    checks
+}
+
+fn check_read_write_audit(expected: &AuditExpected, actual: &ActualState) -> CheckReport {
     if !expected.read_write_events_required {
         return CheckReport::pass(
             "audit.read_write_events_required",
@@ -205,6 +214,32 @@ fn check_audit(expected: &AuditExpected, actual: &ActualState) -> CheckReport {
             format!(
                 "append={has_append} write={has_write} read={has_read} targets_nonempty={targets_nonempty}"
             ),
+            "actual.audit",
+        )
+    }
+}
+
+fn check_claim_update_audit(actual: &ActualState) -> CheckReport {
+    let has_update = actual
+        .audit
+        .iter()
+        .any(|event| event.kind == "claim.update");
+    let update_targets_nonempty = actual
+        .audit
+        .iter()
+        .filter(|event| event.kind == "claim.update")
+        .all(|event| !event.target_id.is_empty());
+    if has_update && update_targets_nonempty {
+        CheckReport::pass(
+            "audit.claim_update_required",
+            "claim.update",
+            "claim.update",
+        )
+    } else {
+        CheckReport::fail(
+            "audit.claim_update_required",
+            "claim.update",
+            format!("has_update={has_update} targets_nonempty={update_targets_nonempty}"),
             "actual.audit",
         )
     }
@@ -264,6 +299,7 @@ mod tests {
                 }),
                 audit: Some(AuditExpected {
                     read_write_events_required: true,
+                    claim_update_required: false,
                 }),
             },
         };
