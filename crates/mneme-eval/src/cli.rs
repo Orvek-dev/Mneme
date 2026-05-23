@@ -6,7 +6,10 @@ use mneme_core::{BuildStage, PRODUCT_NAME};
 use serde::Serialize;
 
 use crate::error::EvalError;
-use crate::report::{EvalReport, ScenarioReport, ScenarioValidationReport, ValidationReport};
+use crate::report::{
+    AcceptanceGateReport, AcceptanceReport, EvalReport, ScenarioReport, ScenarioValidationReport,
+    ValidationReport,
+};
 use crate::runtime::replay_scenario;
 use crate::scenario::load_scenario;
 use crate::target::{build_target, FaultMode, TargetKind, TargetRunOptions};
@@ -29,10 +32,11 @@ pub fn run_cli(args: impl IntoIterator<Item = String>) -> Result<(), EvalError> 
             Ok(())
         }
         "validate" => run_validate(args.collect()),
+        "acceptance" => run_acceptance(args.collect()),
         "replay" => run_replay(args.collect()),
         "run" => run_suite(args.collect()),
         _ => Err(EvalError::invalid_cli(format!(
-            "unknown mneme-eval command: {command}\navailable commands: doctor, version, validate, replay, run"
+            "unknown mneme-eval command: {command}\navailable commands: doctor, version, validate, acceptance, replay, run"
         ))),
     }
 }
@@ -102,18 +106,172 @@ fn validate_paths(paths: Vec<PathBuf>) -> ValidationReport {
     ValidationReport::from_results(results)
 }
 
+fn run_acceptance(raw_args: Vec<String>) -> Result<(), EvalError> {
+    let (suite, options) = parse_acceptance_args(raw_args)?;
+    let report = build_acceptance_report(&suite, options.target_kind);
+    emit_acceptance_report(&report, &options)?;
+    if report.ok {
+        Ok(())
+    } else {
+        Err(EvalError::scenario("acceptance gate failed"))
+    }
+}
+
+fn build_acceptance_report(suite: &str, target_kind: TargetKind) -> AcceptanceReport {
+    let target_name = target_kind.as_str();
+    let mut gates = Vec::new();
+    let paths = match scenario_paths_for_suite(suite) {
+        Ok(paths) => paths,
+        Err(error) => {
+            gates.push(AcceptanceGateReport::fail(
+                "suite.discovery",
+                error.to_string(),
+            ));
+            return AcceptanceReport::from_gates(target_name, gates);
+        }
+    };
+
+    let validation = validate_paths(paths.clone());
+    if validation.ok {
+        gates.push(AcceptanceGateReport::pass(
+            "scenario.validation",
+            format!("{} scenario(s) valid in suite {suite}", validation.valid),
+        ));
+    } else {
+        gates.push(AcceptanceGateReport::fail(
+            "scenario.validation",
+            format!(
+                "{} invalid scenario(s) in suite {suite}",
+                validation.invalid
+            ),
+        ));
+    }
+
+    gates.push(check_invalid_fixtures_are_rejected());
+
+    let suite_report = eval_report_for_paths(&paths, target_kind, FaultMode::None);
+    match &suite_report {
+        Ok(report) if report.ok => gates.push(AcceptanceGateReport::pass(
+            "target.core-suite",
+            format!(
+                "{} scenario(s) passed for target {}",
+                report.passed, report.target
+            ),
+        )),
+        Ok(report) => gates.push(AcceptanceGateReport::fail(
+            "target.core-suite",
+            format!(
+                "{} scenario(s) failed for target {}",
+                report.failed, report.target
+            ),
+        )),
+        Err(error) => gates.push(AcceptanceGateReport::fail(
+            "target.core-suite",
+            error.to_string(),
+        )),
+    }
+
+    match &suite_report {
+        Ok(report)
+            if report.report_schema_version == 1
+                && report.target == target_name
+                && report.scenario_count == paths.len()
+                && !report.results.is_empty() =>
+        {
+            gates.push(AcceptanceGateReport::pass(
+                "report.contract",
+                "schema version, target, counts, and results are present",
+            ));
+        }
+        Ok(_) => {
+            gates.push(AcceptanceGateReport::fail(
+                "report.contract",
+                "report metadata or result shape did not match contract",
+            ));
+        }
+        Err(error) => {
+            gates.push(AcceptanceGateReport::fail(
+                "report.contract",
+                format!("cannot evaluate report contract: {error}"),
+            ));
+        }
+    }
+
+    for fault_mode in [
+        FaultMode::SkipClaims,
+        FaultMode::LeakSecrets,
+        FaultMode::DropCitations,
+    ] {
+        gates.push(check_seeded_fault_is_detected(
+            &paths,
+            target_kind,
+            fault_mode,
+        ));
+    }
+
+    AcceptanceReport::from_gates(target_name, gates)
+}
+
+fn check_invalid_fixtures_are_rejected() -> AcceptanceGateReport {
+    let paths = match invalid_fixture_paths() {
+        Ok(paths) => paths,
+        Err(error) => {
+            return AcceptanceGateReport::fail("invalid-fixtures.rejected", error.to_string());
+        }
+    };
+    if paths.is_empty() {
+        return AcceptanceGateReport::fail(
+            "invalid-fixtures.rejected",
+            "no invalid fixtures found",
+        );
+    }
+
+    let accepted = paths
+        .iter()
+        .filter(|path| load_scenario(path).is_ok())
+        .map(|path| path.display().to_string())
+        .collect::<Vec<_>>();
+    if accepted.is_empty() {
+        AcceptanceGateReport::pass(
+            "invalid-fixtures.rejected",
+            format!("{} invalid fixture(s) rejected", paths.len()),
+        )
+    } else {
+        AcceptanceGateReport::fail(
+            "invalid-fixtures.rejected",
+            format!("unexpected valid fixture(s): {}", accepted.join(", ")),
+        )
+    }
+}
+
+fn check_seeded_fault_is_detected(
+    paths: &[PathBuf],
+    target_kind: TargetKind,
+    fault_mode: FaultMode,
+) -> AcceptanceGateReport {
+    let gate_name = format!("seeded-fault.{}", fault_mode.as_str());
+    match eval_report_for_paths(paths, target_kind, fault_mode) {
+        Ok(report) if !report.ok => AcceptanceGateReport::pass(
+            gate_name,
+            format!(
+                "fault detected for target {} with {} failed scenario(s)",
+                report.target, report.failed
+            ),
+        ),
+        Ok(report) => AcceptanceGateReport::fail(
+            gate_name,
+            format!(
+                "fault unexpectedly passed for target {} across {} scenario(s)",
+                report.target, report.scenario_count
+            ),
+        ),
+        Err(error) => AcceptanceGateReport::fail(gate_name, error.to_string()),
+    }
+}
+
 fn run_replay(raw_args: Vec<String>) -> Result<(), EvalError> {
     let (path, options) = parse_replay_args(raw_args)?;
-    let scenario = load_scenario(&path)?;
-    let target = build_target(options.target_kind);
-    let scenario_report = replay_scenario(
-        &scenario,
-        target.as_ref(),
-        TargetRunOptions {
-            fault_mode: options.fault_mode,
-        },
-    )?;
-    let report = EvalReport::from_results(target.name(), vec![scenario_report]);
+    let report = eval_report_for_paths(&[path], options.target_kind, options.fault_mode)?;
     emit_report(&report, &options)?;
     if report.ok {
         Ok(())
@@ -125,26 +283,32 @@ fn run_replay(raw_args: Vec<String>) -> Result<(), EvalError> {
 fn run_suite(raw_args: Vec<String>) -> Result<(), EvalError> {
     let (suite, options) = parse_suite_args(raw_args)?;
     let paths = scenario_paths_for_suite(&suite)?;
-    let target = build_target(options.target_kind);
-    let target_name = target.name();
-    let mut results = Vec::new();
-    for path in paths {
-        let scenario = load_scenario(&path)?;
-        results.push(replay_scenario(
-            &scenario,
-            target.as_ref(),
-            TargetRunOptions {
-                fault_mode: options.fault_mode,
-            },
-        )?);
-    }
-    let report = EvalReport::from_results(target_name, results);
+    let report = eval_report_for_paths(&paths, options.target_kind, options.fault_mode)?;
     emit_report(&report, &options)?;
     if report.ok {
         Ok(())
     } else {
         Err(EvalError::scenario("eval failed"))
     }
+}
+
+fn eval_report_for_paths(
+    paths: &[PathBuf],
+    target_kind: TargetKind,
+    fault_mode: FaultMode,
+) -> Result<EvalReport, EvalError> {
+    let target = build_target(target_kind);
+    let target_name = target.name();
+    let mut results = Vec::new();
+    for path in paths {
+        let scenario = load_scenario(path)?;
+        results.push(replay_scenario(
+            &scenario,
+            target.as_ref(),
+            TargetRunOptions { fault_mode },
+        )?);
+    }
+    Ok(EvalReport::from_results(target_name, results))
 }
 
 fn parse_validate_args(
@@ -195,6 +359,45 @@ fn parse_validate_args(
             "validate accepts either one scenario path or --suite, not both",
         )),
     }
+}
+
+fn parse_acceptance_args(raw_args: Vec<String>) -> Result<(String, CommandOptions), EvalError> {
+    let mut suite = None;
+    let mut options = CommandOptions::default();
+    let mut idx = 0;
+    while idx < raw_args.len() {
+        match raw_args[idx].as_str() {
+            "--suite" => {
+                idx += 1;
+                let Some(value) = raw_args.get(idx) else {
+                    return Err(EvalError::invalid_cli("--suite requires a name"));
+                };
+                suite = Some(value.clone());
+            }
+            "--target" => {
+                idx += 1;
+                let Some(value) = raw_args.get(idx) else {
+                    return Err(EvalError::invalid_cli("--target requires a name"));
+                };
+                options.target_kind = parse_target_kind(value)?;
+            }
+            "--json" => options.json = true,
+            "--report" => {
+                idx += 1;
+                let Some(value) = raw_args.get(idx) else {
+                    return Err(EvalError::invalid_cli("--report requires a path"));
+                };
+                options.report_path = Some(PathBuf::from(value));
+            }
+            value => {
+                return Err(EvalError::invalid_cli(format!(
+                    "unknown acceptance option: {value}"
+                )));
+            }
+        }
+        idx += 1;
+    }
+    Ok((suite.unwrap_or_else(|| "core".to_owned()), options))
 }
 
 fn parse_replay_args(raw_args: Vec<String>) -> Result<(PathBuf, CommandOptions), EvalError> {
@@ -322,6 +525,16 @@ fn scenario_paths_for_suite(suite: &str) -> Result<Vec<PathBuf>, EvalError> {
     Ok(paths)
 }
 
+fn invalid_fixture_paths() -> Result<Vec<PathBuf>, EvalError> {
+    let root = env::current_dir()
+        .map_err(|source| EvalError::io("read current dir", Path::new("."), source))?;
+    let invalid_dir = root.join("evals").join("fixtures").join("invalid");
+    let mut paths = Vec::new();
+    collect_scenario_paths(&invalid_dir, &mut paths)?;
+    paths.sort();
+    Ok(paths)
+}
+
 fn collect_scenario_paths(dir: &Path, paths: &mut Vec<PathBuf>) -> Result<(), EvalError> {
     let entries = fs::read_dir(dir).map_err(|source| EvalError::io("read dir", dir, source))?;
     for entry in entries {
@@ -373,6 +586,23 @@ fn emit_validation_report(
     Ok(())
 }
 
+fn emit_acceptance_report(
+    report: &AcceptanceReport,
+    options: &CommandOptions,
+) -> Result<(), EvalError> {
+    if let Some(path) = &options.report_path {
+        write_report(path, report)?;
+    }
+    if options.json {
+        let json = serde_json::to_string_pretty(report)
+            .map_err(|source| EvalError::json(Path::new("<stdout>"), source))?;
+        println!("{json}");
+    } else {
+        print_acceptance_report(report);
+    }
+    Ok(())
+}
+
 fn write_report<T: Serialize>(path: &Path, report: &T) -> Result<(), EvalError> {
     if let Some(parent) = path
         .parent()
@@ -409,6 +639,21 @@ fn print_validation_report(report: &ValidationReport) {
         if let Some(error) = &result.error {
             println!("  - {error}");
         }
+    }
+}
+
+fn print_acceptance_report(report: &AcceptanceReport) {
+    println!(
+        "acceptance: target={}, {} gate(s), {} passed, {} failed",
+        report.target, report.gate_count, report.passed, report.failed
+    );
+    for gate in &report.gates {
+        let status = if gate.status == crate::report::CheckStatus::Pass {
+            "PASS"
+        } else {
+            "FAIL"
+        };
+        println!("- {status} {}: {}", gate.name, gate.detail);
     }
 }
 
@@ -459,6 +704,35 @@ mod tests {
             "mneme-v1".to_owned(),
         ]);
         assert!(result.is_err());
+    }
+
+    #[test]
+    fn parse_acceptance_defaults_to_core_fake() -> Result<(), EvalError> {
+        let (suite, options) = parse_acceptance_args(Vec::new())?;
+        assert_eq!(suite, "core");
+        assert_eq!(options.target_kind, TargetKind::Fake);
+        Ok(())
+    }
+
+    #[test]
+    fn parse_acceptance_accepts_suite_and_report_options() -> Result<(), EvalError> {
+        let (suite, options) = parse_acceptance_args(vec![
+            "--suite".to_owned(),
+            "core".to_owned(),
+            "--target".to_owned(),
+            "fake".to_owned(),
+            "--json".to_owned(),
+            "--report".to_owned(),
+            "evals/reports/acceptance.json".to_owned(),
+        ])?;
+        assert_eq!(suite, "core");
+        assert_eq!(options.target_kind, TargetKind::Fake);
+        assert!(options.json);
+        assert_eq!(
+            options.report_path.as_deref(),
+            Some(Path::new("evals/reports/acceptance.json"))
+        );
+        Ok(())
     }
 
     #[test]

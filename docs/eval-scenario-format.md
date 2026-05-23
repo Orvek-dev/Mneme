@@ -39,6 +39,12 @@ Run a suite:
 cargo run -p mneme-eval -- run --suite core --target fake
 ```
 
+Run the full harness acceptance gate:
+
+```sh
+cargo run -p mneme-eval -- acceptance --suite core --target fake
+```
+
 Use `--json` for machine-readable output and `--report <path>` to write a JSON
 report.
 

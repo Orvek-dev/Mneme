@@ -25,6 +25,12 @@ impl TargetKind {
     pub(crate) fn available() -> &'static str {
         "fake"
     }
+
+    pub(crate) fn as_str(self) -> &'static str {
+        match self {
+            Self::Fake => "fake",
+        }
+    }
 }
 
 #[derive(Debug, Clone, Copy, Eq, PartialEq)]
@@ -43,6 +49,15 @@ impl FaultMode {
             "leak-secrets" => Some(Self::LeakSecrets),
             "drop-citations" => Some(Self::DropCitations),
             _ => None,
+        }
+    }
+
+    pub(crate) fn as_str(self) -> &'static str {
+        match self {
+            Self::None => "none",
+            Self::SkipClaims => "skip-claims",
+            Self::LeakSecrets => "leak-secrets",
+            Self::DropCitations => "drop-citations",
         }
     }
 }

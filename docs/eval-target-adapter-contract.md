@@ -12,6 +12,12 @@ between public fixtures and a concrete Mneme implementation.
 The fake target is the default. CI still passes `--target fake` explicitly so a
 future Mneme implementation cannot silently change what is being tested.
 
+Before adding a production target, keep the fake target passing:
+
+```sh
+cargo run -p mneme-eval -- acceptance --suite core --target fake
+```
+
 ## Target Responsibilities
 
 Every target must:
