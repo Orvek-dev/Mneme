@@ -10,6 +10,8 @@ boundary for restart verification.
 
 - Raw events remain the source of truth.
 - Budget checks happen before extraction.
+- Extraction adapters propose claims; the engine still owns IDs, provenance,
+  audit, lifecycle state, and safety checks.
 - Secret-like data must not become active context.
 - Every context item must preserve source event provenance.
 - Persisted state must round-trip without changing claim, event, budget, or
@@ -43,6 +45,10 @@ boundary for restart verification.
   that mark active claims as forgotten.
 - [REQ-V1-013][Ubiquitous] Superseded and forgotten claims shall be omitted from
   context packs.
+- [REQ-V1-014][Ports-and-adapters] The v1 core shall expose an extraction
+  adapter boundary for claim extraction.
+- [REQ-V1-015][Ubiquitous] Extractor output shall still pass through engine
+  safety, provenance, and audit rules.
 
 ## Verification Map
 
@@ -61,3 +67,5 @@ boundary for restart verification.
 | REQ-V1-011 | `correct-memory` core scenario | verified |
 | REQ-V1-012 | `forget-persists` core scenario | verified |
 | REQ-V1-013 | lifecycle context-pack checks in core suite | verified |
+| REQ-V1-014 | custom extractor unit test and `RuleBasedExtractor` default path | verified |
+| REQ-V1-015 | extractor secret-blocking unit test | verified |

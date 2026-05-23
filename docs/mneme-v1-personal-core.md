@@ -10,6 +10,7 @@ The v1 core supports:
 
 - raw event append;
 - deterministic budget hard-cap checks before extraction;
+- extraction through the `MnemeExtractor` adapter boundary;
 - explicit memory extraction from `remember:` and `기억해줘:` markers;
 - explicit memory correction from `correct:` and `수정:` markers;
 - explicit memory removal from `forget:` and `잊어줘:` markers;
@@ -20,6 +21,7 @@ The v1 core supports:
 - read/write audit records;
 - serializable state snapshots;
 - an in-memory store and local JSON file store for restart tests.
+- a rule-based extractor used by default for deterministic v1 behavior.
 
 ## Current Non-Goals
 
@@ -28,7 +30,7 @@ The v1 core does not yet provide:
 - production-grade storage, migrations, compaction, or concurrent writes;
 - concurrent sessions;
 - team/shared memory;
-- real LLM extraction;
+- production LLM extraction adapters;
 - vector search;
 - external API or UI.
 

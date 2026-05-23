@@ -27,6 +27,7 @@ This project follows the spirit of Keep a Changelog.
 - Added v1 correction and forget lifecycle handling with core eval coverage.
 - Added the local `mneme` CLI for remember, correct, forget, context, and
   snapshot workflows over the JSON file store.
+- Added the v1 extraction adapter boundary with a default rule-based extractor.
 
 ## [0.0.1] - 2026-05-24
 

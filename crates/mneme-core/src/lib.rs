@@ -7,8 +7,9 @@ mod v1;
 
 pub use v1::{
     AuditKind, AuditRecord, BudgetState, ClaimRecord, ClaimStatus, ContextItem, ContextPack,
-    EngineSnapshot, EventInput, EventRecord, InMemoryStore, JsonFileStore, MnemeConfig,
-    MnemeEngine, MnemeState, MnemeStore, OmittedContextItem, StoreError,
+    EngineSnapshot, EventInput, EventRecord, ExtractedClaim, InMemoryStore, JsonFileStore,
+    MnemeConfig, MnemeEngine, MnemeExtractor, MnemeState, MnemeStore, OmittedContextItem,
+    RuleBasedExtractor, StoreError,
 };
 
 /// Public product name.
