@@ -8,6 +8,7 @@ through the JSON file store.
 
 ```sh
 cargo run -p mneme-cli -- doctor
+cargo run -p mneme-cli -- ingest "remember: user prefers local-first tools"
 cargo run -p mneme-cli -- remember "user prefers local-first tools"
 cargo run -p mneme-cli -- correct "user prefers local-first tools" "user prefers desktop IDE"
 cargo run -p mneme-cli -- forget "user prefers desktop IDE"
@@ -27,7 +28,7 @@ cargo run -p mneme-cli -- context "local-first" --store /tmp/mneme.json --json
 
 ## Event Options
 
-`remember`, `correct`, and `forget` accept:
+`ingest`, `remember`, `correct`, and `forget` accept:
 
 - `--speaker <id>`: defaults to `user`.
 - `--agent <id>`: optional acting agent.
@@ -37,7 +38,25 @@ cargo run -p mneme-cli -- context "local-first" --store /tmp/mneme.json --json
 
 The CLI intentionally keeps the v1 deterministic lifecycle markers visible:
 
+- `ingest <text>` writes the event exactly as provided.
 - `remember <claim>` writes `remember: <claim>`.
 - `correct <old-claim> <new-claim>` writes
   `correct: <old-claim> -> <new-claim>`.
 - `forget <claim>` writes `forget: <claim>`.
+
+## Command Extractor
+
+`ingest` can delegate extraction to a local command:
+
+```sh
+cargo run -p mneme-cli -- ingest "the user prefers local-first tools" \
+  --extractor command \
+  --extractor-command ./mneme-extractor-wrapper \
+  --store /tmp/mneme.json
+```
+
+The wrapper receives the command extraction JSON request on stdin and must write
+the response JSON to stdout. `MNEME_EXTRACTOR_COMMAND` can provide the command
+program when `--extractor-command` is omitted; pass command arguments with
+repeated `--extractor-arg <arg>` flags. API keys should stay in the wrapper's
+environment, not in the Mneme store or tracked repo files.

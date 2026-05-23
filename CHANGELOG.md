@@ -4,6 +4,16 @@ This project follows the spirit of Keep a Changelog.
 
 ## Unreleased
 
+## [0.2.0] - 2026-05-24
+
+### Added
+
+- Added a provider-neutral command extraction adapter for model-backed memory
+  extraction experiments.
+- Added a stable JSON stdin/stdout protocol for external extraction commands.
+- Added `mneme ingest` with opt-in `--extractor command` support.
+- Added public documentation for command-backed extraction wrappers.
+
 ## [0.1.1] - 2026-05-24
 
 ### Fixed

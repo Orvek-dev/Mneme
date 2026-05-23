@@ -2,7 +2,7 @@
 
 Mneme is an early personal-memory runtime and eval harness for agent workflows.
 The current repository focuses on deterministic v1 behavior before adding model
-extraction, teams, UI, or production storage.
+providers, teams, UI, or production storage.
 
 Mneme currently provides:
 
@@ -20,6 +20,8 @@ Mneme is pre-1.0. The useful surface today is local development and evaluation:
 - secret-like data is blocked from active context;
 - corrections and forgets are auditable lifecycle transitions;
 - extraction and storage are behind adapter boundaries.
+- model-backed extraction experiments can use a provider-neutral command
+  adapter without adding API keys to the repo.
 
 See [docs/v1-stability.md](docs/v1-stability.md) for the current stability
 contract.
@@ -46,6 +48,15 @@ cargo run -p mneme-cli -- snapshot --store "$STORE" --json
 
 Without `--store`, the CLI writes to `.mneme/mneme-v1.json` in the current
 directory. `.mneme/` is ignored by git.
+
+For model-backed extraction experiments, use `ingest` with a local wrapper:
+
+```sh
+cargo run -p mneme-cli -- ingest "the user prefers local-first tools" \
+  --extractor command \
+  --extractor-command ./mneme-extractor-wrapper \
+  --store "$STORE"
+```
 
 ## Eval Harness
 
@@ -100,6 +111,7 @@ spec/               feature specs and verification maps
 - [Eval Acceptance Gate](docs/eval-harness-acceptance.md)
 - [Eval Target Adapter Contract](docs/eval-target-adapter-contract.md)
 - [Extraction Adapter Contract](docs/extraction-adapter-contract.md)
+- [Model Extraction Adapter](docs/model-extraction-adapter.md)
 - [Mneme v1 Personal Core](docs/mneme-v1-personal-core.md)
 - [Mneme v1 Stability](docs/v1-stability.md)
 - [Release Checklist](docs/release-checklist.md)

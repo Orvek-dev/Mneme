@@ -44,13 +44,21 @@ fn run_with_optional_persistence(
     };
     let mut engine = MnemeEngine::new(config);
     for (idx, input) in scenario.events.iter().enumerate() {
-        engine.ingest_event(EventInput {
-            speaker_id: input.speaker_id.clone(),
-            actor_agent_id: input.actor_agent_id.clone(),
-            text: input.text.clone(),
-            scope: input.scope.clone(),
-            trust_level: input.trust_level.clone(),
-        });
+        engine
+            .ingest_event(EventInput {
+                speaker_id: input.speaker_id.clone(),
+                actor_agent_id: input.actor_agent_id.clone(),
+                text: input.text.clone(),
+                scope: input.scope.clone(),
+                trust_level: input.trust_level.clone(),
+            })
+            .map_err(|source| {
+                EvalError::scenario(format!(
+                    "scenario {} extractor failed for event {}: {source}",
+                    scenario.id,
+                    idx + 1
+                ))
+            })?;
 
         if scenario
             .persistence

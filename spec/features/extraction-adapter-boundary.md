@@ -27,6 +27,8 @@ audit, lifecycle, budget, or eval contracts.
   shall accept custom adapters.
 - [REQ-EXT-006][Ubiquitous] Custom extractor output shall not bypass secret
   blocking or provenance rules.
+- [REQ-EXT-007][Testability] Custom extraction failures shall surface as typed
+  errors instead of being silently ignored.
 
 ## Verification Map
 
@@ -38,3 +40,4 @@ audit, lifecycle, budget, or eval contracts.
 | REQ-EXT-004 | existing core/eval scenarios through `ingest_event` | verified |
 | REQ-EXT-005 | custom extractor unit test | verified |
 | REQ-EXT-006 | extractor secret-blocking unit test | verified |
+| REQ-EXT-007 | `ExtractorError` return path on `MnemeExtractor` | verified |

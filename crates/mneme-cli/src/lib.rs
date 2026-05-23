@@ -6,8 +6,9 @@ use std::io::{self, Write};
 use std::path::{Path, PathBuf};
 
 use mneme_core::{
-    BuildStage, ClaimRecord, ContextPack, EngineSnapshot, EventInput, JsonFileStore, MnemeConfig,
-    MnemeEngine, PRODUCT_NAME,
+    BuildStage, ClaimRecord, CommandExtractor, ContextPack, EngineSnapshot, EventInput,
+    ExtractorError, JsonFileStore, MnemeConfig, MnemeEngine, MnemeExtractor, RuleBasedExtractor,
+    PRODUCT_NAME,
 };
 use serde::Serialize;
 
@@ -43,6 +44,13 @@ impl CliError {
     fn json(source: serde_json::Error) -> Self {
         Self {
             message: format!("serialize CLI output: {source}"),
+            exit_code: 1,
+        }
+    }
+
+    fn extractor(source: ExtractorError) -> Self {
+        Self {
+            message: format!("extract memory claim: {source}"),
             exit_code: 1,
         }
     }
@@ -84,13 +92,14 @@ fn run_cli_with_writer(
             writeln!(writer, "{}", env!("CARGO_PKG_VERSION"))
                 .map_err(|source| CliError::io("write", Path::new("<stdout>"), source))
         }
+        "ingest" => run_ingest(args.collect(), writer),
         "remember" => run_remember(args.collect(), writer),
         "correct" => run_correct(args.collect(), writer),
         "forget" => run_forget(args.collect(), writer),
         "context" => run_context(args.collect(), writer),
         "snapshot" => run_snapshot(args.collect(), writer),
         _ => Err(CliError::invalid_cli(format!(
-            "unknown mneme command: {command}\navailable commands: doctor, version, remember, correct, forget, context, snapshot"
+            "unknown mneme command: {command}\navailable commands: doctor, version, ingest, remember, correct, forget, context, snapshot"
         ))),
     }
 }
@@ -119,6 +128,7 @@ struct EventOptions {
     actor_agent_id: Option<String>,
     scope: String,
     trust_level: String,
+    extractor: ExtractorOptions,
 }
 
 impl Default for EventOptions {
@@ -129,6 +139,25 @@ impl Default for EventOptions {
             actor_agent_id: None,
             scope: "private".to_owned(),
             trust_level: "trusted_user".to_owned(),
+            extractor: ExtractorOptions::Rule,
+        }
+    }
+}
+
+#[derive(Debug, Clone)]
+enum ExtractorOptions {
+    Rule,
+    Command {
+        program: Option<String>,
+        args: Vec<String>,
+    },
+}
+
+impl ExtractorOptions {
+    fn name(&self) -> &'static str {
+        match self {
+            Self::Rule => "rule",
+            Self::Command { .. } => "command",
         }
     }
 }
@@ -137,6 +166,7 @@ impl Default for EventOptions {
 struct EventCommandReport {
     command: String,
     store: String,
+    extractor: String,
     event_count: usize,
     claim_count: usize,
     latest_claim: Option<ClaimSummary>,
@@ -181,6 +211,11 @@ struct SnapshotReport {
     snapshot: EngineSnapshot,
 }
 
+fn run_ingest(raw_args: Vec<String>, writer: &mut impl Write) -> Result<(), CliError> {
+    let (text, options) = parse_ingest_args(raw_args)?;
+    run_event_command("ingest", text, options, writer)
+}
+
 fn run_remember(raw_args: Vec<String>, writer: &mut impl Write) -> Result<(), CliError> {
     let (claim, options) = parse_event_args(
         raw_args,
@@ -214,19 +249,27 @@ fn run_event_command(
     writer: &mut impl Write,
 ) -> Result<(), CliError> {
     let store_path = resolve_store_path(&options.common)?;
+    let extractor_name = options.extractor.name().to_owned();
+    let extractor = build_extractor(&options.extractor)?;
     let mut engine = load_engine(&store_path)?;
-    engine.ingest_event(EventInput {
-        speaker_id: options.speaker_id,
-        actor_agent_id: options.actor_agent_id,
-        text: event_text,
-        scope: options.scope,
-        trust_level: options.trust_level,
-    });
+    engine
+        .ingest_event_with_extractor(
+            EventInput {
+                speaker_id: options.speaker_id,
+                actor_agent_id: options.actor_agent_id,
+                text: event_text,
+                scope: options.scope,
+                trust_level: options.trust_level,
+            },
+            extractor.as_ref(),
+        )
+        .map_err(CliError::extractor)?;
     persist_engine(&store_path, &engine)?;
     let snapshot = engine.snapshot();
     let report = EventCommandReport {
         command: command.to_owned(),
         store: store_path.display().to_string(),
+        extractor: extractor_name,
         event_count: snapshot.events.len(),
         claim_count: snapshot.claims.len(),
         latest_claim: snapshot.claims.last().map(ClaimSummary::from),
@@ -303,6 +346,105 @@ fn parse_event_args(
     }
     let claim = require_nonempty(positionals.remove(0), "claim")?;
     Ok((claim, options))
+}
+
+fn parse_ingest_args(raw_args: Vec<String>) -> Result<(String, EventOptions), CliError> {
+    let mut options = EventOptions::default();
+    let mut positionals = Vec::new();
+    let mut idx = 0;
+    while idx < raw_args.len() {
+        if parse_common_option(&raw_args, &mut idx, &mut options.common)? {
+            idx += 1;
+            continue;
+        }
+        match raw_args[idx].as_str() {
+            "--speaker" => {
+                idx += 1;
+                options.speaker_id = required_arg(&raw_args, idx, "--speaker")?;
+            }
+            "--agent" => {
+                idx += 1;
+                options.actor_agent_id = Some(required_arg(&raw_args, idx, "--agent")?);
+            }
+            "--scope" => {
+                idx += 1;
+                options.scope = required_arg(&raw_args, idx, "--scope")?;
+            }
+            "--trust" => {
+                idx += 1;
+                options.trust_level = required_arg(&raw_args, idx, "--trust")?;
+            }
+            "--extractor" => {
+                idx += 1;
+                options.extractor =
+                    parse_extractor_kind(required_arg(&raw_args, idx, "--extractor")?)?;
+            }
+            "--extractor-command" => {
+                idx += 1;
+                set_command_program(
+                    &mut options.extractor,
+                    required_arg(&raw_args, idx, "--extractor-command")?,
+                );
+            }
+            "--extractor-arg" => {
+                idx += 1;
+                push_command_arg(
+                    &mut options.extractor,
+                    required_arg(&raw_args, idx, "--extractor-arg")?,
+                );
+            }
+            value if value.starts_with('-') => {
+                return Err(CliError::invalid_cli(format!(
+                    "unknown ingest option: {value}"
+                )));
+            }
+            value => positionals.push(value.to_owned()),
+        }
+        idx += 1;
+    }
+    if positionals.len() != 1 {
+        return Err(CliError::invalid_cli(
+            "usage: mneme ingest <text> [--store <path>] [--speaker <id>] [--agent <id>] [--scope <scope>] [--trust <trust>] [--extractor rule|command] [--extractor-command <program>] [--extractor-arg <arg>]... [--json]",
+        ));
+    }
+    let text = require_nonempty(positionals.remove(0), "text")?;
+    Ok((text, options))
+}
+
+fn parse_extractor_kind(value: String) -> Result<ExtractorOptions, CliError> {
+    match value.as_str() {
+        "rule" => Ok(ExtractorOptions::Rule),
+        "command" => Ok(ExtractorOptions::Command {
+            program: None,
+            args: Vec::new(),
+        }),
+        _ => Err(CliError::invalid_cli(format!(
+            "unknown extractor: {value}\navailable extractors: rule, command"
+        ))),
+    }
+}
+
+fn set_command_program(options: &mut ExtractorOptions, program: String) {
+    let args = match options {
+        ExtractorOptions::Command { args, .. } => std::mem::take(args),
+        ExtractorOptions::Rule => Vec::new(),
+    };
+    *options = ExtractorOptions::Command {
+        program: Some(program),
+        args,
+    };
+}
+
+fn push_command_arg(options: &mut ExtractorOptions, arg: String) {
+    match options {
+        ExtractorOptions::Command { args, .. } => args.push(arg),
+        ExtractorOptions::Rule => {
+            *options = ExtractorOptions::Command {
+                program: None,
+                args: vec![arg],
+            };
+        }
+    }
 }
 
 fn parse_correct_args(raw_args: Vec<String>) -> Result<((String, String), EventOptions), CliError> {
@@ -436,6 +578,26 @@ fn resolve_store_path(options: &CommonOptions) -> Result<PathBuf, CliError> {
     }
 }
 
+fn build_extractor(options: &ExtractorOptions) -> Result<Box<dyn MnemeExtractor>, CliError> {
+    match options {
+        ExtractorOptions::Rule => Ok(Box::new(RuleBasedExtractor::new())),
+        ExtractorOptions::Command { program, args } => {
+            let program = match program {
+                Some(program) => program.clone(),
+                None => env::var("MNEME_EXTRACTOR_COMMAND")
+                    .ok()
+                    .filter(|value| !value.trim().is_empty())
+                    .ok_or_else(|| {
+                        CliError::invalid_cli(
+                            "command extractor requires --extractor-command <program> or MNEME_EXTRACTOR_COMMAND",
+                        )
+                    })?,
+            };
+            Ok(Box::new(CommandExtractor::new(program, args.clone())))
+        }
+    }
+}
+
 fn default_store_path() -> Result<PathBuf, CliError> {
     env::current_dir()
         .map(|dir| dir.join(".mneme").join("mneme-v1.json"))
@@ -465,8 +627,8 @@ fn emit_event_report(
     }
     writeln!(
         writer,
-        "mneme: {} saved to {} (events={}, claims={})",
-        report.command, report.store, report.event_count, report.claim_count
+        "mneme: {} saved to {} (events={}, claims={}, extractor={})",
+        report.command, report.store, report.event_count, report.claim_count, report.extractor
     )
     .map_err(|source| CliError::io("write", Path::new("<stdout>"), source))
 }
@@ -617,6 +779,83 @@ mod tests {
 
         let _ = std::fs::remove_file(&path);
         Ok(())
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn ingest_can_use_command_extractor() -> Result<(), Box<dyn std::error::Error>> {
+        let path = temp_store_path("command-extractor");
+        let _ = std::fs::remove_file(&path);
+        let response = serde_json::to_string(&mneme_core::ExtractorCommandResponse::from_claim(
+            mneme_core::ExtractedClaim::new("user", "prefers", "command-backed extraction"),
+        ))?;
+        let script = format!("cat >/dev/null; printf '%s\\n' '{}'", response);
+
+        let mut output = Vec::new();
+        run_cli_with_writer(
+            vec![
+                "mneme".to_owned(),
+                "ingest".to_owned(),
+                "the user likes model-backed extraction".to_owned(),
+                "--extractor".to_owned(),
+                "command".to_owned(),
+                "--extractor-command".to_owned(),
+                "/bin/sh".to_owned(),
+                "--extractor-arg".to_owned(),
+                "-c".to_owned(),
+                "--extractor-arg".to_owned(),
+                script,
+                "--store".to_owned(),
+                path.display().to_string(),
+                "--json".to_owned(),
+            ],
+            &mut output,
+        )?;
+        let ingest_text = String::from_utf8(output)?;
+        assert!(ingest_text.contains("\"extractor\": \"command\""));
+
+        let mut context_output = Vec::new();
+        run_cli_with_writer(
+            vec![
+                "mneme".to_owned(),
+                "context".to_owned(),
+                "command-backed".to_owned(),
+                "--store".to_owned(),
+                path.display().to_string(),
+                "--json".to_owned(),
+            ],
+            &mut context_output,
+        )?;
+        let context_text = String::from_utf8(context_output)?;
+        assert!(context_text.contains("command-backed extraction"));
+        assert!(context_text.contains("event-001"));
+
+        let _ = std::fs::remove_file(&path);
+        Ok(())
+    }
+
+    #[test]
+    fn command_extractor_requires_program() -> Result<(), Box<dyn std::error::Error>> {
+        let mut output = Vec::new();
+        let result = run_cli_with_writer(
+            vec![
+                "mneme".to_owned(),
+                "ingest".to_owned(),
+                "the user likes model-backed extraction".to_owned(),
+                "--extractor".to_owned(),
+                "command".to_owned(),
+            ],
+            &mut output,
+        );
+
+        match result {
+            Ok(()) => Err("command extractor without program should fail".into()),
+            Err(error) => {
+                assert_eq!(error.exit_code(), 2);
+                assert!(error.to_string().contains("--extractor-command"));
+                Ok(())
+            }
+        }
     }
 
     fn temp_store_path(name: &str) -> PathBuf {
