@@ -15,6 +15,8 @@ This project follows the spirit of Keep a Changelog.
 - Added public eval scenario format documentation and invalid fixture coverage.
 - Added eval target adapter boundary with explicit `--target fake` execution.
 - Added report schema version and target metadata to eval JSON reports.
+- Added `mneme-eval acceptance` to gate Phase 1 readiness in CI.
+- Added public acceptance coverage and Phase 1 entry documentation.
 
 ## [0.0.1] - 2026-05-24
 
