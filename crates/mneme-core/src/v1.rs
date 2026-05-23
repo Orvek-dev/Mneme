@@ -58,6 +58,15 @@ impl MnemeEngine {
 
     /// Appends one user event and extracts a claim when allowed by budget.
     pub fn ingest_event(&mut self, input: EventInput) {
+        self.ingest_event_with_extractor(input, &RuleBasedExtractor);
+    }
+
+    /// Appends one user event using the provided extraction adapter.
+    pub fn ingest_event_with_extractor(
+        &mut self,
+        input: EventInput,
+        extractor: &(impl MnemeExtractor + ?Sized),
+    ) {
         let event = EventRecord {
             id: next_id("event", self.events.len() + 1),
             speaker_id: input.speaker_id,
@@ -94,7 +103,13 @@ impl MnemeEngine {
             return;
         }
 
-        if let Some(claim) = extract_claim(&event, self.claims.len() + 1) {
+        if let Some(extracted) = extractor.extract(&event) {
+            let claim = claim_from_extracted(
+                &event,
+                self.claims.len() + 1,
+                extracted,
+                vec![event.id.clone()],
+            );
             self.audit.push(AuditRecord {
                 kind: AuditKind::ClaimWrite,
                 target_id: claim.id.clone(),
@@ -148,7 +163,8 @@ impl MnemeEngine {
         source_event_ids.push(event.id.clone());
         dedupe_ids(&mut source_event_ids);
 
-        let claim = claim_from_marker(event, self.claims.len() + 1, new_text, source_event_ids);
+        let extracted = extracted_claim_from_text(event, new_text);
+        let claim = claim_from_extracted(event, self.claims.len() + 1, extracted, source_event_ids);
         self.audit.push(AuditRecord {
             kind: AuditKind::ClaimWrite,
             target_id: claim.id.clone(),
@@ -232,6 +248,64 @@ impl MnemeEngine {
             budget: self.budget.clone(),
             audit: self.audit.clone(),
         }
+    }
+}
+
+/// Adapter boundary for extracting memory claims from events.
+pub trait MnemeExtractor {
+    /// Extracts one claim candidate from an event, when the adapter can find one.
+    fn extract(&self, event: &EventRecord) -> Option<ExtractedClaim>;
+}
+
+/// Claim candidate returned by an extraction adapter before engine persistence.
+#[derive(Debug, Clone, Eq, PartialEq, Serialize, Deserialize)]
+pub struct ExtractedClaim {
+    /// Claim subject.
+    pub subject: String,
+    /// Claim predicate.
+    pub predicate: String,
+    /// Claim object.
+    pub object: String,
+}
+
+impl ExtractedClaim {
+    /// Creates a claim candidate.
+    #[must_use]
+    pub fn new(
+        subject: impl Into<String>,
+        predicate: impl Into<String>,
+        object: impl Into<String>,
+    ) -> Self {
+        Self {
+            subject: subject.into(),
+            predicate: predicate.into(),
+            object: object.into(),
+        }
+    }
+
+    /// Text form used by lifecycle matching.
+    #[must_use]
+    pub fn text(&self) -> String {
+        format!("{} {} {}", self.subject, self.predicate, self.object)
+    }
+}
+
+/// Deterministic extraction adapter for explicit v1 lifecycle markers.
+#[derive(Debug, Clone, Copy, Default)]
+pub struct RuleBasedExtractor;
+
+impl RuleBasedExtractor {
+    /// Creates a rule-based extractor.
+    #[must_use]
+    pub const fn new() -> Self {
+        Self
+    }
+}
+
+impl MnemeExtractor for RuleBasedExtractor {
+    fn extract(&self, event: &EventRecord) -> Option<ExtractedClaim> {
+        let marker = find_remember_marker(&event.text)?;
+        Some(extracted_claim_from_text(event, marker))
     }
 }
 
@@ -551,48 +625,38 @@ pub struct EngineSnapshot {
     pub audit: Vec<AuditRecord>,
 }
 
-fn extract_claim(event: &EventRecord, next_claim_number: usize) -> Option<ClaimRecord> {
-    let marker = find_remember_marker(&event.text)?;
-    Some(claim_from_marker(
-        event,
-        next_claim_number,
-        marker,
-        vec![event.id.clone()],
-    ))
-}
-
-fn claim_from_marker(
+fn claim_from_extracted(
     event: &EventRecord,
     next_claim_number: usize,
-    marker: &str,
+    extracted: ExtractedClaim,
     source_event_ids: Vec<String>,
 ) -> ClaimRecord {
-    let mut parts = marker.split_whitespace();
-    let first = parts.next();
-    let second = parts.next();
-    let rest = parts.collect::<Vec<_>>().join(" ");
-    let (subject, predicate, object) = match (first, second, rest.trim().is_empty()) {
-        (Some(subject), Some(predicate), false) => (subject.to_owned(), predicate.to_owned(), rest),
-        _ => (
-            event.speaker_id.clone(),
-            "note".to_owned(),
-            marker.to_owned(),
-        ),
-    };
-    let status = if looks_like_secret(&object) || looks_like_secret(&event.text) {
+    let status = if looks_like_secret(&extracted.object) || looks_like_secret(&event.text) {
         ClaimStatus::BlockedSecret
     } else {
         ClaimStatus::Active
     };
     ClaimRecord {
         id: next_id("claim", next_claim_number),
-        subject,
-        predicate,
-        object,
+        subject: extracted.subject,
+        predicate: extracted.predicate,
+        object: extracted.object,
         status,
         scope: event.scope.clone(),
         source_event_ids,
     }
+}
+
+fn extracted_claim_from_text(event: &EventRecord, text: &str) -> ExtractedClaim {
+    let mut parts = text.split_whitespace();
+    let first = parts.next();
+    let second = parts.next();
+    let rest = parts.collect::<Vec<_>>().join(" ");
+    let (subject, predicate, object) = match (first, second, rest.trim().is_empty()) {
+        (Some(subject), Some(predicate), false) => (subject.to_owned(), predicate.to_owned(), rest),
+        _ => (event.speaker_id.clone(), "note".to_owned(), text.to_owned()),
+    };
+    ExtractedClaim::new(subject, predicate, object)
 }
 
 fn claim_matches_text(claim: &ClaimRecord, target: &str) -> bool {
@@ -693,6 +757,72 @@ mod tests {
             .audit
             .iter()
             .any(|event| event.kind == AuditKind::ClaimWrite));
+    }
+
+    #[test]
+    fn custom_extractor_can_write_claim_without_rule_marker() {
+        struct StaticExtractor;
+
+        impl MnemeExtractor for StaticExtractor {
+            fn extract(&self, _event: &EventRecord) -> Option<ExtractedClaim> {
+                Some(ExtractedClaim::new("user", "prefers", "adapter extraction"))
+            }
+        }
+
+        let mut engine = MnemeEngine::new(MnemeConfig {
+            daily_cloud_tokens: 100,
+        });
+        engine.ingest_event_with_extractor(
+            EventInput {
+                speaker_id: "user".to_owned(),
+                actor_agent_id: Some("model-adapter".to_owned()),
+                text: "model adapter should extract from this event".to_owned(),
+                scope: "private".to_owned(),
+                trust_level: "trusted_user".to_owned(),
+            },
+            &StaticExtractor,
+        );
+        let snapshot = engine.snapshot();
+
+        assert_eq!(snapshot.claims.len(), 1);
+        assert_eq!(snapshot.claims[0].object, "adapter extraction");
+        assert_eq!(snapshot.claims[0].source_event_ids, vec!["event-001"]);
+        assert_eq!(snapshot.claims[0].status, ClaimStatus::Active);
+    }
+
+    #[test]
+    fn extractor_output_still_passes_secret_blocking() {
+        struct SecretExtractor;
+
+        impl MnemeExtractor for SecretExtractor {
+            fn extract(&self, _event: &EventRecord) -> Option<ExtractedClaim> {
+                Some(ExtractedClaim::new(
+                    "user",
+                    "note",
+                    "API_KEY=FAKE_TEST_VALUE",
+                ))
+            }
+        }
+
+        let mut engine = MnemeEngine::new(MnemeConfig {
+            daily_cloud_tokens: 100,
+        });
+        engine.ingest_event_with_extractor(
+            EventInput {
+                speaker_id: "user".to_owned(),
+                actor_agent_id: Some("model-adapter".to_owned()),
+                text: "adapter extracted a sensitive value".to_owned(),
+                scope: "private".to_owned(),
+                trust_level: "trusted_user".to_owned(),
+            },
+            &SecretExtractor,
+        );
+        let context = engine.build_context_pack("API key");
+        let snapshot = engine.snapshot();
+
+        assert_eq!(snapshot.claims.len(), 1);
+        assert_eq!(snapshot.claims[0].status, ClaimStatus::BlockedSecret);
+        assert!(context.items.is_empty());
     }
 
     #[test]
