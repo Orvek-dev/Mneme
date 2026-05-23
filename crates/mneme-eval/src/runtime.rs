@@ -1,281 +1,20 @@
+use crate::error::EvalError;
 use crate::report::{CheckReport, ScenarioReport};
 use crate::scenario::{AuditExpected, ClaimExpected, ContextPackExpected, Expected, Scenario};
+use crate::target::{ActualState, ContextPack, EvalTarget, TargetRunOptions};
 
-#[derive(Debug, Clone, Copy, Eq, PartialEq)]
-pub(crate) enum FaultMode {
-    None,
-    SkipClaims,
-    LeakSecrets,
-    DropCitations,
-}
-
-impl FaultMode {
-    pub(crate) fn parse(value: &str) -> Option<Self> {
-        match value {
-            "none" => Some(Self::None),
-            "skip-claims" => Some(Self::SkipClaims),
-            "leak-secrets" => Some(Self::LeakSecrets),
-            "drop-citations" => Some(Self::DropCitations),
-            _ => None,
-        }
-    }
-}
-
-#[derive(Debug, Clone, Copy)]
-pub(crate) struct ReplayOptions {
-    pub(crate) fault_mode: FaultMode,
-}
-
-impl Default for ReplayOptions {
-    fn default() -> Self {
-        Self {
-            fault_mode: FaultMode::None,
-        }
-    }
-}
-
-#[derive(Debug, Clone)]
-struct RecordedEvent {
-    id: String,
-    speaker_id: String,
-    actor_agent_id: Option<String>,
-    text: String,
-    scope: String,
-    trust_level: String,
-}
-
-#[derive(Debug, Clone)]
-struct Claim {
-    id: String,
-    subject: String,
-    predicate: String,
-    object: String,
-    status: String,
-    scope: String,
-    source_event_ids: Vec<String>,
-}
-
-impl Claim {
-    fn text(&self) -> String {
-        format!("{} {} {}", self.subject, self.predicate, self.object)
-    }
-}
-
-#[derive(Debug, Clone)]
-struct ContextPack {
-    items: Vec<ContextItem>,
-    omitted: Vec<OmittedItem>,
-}
-
-#[derive(Debug, Clone)]
-struct ContextItem {
-    claim_id: String,
-    claim_text: String,
-    source_event_ids: Vec<String>,
-}
-
-#[derive(Debug, Clone)]
-struct OmittedItem {
-    claim_id: String,
-    reason: String,
-}
-
-#[derive(Debug, Clone, Default)]
-struct BudgetActual {
-    spent_tokens: u32,
-    hard_cap_violations: u32,
-}
-
-#[derive(Debug, Clone)]
-struct AuditEvent {
-    kind: String,
-    target_id: String,
-}
-
-#[derive(Debug, Clone, Default)]
-struct ActualState {
-    events: Vec<RecordedEvent>,
-    claims: Vec<Claim>,
-    context_pack: Option<ContextPack>,
-    budget: BudgetActual,
-    audit: Vec<AuditEvent>,
-}
-
-pub(crate) fn replay_scenario(scenario: &Scenario, options: ReplayOptions) -> ScenarioReport {
-    let actual = run_fake_runtime(scenario, options);
+pub(crate) fn replay_scenario(
+    scenario: &Scenario,
+    target: &dyn EvalTarget,
+    options: TargetRunOptions,
+) -> Result<ScenarioReport, EvalError> {
+    let actual = target.run(scenario, options)?;
     let checks = check_expected(scenario, &actual);
-    ScenarioReport::new(scenario.id.clone(), scenario.tags.clone(), checks)
-}
-
-fn run_fake_runtime(scenario: &Scenario, options: ReplayOptions) -> ActualState {
-    let mut actual = ActualState::default();
-
-    for (idx, input) in scenario.events.iter().enumerate() {
-        let event = RecordedEvent {
-            id: format!("event-{:03}", idx + 1),
-            speaker_id: input.speaker_id.clone(),
-            actor_agent_id: input.actor_agent_id.clone(),
-            text: input.text.clone(),
-            scope: input.scope.clone(),
-            trust_level: input.trust_level.clone(),
-        };
-        actual.audit.push(AuditEvent {
-            kind: "event.append".to_owned(),
-            target_id: format!(
-                "{}:{}:{}",
-                event.id,
-                event.actor_agent_id.as_deref().unwrap_or("no-agent"),
-                event.trust_level
-            ),
-        });
-        let token_estimate = estimate_tokens(&event.text);
-        if actual.budget.spent_tokens.saturating_add(token_estimate)
-            > scenario.budget.daily_cloud_tokens
-        {
-            actual.budget.hard_cap_violations = actual.budget.hard_cap_violations.saturating_add(1);
-            actual.audit.push(AuditEvent {
-                kind: "budget.block".to_owned(),
-                target_id: event.id.clone(),
-            });
-            actual.events.push(event);
-            continue;
-        }
-        actual.budget.spent_tokens = actual.budget.spent_tokens.saturating_add(token_estimate);
-
-        if options.fault_mode != FaultMode::SkipClaims {
-            if let Some(mut claim) = extract_claim(&event, actual.claims.len() + 1) {
-                if options.fault_mode == FaultMode::LeakSecrets && claim.status == "blocked_secret"
-                {
-                    claim.status = "active".to_owned();
-                }
-                actual.audit.push(AuditEvent {
-                    kind: "claim.write".to_owned(),
-                    target_id: claim.id.clone(),
-                });
-                actual.claims.push(claim);
-            }
-        }
-        actual.events.push(event);
-    }
-
-    if let Some(context_expected) = &scenario.expected.context_pack {
-        actual.context_pack = Some(build_context_pack(
-            &actual.claims,
-            context_expected,
-            options,
-        ));
-        actual.audit.push(AuditEvent {
-            kind: "context.read".to_owned(),
-            target_id: scenario.id.clone(),
-        });
-    }
-
-    actual
-}
-
-fn extract_claim(event: &RecordedEvent, next_claim_number: usize) -> Option<Claim> {
-    let marker = find_remember_marker(&event.text)?;
-    let source_event_ids = vec![event.id.clone()];
-    let mut parts = marker.split_whitespace();
-    let first = parts.next();
-    let second = parts.next();
-    let rest = parts.collect::<Vec<_>>().join(" ");
-    let (subject, predicate, object) = match (first, second, rest.trim().is_empty()) {
-        (Some(subject), Some(predicate), false) => (subject.to_owned(), predicate.to_owned(), rest),
-        _ => (
-            event.speaker_id.clone(),
-            "note".to_owned(),
-            marker.to_owned(),
-        ),
-    };
-    let status = if looks_like_secret(&object) || looks_like_secret(&event.text) {
-        "blocked_secret"
-    } else {
-        "active"
-    };
-    Some(Claim {
-        id: format!("claim-{:03}", next_claim_number),
-        subject,
-        predicate,
-        object,
-        status: status.to_owned(),
-        scope: event.scope.clone(),
-        source_event_ids,
-    })
-}
-
-fn find_remember_marker(text: &str) -> Option<&str> {
-    for marker in ["remember:", "기억해줘:"] {
-        if let Some((_, rest)) = text.split_once(marker) {
-            let trimmed = rest.trim();
-            if !trimmed.is_empty() {
-                return Some(trimmed);
-            }
-        }
-    }
-    None
-}
-
-fn looks_like_secret(text: &str) -> bool {
-    let lower = text.to_ascii_lowercase();
-    lower.contains("api_key=")
-        || lower.contains("api key")
-        || lower.contains("secret=")
-        || lower.contains("password=")
-}
-
-fn estimate_tokens(text: &str) -> u32 {
-    let count = text.split_whitespace().count();
-    u32::try_from(count).unwrap_or(u32::MAX).max(1)
-}
-
-fn build_context_pack(
-    claims: &[Claim],
-    expected: &ContextPackExpected,
-    options: ReplayOptions,
-) -> ContextPack {
-    let query_terms = expected
-        .query
-        .split_whitespace()
-        .map(|term| term.to_ascii_lowercase())
-        .collect::<Vec<_>>();
-    let mut items = Vec::new();
-    let mut omitted = Vec::new();
-
-    for claim in claims {
-        if claim.status != "active" {
-            omitted.push(OmittedItem {
-                claim_id: claim.id.clone(),
-                reason: claim.status.clone(),
-            });
-            continue;
-        }
-        let claim_text = claim.text();
-        let claim_text_lower = claim_text.to_ascii_lowercase();
-        let matches_query = query_terms.is_empty()
-            || query_terms
-                .iter()
-                .any(|term| claim_text_lower.contains(term));
-        if matches_query || !expected.must_include.is_empty() {
-            let source_event_ids = if options.fault_mode == FaultMode::DropCitations {
-                Vec::new()
-            } else {
-                claim.source_event_ids.clone()
-            };
-            items.push(ContextItem {
-                claim_id: claim.id.clone(),
-                claim_text,
-                source_event_ids,
-            });
-        } else {
-            omitted.push(OmittedItem {
-                claim_id: claim.id.clone(),
-                reason: "low_relevance".to_owned(),
-            });
-        }
-    }
-
-    ContextPack { items, omitted }
+    Ok(ScenarioReport::new(
+        scenario.id.clone(),
+        scenario.tags.clone(),
+        checks,
+    ))
 }
 
 fn check_expected(scenario: &Scenario, actual: &ActualState) -> Vec<CheckReport> {
@@ -481,13 +220,15 @@ fn option_matches(expected: Option<&String>, actual: &str) -> bool {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::fake::FakeEvalTarget;
     use crate::scenario::{
         Budget, BudgetExpected, ContextPackExpected, EventAppendExpected, Expected, InputEvent,
         Scenario,
     };
+    use crate::target::FaultMode;
 
     #[test]
-    fn deterministic_replay_passes_same_turn_memory() {
+    fn deterministic_replay_passes_same_turn_memory() -> Result<(), EvalError> {
         let scenario = Scenario {
             id: "test".to_owned(),
             tags: Vec::new(),
@@ -525,15 +266,17 @@ mod tests {
                 }),
             },
         };
-        let first = replay_scenario(&scenario, ReplayOptions::default());
-        let second = replay_scenario(&scenario, ReplayOptions::default());
+        let target = FakeEvalTarget;
+        let first = replay_scenario(&scenario, &target, TargetRunOptions::default())?;
+        let second = replay_scenario(&scenario, &target, TargetRunOptions::default())?;
         assert!(first.ok);
         assert_eq!(first.checks.len(), second.checks.len());
         assert_eq!(first.ok, second.ok);
+        Ok(())
     }
 
     #[test]
-    fn seeded_fault_is_detected() {
+    fn seeded_fault_is_detected() -> Result<(), EvalError> {
         let scenario = Scenario {
             id: "test".to_owned(),
             tags: Vec::new(),
@@ -562,12 +305,15 @@ mod tests {
                 audit: None,
             },
         };
+        let target = FakeEvalTarget;
         let report = replay_scenario(
             &scenario,
-            ReplayOptions {
+            &target,
+            TargetRunOptions {
                 fault_mode: FaultMode::SkipClaims,
             },
-        );
+        )?;
         assert!(!report.ok);
+        Ok(())
     }
 }

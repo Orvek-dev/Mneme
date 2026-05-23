@@ -39,10 +39,10 @@ jobs:
             fi
           done
       - name: Eval core suite
-        run: cargo run -p mneme-eval -- run --suite core
+        run: cargo run -p mneme-eval -- run --suite core --target fake
       - name: Eval seeded fault check
         run: |
-          if cargo run -p mneme-eval -- run --suite core --seeded-fault skip-claims; then
+          if cargo run -p mneme-eval -- run --suite core --target fake --seeded-fault skip-claims; then
             echo "seeded fault unexpectedly passed"
             exit 1
           fi

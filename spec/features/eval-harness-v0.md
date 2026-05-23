@@ -42,6 +42,11 @@ reports.
   required fields, optional fields, report conventions, and seeded fault modes.
 - [REQ-EVAL-008][Ubiquitous] The eval harness shall validate scenario structure
   without replaying runtime behavior and shall fail malformed fixtures.
+- [REQ-EVAL-009][Ports-and-adapters] The eval harness shall execute scenarios
+  through a named target adapter boundary instead of coupling checks to one
+  runtime implementation.
+- [REQ-EVAL-010][Ubiquitous] Eval reports shall include the target name and a
+  report schema version for future compatibility checks.
 
 ## Verification Map
 
@@ -55,3 +60,5 @@ reports.
 | REQ-EVAL-006 | `--seeded-fault skip-claims` / `leak-secrets` tests | verified |
 | REQ-EVAL-007 | `docs/eval-scenario-format.md` | verified |
 | REQ-EVAL-008 | `mneme-eval validate --suite core` and invalid fixture CI check | verified |
+| REQ-EVAL-009 | `--target fake`, `EvalTarget`, and `docs/eval-target-adapter-contract.md` | verified |
+| REQ-EVAL-010 | JSON report fields `target` and `report_schema_version` | verified |
