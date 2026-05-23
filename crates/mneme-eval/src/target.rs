@@ -1,5 +1,6 @@
 use crate::error::EvalError;
 use crate::fake::FakeEvalTarget;
+use crate::mneme_v1::MnemeV1EvalTarget;
 use crate::scenario::Scenario;
 
 pub(crate) trait EvalTarget {
@@ -12,23 +13,26 @@ pub(crate) trait EvalTarget {
 #[derive(Debug, Clone, Copy, Eq, PartialEq)]
 pub(crate) enum TargetKind {
     Fake,
+    MnemeV1,
 }
 
 impl TargetKind {
     pub(crate) fn parse(value: &str) -> Option<Self> {
         match value {
             "fake" => Some(Self::Fake),
+            "mneme-v1" => Some(Self::MnemeV1),
             _ => None,
         }
     }
 
     pub(crate) fn available() -> &'static str {
-        "fake"
+        "fake, mneme-v1"
     }
 
     pub(crate) fn as_str(self) -> &'static str {
         match self {
             Self::Fake => "fake",
+            Self::MnemeV1 => "mneme-v1",
         }
     }
 }
@@ -78,6 +82,7 @@ impl Default for TargetRunOptions {
 pub(crate) fn build_target(kind: TargetKind) -> Box<dyn EvalTarget> {
     match kind {
         TargetKind::Fake => Box::new(FakeEvalTarget),
+        TargetKind::MnemeV1 => Box::new(MnemeV1EvalTarget),
     }
 }
 

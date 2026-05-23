@@ -37,19 +37,21 @@ Run a suite:
 
 ```sh
 cargo run -p mneme-eval -- run --suite core --target fake
+cargo run -p mneme-eval -- run --suite core --target mneme-v1
 ```
 
 Run the full harness acceptance gate:
 
 ```sh
 cargo run -p mneme-eval -- acceptance --suite core --target fake
+cargo run -p mneme-eval -- acceptance --suite core --target mneme-v1
 ```
 
 Use `--json` for machine-readable output and `--report <path>` to write a JSON
 report.
 
-`fake` is the default target. It is still useful to pass `--target fake` in CI so
-future targets can be added without making the active adapter ambiguous.
+`fake` is the default target. CI passes targets explicitly so future adapters
+cannot silently change what is being tested.
 
 ## Schema
 

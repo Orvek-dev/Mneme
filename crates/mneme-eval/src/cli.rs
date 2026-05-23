@@ -44,7 +44,7 @@ pub fn run_cli(args: impl IntoIterator<Item = String>) -> Result<(), EvalError> 
 fn print_doctor() {
     println!(
         "{PRODUCT_NAME} eval harness: {}",
-        BuildStage::Bootstrap.as_str()
+        BuildStage::PersonalCoreV1.as_str()
     );
     println!("available eval targets: {}", TargetKind::available());
 }
@@ -701,9 +701,21 @@ mod tests {
             "--suite".to_owned(),
             "core".to_owned(),
             "--target".to_owned(),
-            "mneme-v1".to_owned(),
+            "mneme-v2".to_owned(),
         ]);
         assert!(result.is_err());
+    }
+
+    #[test]
+    fn parse_suite_accepts_mneme_v1_target() -> Result<(), EvalError> {
+        let (_, options) = parse_suite_args(vec![
+            "--suite".to_owned(),
+            "core".to_owned(),
+            "--target".to_owned(),
+            "mneme-v1".to_owned(),
+        ])?;
+        assert_eq!(options.target_kind, TargetKind::MnemeV1);
+        Ok(())
     }
 
     #[test]

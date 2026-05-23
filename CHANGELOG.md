@@ -17,6 +17,10 @@ This project follows the spirit of Keep a Changelog.
 - Added report schema version and target metadata to eval JSON reports.
 - Added `mneme-eval acceptance` to gate Phase 1 readiness in CI.
 - Added public acceptance coverage and Phase 1 entry documentation.
+- Added Mneme v1 personal-memory core with in-memory events, claims, context,
+  budget, and audit state.
+- Added the `mneme-v1` eval target and CI coverage for the core suite and
+  acceptance gate.
 
 ## [0.0.1] - 2026-05-24
 

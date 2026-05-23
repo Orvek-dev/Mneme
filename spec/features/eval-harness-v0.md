@@ -65,7 +65,7 @@ reports.
 | REQ-EVAL-006 | `--seeded-fault skip-claims` / `leak-secrets` tests | verified |
 | REQ-EVAL-007 | `docs/eval-scenario-format.md` | verified |
 | REQ-EVAL-008 | `mneme-eval validate --suite core` and invalid fixture CI check | verified |
-| REQ-EVAL-009 | `--target fake`, `EvalTarget`, and `docs/eval-target-adapter-contract.md` | verified |
+| REQ-EVAL-009 | `--target fake`, `--target mneme-v1`, `EvalTarget`, and `docs/eval-target-adapter-contract.md` | verified |
 | REQ-EVAL-010 | JSON report fields `target` and `report_schema_version` | verified |
 | REQ-EVAL-011 | `mneme-eval acceptance --suite core --target fake` in CI | verified |
 | REQ-EVAL-012 | `docs/eval-harness-acceptance.md` | verified |

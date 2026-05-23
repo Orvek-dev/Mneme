@@ -40,6 +40,8 @@ jobs:
           done
       - name: Eval core suite
         run: cargo run -p mneme-eval -- run --suite core --target fake
+      - name: Eval Mneme v1 core suite
+        run: cargo run -p mneme-eval -- run --suite core --target mneme-v1
       - name: Eval seeded fault check
         run: |
           if cargo run -p mneme-eval -- run --suite core --target fake --seeded-fault skip-claims; then
@@ -48,3 +50,5 @@ jobs:
           fi
       - name: Eval acceptance gate
         run: cargo run -p mneme-eval -- acceptance --suite core --target fake
+      - name: Eval Mneme v1 acceptance gate
+        run: cargo run -p mneme-eval -- acceptance --suite core --target mneme-v1
