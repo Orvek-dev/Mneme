@@ -7,8 +7,9 @@ use serde::Serialize;
 
 use crate::error::EvalError;
 use crate::report::{EvalReport, ScenarioReport, ScenarioValidationReport, ValidationReport};
-use crate::runtime::{replay_scenario, FaultMode, ReplayOptions};
+use crate::runtime::replay_scenario;
 use crate::scenario::load_scenario;
+use crate::target::{build_target, FaultMode, TargetKind, TargetRunOptions};
 
 /// Runs the Mneme eval harness command-line interface.
 pub fn run_cli(args: impl IntoIterator<Item = String>) -> Result<(), EvalError> {
@@ -41,12 +42,14 @@ fn print_doctor() {
         "{PRODUCT_NAME} eval harness: {}",
         BuildStage::Bootstrap.as_str()
     );
+    println!("available eval targets: {}", TargetKind::available());
 }
 
 #[derive(Debug, Clone)]
 struct CommandOptions {
     json: bool,
     report_path: Option<PathBuf>,
+    target_kind: TargetKind,
     fault_mode: FaultMode,
 }
 
@@ -55,6 +58,7 @@ impl Default for CommandOptions {
         Self {
             json: false,
             report_path: None,
+            target_kind: TargetKind::Fake,
             fault_mode: FaultMode::None,
         }
     }
@@ -101,13 +105,15 @@ fn validate_paths(paths: Vec<PathBuf>) -> ValidationReport {
 fn run_replay(raw_args: Vec<String>) -> Result<(), EvalError> {
     let (path, options) = parse_replay_args(raw_args)?;
     let scenario = load_scenario(&path)?;
+    let target = build_target(options.target_kind);
     let scenario_report = replay_scenario(
         &scenario,
-        ReplayOptions {
+        target.as_ref(),
+        TargetRunOptions {
             fault_mode: options.fault_mode,
         },
-    );
-    let report = EvalReport::from_results(vec![scenario_report]);
+    )?;
+    let report = EvalReport::from_results(target.name(), vec![scenario_report]);
     emit_report(&report, &options)?;
     if report.ok {
         Ok(())
@@ -119,17 +125,20 @@ fn run_replay(raw_args: Vec<String>) -> Result<(), EvalError> {
 fn run_suite(raw_args: Vec<String>) -> Result<(), EvalError> {
     let (suite, options) = parse_suite_args(raw_args)?;
     let paths = scenario_paths_for_suite(&suite)?;
+    let target = build_target(options.target_kind);
+    let target_name = target.name();
     let mut results = Vec::new();
     for path in paths {
         let scenario = load_scenario(&path)?;
         results.push(replay_scenario(
             &scenario,
-            ReplayOptions {
+            target.as_ref(),
+            TargetRunOptions {
                 fault_mode: options.fault_mode,
             },
-        ));
+        )?);
     }
-    let report = EvalReport::from_results(results);
+    let report = EvalReport::from_results(target_name, results);
     emit_report(&report, &options)?;
     if report.ok {
         Ok(())
@@ -202,6 +211,13 @@ fn parse_replay_args(raw_args: Vec<String>) -> Result<(PathBuf, CommandOptions),
                 };
                 options.report_path = Some(PathBuf::from(value));
             }
+            "--target" => {
+                idx += 1;
+                let Some(value) = raw_args.get(idx) else {
+                    return Err(EvalError::invalid_cli("--target requires a name"));
+                };
+                options.target_kind = parse_target_kind(value)?;
+            }
             "--seeded-fault" => {
                 idx += 1;
                 let Some(value) = raw_args.get(idx) else {
@@ -227,7 +243,7 @@ fn parse_replay_args(raw_args: Vec<String>) -> Result<(PathBuf, CommandOptions),
     }
     let Some(path) = path else {
         return Err(EvalError::invalid_cli(
-            "usage: mneme-eval replay <scenario.yaml> [--json] [--report <path>]",
+            "usage: mneme-eval replay <scenario.yaml> [--target fake] [--json] [--report <path>]",
         ));
     };
     Ok((path, options))
@@ -254,6 +270,13 @@ fn parse_suite_args(raw_args: Vec<String>) -> Result<(String, CommandOptions), E
                 };
                 options.report_path = Some(PathBuf::from(value));
             }
+            "--target" => {
+                idx += 1;
+                let Some(value) = raw_args.get(idx) else {
+                    return Err(EvalError::invalid_cli("--target requires a name"));
+                };
+                options.target_kind = parse_target_kind(value)?;
+            }
             "--seeded-fault" => {
                 idx += 1;
                 let Some(value) = raw_args.get(idx) else {
@@ -272,6 +295,15 @@ fn parse_suite_args(raw_args: Vec<String>) -> Result<(String, CommandOptions), E
         idx += 1;
     }
     Ok((suite.unwrap_or_else(|| "core".to_owned()), options))
+}
+
+fn parse_target_kind(value: &str) -> Result<TargetKind, EvalError> {
+    TargetKind::parse(value).ok_or_else(|| {
+        EvalError::invalid_cli(format!(
+            "unknown eval target: {value}\navailable targets: {}",
+            TargetKind::available()
+        ))
+    })
 }
 
 fn scenario_paths_for_suite(suite: &str) -> Result<Vec<PathBuf>, EvalError> {
@@ -355,8 +387,8 @@ fn write_report<T: Serialize>(path: &Path, report: &T) -> Result<(), EvalError> 
 
 fn print_human_report(report: &EvalReport) {
     println!(
-        "eval: {} scenario(s), {} passed, {} failed",
-        report.scenario_count, report.passed, report.failed
+        "eval: target={}, {} scenario(s), {} passed, {} failed",
+        report.target, report.scenario_count, report.passed, report.failed
     );
     for scenario in &report.results {
         print_scenario_report(scenario);
@@ -404,6 +436,28 @@ mod tests {
     #[test]
     fn parse_replay_requires_path() {
         let result = parse_replay_args(vec!["--json".to_owned()]);
+        assert!(result.is_err());
+    }
+
+    #[test]
+    fn parse_replay_accepts_explicit_fake_target() -> Result<(), EvalError> {
+        let (_, options) = parse_replay_args(vec![
+            "scenario.yaml".to_owned(),
+            "--target".to_owned(),
+            "fake".to_owned(),
+        ])?;
+        assert_eq!(options.target_kind, TargetKind::Fake);
+        Ok(())
+    }
+
+    #[test]
+    fn parse_suite_rejects_unknown_target() {
+        let result = parse_suite_args(vec![
+            "--suite".to_owned(),
+            "core".to_owned(),
+            "--target".to_owned(),
+            "mneme-v1".to_owned(),
+        ]);
         assert!(result.is_err());
     }
 
