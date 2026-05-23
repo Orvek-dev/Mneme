@@ -34,6 +34,7 @@ __pycache__/
 .mypy_cache/
 
 # Local databases and generated runtime state
+.mneme/
 *.sqlite
 *.sqlite3
 *.db

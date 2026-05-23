@@ -28,6 +28,14 @@ jobs:
         run: cargo test --workspace --all-targets
       - name: Eval harness doctor
         run: cargo run -p mneme-eval -- doctor
+      - name: Local CLI doctor
+        run: cargo run -p mneme-cli -- doctor
+      - name: Local CLI smoke
+        run: |
+          STORE="${RUNNER_TEMP}/mneme-cli-smoke.json"
+          cargo run -p mneme-cli -- remember "user prefers local-first tools" --store "${STORE}"
+          cargo run -p mneme-cli -- context "local-first" --store "${STORE}" --json | tee "${RUNNER_TEMP}/mneme-cli-context.json"
+          grep -q "local-first tools" "${RUNNER_TEMP}/mneme-cli-context.json"
       - name: Eval scenario validation
         run: cargo run -p mneme-eval -- validate --suite core
       - name: Eval invalid fixture check
