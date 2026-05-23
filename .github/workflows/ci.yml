@@ -28,3 +28,11 @@ jobs:
         run: cargo test --workspace --all-targets
       - name: Eval harness doctor
         run: cargo run -p mneme-eval -- doctor
+      - name: Eval core suite
+        run: cargo run -p mneme-eval -- run --suite core
+      - name: Eval seeded fault check
+        run: |
+          if cargo run -p mneme-eval -- run --suite core --seeded-fault skip-claims; then
+            echo "seeded fault unexpectedly passed"
+            exit 1
+          fi

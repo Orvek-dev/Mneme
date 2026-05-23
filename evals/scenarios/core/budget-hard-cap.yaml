@@ -1,0 +1,21 @@
+id: budget-hard-cap
+tags:
+  - budget
+budget:
+  daily_cloud_tokens: 2
+events:
+  - speaker_id: user
+    actor_agent_id: codex
+    scope: private
+    trust_level: trusted_user
+    text: "remember: user prefers local-first tools"
+expected:
+  event_append:
+    count: 1
+  claims:
+    - subject: user
+      predicate: prefers
+      object: local-first tools
+      must_not_exist: true
+  budget:
+    hard_cap_violations: 1

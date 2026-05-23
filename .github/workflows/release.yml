@@ -23,6 +23,7 @@ jobs:
           cargo clippy --workspace --all-targets -- -D warnings
           cargo test --workspace --all-targets
           cargo run -p mneme-eval -- doctor
+          cargo run -p mneme-eval -- run --suite core
       - name: Create GitHub release
         env:
           # Orvek-dev currently caps GITHUB_TOKEN to read-only. Set a
