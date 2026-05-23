@@ -1,0 +1,86 @@
+# macOS and editor noise
+.DS_Store
+Thumbs.db
+*.swp
+*.swo
+.idea/
+.vscode/
+
+# Environment and secrets
+.env
+.env.*
+!.env.example
+*.pem
+*.key
+*.p12
+*.pfx
+*.crt
+*.cer
+secrets/
+
+# Dependency and build output
+node_modules/
+dist/
+build/
+target/
+.next/
+.turbo/
+.cache/
+coverage/
+__pycache__/
+*.py[cod]
+.pytest_cache/
+.ruff_cache/
+.mypy_cache/
+
+# Local databases and generated runtime state
+*.sqlite
+*.sqlite3
+*.db
+*.db-wal
+*.db-shm
+*.log
+tmp/
+temp/
+
+# Eval outputs are generated; scenario fixtures should remain trackable.
+evals/reports/*
+!evals/reports/.gitkeep
+evals/runs/
+benchmarks/results/*
+!benchmarks/results/.gitkeep
+
+# Local AI / vibe-coding harness files. These are development control-plane
+# files, not public Mneme product source.
+AGENTS.md
+CLAUDE.md
+ETHOS.md
+.agents/
+.claude/
+.codex/
+harness/
+templates/
+Prompt.md
+Plan.md
+Implement.md
+Documentation.md
+Automation-Intent.md
+Subagent-Manifest.md
+Design-Options.md
+PM-Brief.md
+Quality-Rubric.md
+Review.md
+Simplicity-Review.md
+Strict-Adoption.md
+Task-Profile.json
+UI-UX-Brief.md
+UI-Review.md
+Visual-Evidence.md
+Memory-Proposal.md
+Proposed-Skill.md
+
+# Accidental local template copies
+*private_template*/
+*_harness*/
+Vibebuilder/
+Packly*/
