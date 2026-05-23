@@ -1,10 +1,13 @@
 use crate::error::EvalError;
 use crate::fake::FakeEvalTarget;
-use crate::mneme_v1::MnemeV1EvalTarget;
+use crate::mneme_v1::{MnemeV1CommandEvalTarget, MnemeV1EvalTarget};
 use crate::scenario::Scenario;
+use serde::Serialize;
 
 pub(crate) trait EvalTarget {
     fn name(&self) -> &'static str;
+
+    fn metadata(&self, options: &TargetRunOptions) -> EvalTargetMetadata;
 
     fn run(&self, scenario: &Scenario, options: TargetRunOptions)
         -> Result<ActualState, EvalError>;
@@ -14,6 +17,7 @@ pub(crate) trait EvalTarget {
 pub(crate) enum TargetKind {
     Fake,
     MnemeV1,
+    MnemeV1Command,
 }
 
 impl TargetKind {
@@ -21,18 +25,20 @@ impl TargetKind {
         match value {
             "fake" => Some(Self::Fake),
             "mneme-v1" => Some(Self::MnemeV1),
+            "mneme-v1-command" => Some(Self::MnemeV1Command),
             _ => None,
         }
     }
 
     pub(crate) fn available() -> &'static str {
-        "fake, mneme-v1"
+        "fake, mneme-v1, mneme-v1-command"
     }
 
     pub(crate) fn as_str(self) -> &'static str {
         match self {
             Self::Fake => "fake",
             Self::MnemeV1 => "mneme-v1",
+            Self::MnemeV1Command => "mneme-v1-command",
         }
     }
 }
@@ -66,15 +72,61 @@ impl FaultMode {
     }
 }
 
-#[derive(Debug, Clone, Copy)]
+#[derive(Debug, Clone)]
 pub(crate) struct TargetRunOptions {
     pub(crate) fault_mode: FaultMode,
+    pub(crate) command_extractor: Option<CommandExtractorOptions>,
 }
 
 impl Default for TargetRunOptions {
     fn default() -> Self {
         Self {
             fault_mode: FaultMode::None,
+            command_extractor: None,
+        }
+    }
+}
+
+#[derive(Debug, Clone, Eq, PartialEq)]
+pub(crate) struct CommandExtractorOptions {
+    pub(crate) program: String,
+    pub(crate) args: Vec<String>,
+}
+
+#[derive(Debug, Clone, Serialize)]
+pub(crate) struct EvalTargetMetadata {
+    pub(crate) extractor: String,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub(crate) protocol: Option<String>,
+    pub(crate) opt_in: bool,
+    pub(crate) command_configured: bool,
+}
+
+impl EvalTargetMetadata {
+    pub(crate) fn fake() -> Self {
+        Self {
+            extractor: "fixture".to_owned(),
+            protocol: None,
+            opt_in: false,
+            command_configured: false,
+        }
+    }
+
+    pub(crate) fn rule_based() -> Self {
+        Self {
+            extractor: "rule-based".to_owned(),
+            protocol: None,
+            opt_in: false,
+            command_configured: false,
+        }
+    }
+
+    pub(crate) fn command(configured: bool) -> Self {
+        Self {
+            extractor: "command".to_owned(),
+            protocol: Some(mneme_core::EXTRACTOR_COMMAND_SCHEMA_VERSION.to_owned()),
+            opt_in: true,
+            command_configured: configured,
         }
     }
 }
@@ -83,6 +135,7 @@ pub(crate) fn build_target(kind: TargetKind) -> Box<dyn EvalTarget> {
     match kind {
         TargetKind::Fake => Box::new(FakeEvalTarget),
         TargetKind::MnemeV1 => Box::new(MnemeV1EvalTarget),
+        TargetKind::MnemeV1Command => Box::new(MnemeV1CommandEvalTarget),
     }
 }
 

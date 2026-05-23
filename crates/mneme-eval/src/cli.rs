@@ -12,7 +12,9 @@ use crate::report::{
 };
 use crate::runtime::replay_scenario;
 use crate::scenario::load_scenario;
-use crate::target::{build_target, FaultMode, TargetKind, TargetRunOptions};
+use crate::target::{
+    build_target, CommandExtractorOptions, FaultMode, TargetKind, TargetRunOptions,
+};
 
 /// Runs the Mneme eval harness command-line interface.
 pub fn run_cli(args: impl IntoIterator<Item = String>) -> Result<(), EvalError> {
@@ -55,6 +57,8 @@ struct CommandOptions {
     report_path: Option<PathBuf>,
     target_kind: TargetKind,
     fault_mode: FaultMode,
+    extractor_command: Option<String>,
+    extractor_args: Vec<String>,
 }
 
 impl Default for CommandOptions {
@@ -64,6 +68,8 @@ impl Default for CommandOptions {
             report_path: None,
             target_kind: TargetKind::Fake,
             fault_mode: FaultMode::None,
+            extractor_command: None,
+            extractor_args: Vec::new(),
         }
     }
 }
@@ -108,7 +114,7 @@ fn validate_paths(paths: Vec<PathBuf>) -> ValidationReport {
 
 fn run_acceptance(raw_args: Vec<String>) -> Result<(), EvalError> {
     let (suite, options) = parse_acceptance_args(raw_args)?;
-    let report = build_acceptance_report(&suite, options.target_kind);
+    let report = build_acceptance_report(&suite, &options);
     emit_acceptance_report(&report, &options)?;
     if report.ok {
         Ok(())
@@ -117,7 +123,8 @@ fn run_acceptance(raw_args: Vec<String>) -> Result<(), EvalError> {
     }
 }
 
-fn build_acceptance_report(suite: &str, target_kind: TargetKind) -> AcceptanceReport {
+fn build_acceptance_report(suite: &str, options: &CommandOptions) -> AcceptanceReport {
+    let target_kind = options.target_kind;
     let target_name = target_kind.as_str();
     let mut gates = Vec::new();
     let paths = match scenario_paths_for_suite(suite) {
@@ -149,7 +156,9 @@ fn build_acceptance_report(suite: &str, target_kind: TargetKind) -> AcceptanceRe
 
     gates.push(check_invalid_fixtures_are_rejected());
 
-    let suite_report = eval_report_for_paths(&paths, target_kind, FaultMode::None);
+    let mut suite_options = options.clone();
+    suite_options.fault_mode = FaultMode::None;
+    let suite_report = eval_report_for_paths(&paths, &suite_options);
     match &suite_report {
         Ok(report) if report.ok => gates.push(AcceptanceGateReport::pass(
             "target.core-suite",
@@ -175,12 +184,13 @@ fn build_acceptance_report(suite: &str, target_kind: TargetKind) -> AcceptanceRe
         Ok(report)
             if report.report_schema_version == 1
                 && report.target == target_name
+                && !report.target_metadata.extractor.is_empty()
                 && report.scenario_count == paths.len()
                 && !report.results.is_empty() =>
         {
             gates.push(AcceptanceGateReport::pass(
                 "report.contract",
-                "schema version, target, counts, and results are present",
+                "schema version, target metadata, counts, and results are present",
             ));
         }
         Ok(_) => {
@@ -205,6 +215,7 @@ fn build_acceptance_report(suite: &str, target_kind: TargetKind) -> AcceptanceRe
         gates.push(check_seeded_fault_is_detected(
             &paths,
             target_kind,
+            options,
             fault_mode,
         ));
     }
@@ -247,10 +258,14 @@ fn check_invalid_fixtures_are_rejected() -> AcceptanceGateReport {
 fn check_seeded_fault_is_detected(
     paths: &[PathBuf],
     target_kind: TargetKind,
+    options: &CommandOptions,
     fault_mode: FaultMode,
 ) -> AcceptanceGateReport {
     let gate_name = format!("seeded-fault.{}", fault_mode.as_str());
-    match eval_report_for_paths(paths, target_kind, fault_mode) {
+    let mut fault_options = options.clone();
+    fault_options.target_kind = target_kind;
+    fault_options.fault_mode = fault_mode;
+    match eval_report_for_paths(paths, &fault_options) {
         Ok(report) if !report.ok => AcceptanceGateReport::pass(
             gate_name,
             format!(
@@ -271,7 +286,7 @@ fn check_seeded_fault_is_detected(
 
 fn run_replay(raw_args: Vec<String>) -> Result<(), EvalError> {
     let (path, options) = parse_replay_args(raw_args)?;
-    let report = eval_report_for_paths(&[path], options.target_kind, options.fault_mode)?;
+    let report = eval_report_for_paths(&[path], &options)?;
     emit_report(&report, &options)?;
     if report.ok {
         Ok(())
@@ -283,7 +298,7 @@ fn run_replay(raw_args: Vec<String>) -> Result<(), EvalError> {
 fn run_suite(raw_args: Vec<String>) -> Result<(), EvalError> {
     let (suite, options) = parse_suite_args(raw_args)?;
     let paths = scenario_paths_for_suite(&suite)?;
-    let report = eval_report_for_paths(&paths, options.target_kind, options.fault_mode)?;
+    let report = eval_report_for_paths(&paths, &options)?;
     emit_report(&report, &options)?;
     if report.ok {
         Ok(())
@@ -294,21 +309,45 @@ fn run_suite(raw_args: Vec<String>) -> Result<(), EvalError> {
 
 fn eval_report_for_paths(
     paths: &[PathBuf],
-    target_kind: TargetKind,
-    fault_mode: FaultMode,
+    options: &CommandOptions,
 ) -> Result<EvalReport, EvalError> {
-    let target = build_target(target_kind);
+    let target = build_target(options.target_kind);
     let target_name = target.name();
+    let run_options = target_run_options(options);
+    let target_metadata = target.metadata(&run_options);
     let mut results = Vec::new();
     for path in paths {
         let scenario = load_scenario(path)?;
         results.push(replay_scenario(
             &scenario,
             target.as_ref(),
-            TargetRunOptions { fault_mode },
+            run_options.clone(),
         )?);
     }
-    Ok(EvalReport::from_results(target_name, results))
+    Ok(EvalReport::from_results(
+        target_name,
+        target_metadata,
+        results,
+    ))
+}
+
+fn target_run_options(options: &CommandOptions) -> TargetRunOptions {
+    TargetRunOptions {
+        fault_mode: options.fault_mode,
+        command_extractor: command_extractor_options(options),
+    }
+}
+
+fn command_extractor_options(options: &CommandOptions) -> Option<CommandExtractorOptions> {
+    let program = options
+        .extractor_command
+        .clone()
+        .or_else(|| env::var("MNEME_EVAL_EXTRACTOR_COMMAND").ok())
+        .filter(|value| !value.trim().is_empty())?;
+    Some(CommandExtractorOptions {
+        program,
+        args: options.extractor_args.clone(),
+    })
 }
 
 fn parse_validate_args(
@@ -381,6 +420,22 @@ fn parse_acceptance_args(raw_args: Vec<String>) -> Result<(String, CommandOption
                 };
                 options.target_kind = parse_target_kind(value)?;
             }
+            "--extractor-command" => {
+                idx += 1;
+                let Some(value) = raw_args.get(idx) else {
+                    return Err(EvalError::invalid_cli(
+                        "--extractor-command requires a program",
+                    ));
+                };
+                options.extractor_command = Some(value.clone());
+            }
+            "--extractor-arg" => {
+                idx += 1;
+                let Some(value) = raw_args.get(idx) else {
+                    return Err(EvalError::invalid_cli("--extractor-arg requires a value"));
+                };
+                options.extractor_args.push(value.clone());
+            }
             "--json" => options.json = true,
             "--report" => {
                 idx += 1;
@@ -421,6 +476,22 @@ fn parse_replay_args(raw_args: Vec<String>) -> Result<(PathBuf, CommandOptions),
                 };
                 options.target_kind = parse_target_kind(value)?;
             }
+            "--extractor-command" => {
+                idx += 1;
+                let Some(value) = raw_args.get(idx) else {
+                    return Err(EvalError::invalid_cli(
+                        "--extractor-command requires a program",
+                    ));
+                };
+                options.extractor_command = Some(value.clone());
+            }
+            "--extractor-arg" => {
+                idx += 1;
+                let Some(value) = raw_args.get(idx) else {
+                    return Err(EvalError::invalid_cli("--extractor-arg requires a value"));
+                };
+                options.extractor_args.push(value.clone());
+            }
             "--seeded-fault" => {
                 idx += 1;
                 let Some(value) = raw_args.get(idx) else {
@@ -446,7 +517,7 @@ fn parse_replay_args(raw_args: Vec<String>) -> Result<(PathBuf, CommandOptions),
     }
     let Some(path) = path else {
         return Err(EvalError::invalid_cli(
-            "usage: mneme-eval replay <scenario.yaml> [--target fake] [--json] [--report <path>]",
+            "usage: mneme-eval replay <scenario.yaml> [--target fake|mneme-v1|mneme-v1-command] [--extractor-command <program>] [--extractor-arg <arg>]... [--json] [--report <path>]",
         ));
     };
     Ok((path, options))
@@ -479,6 +550,22 @@ fn parse_suite_args(raw_args: Vec<String>) -> Result<(String, CommandOptions), E
                     return Err(EvalError::invalid_cli("--target requires a name"));
                 };
                 options.target_kind = parse_target_kind(value)?;
+            }
+            "--extractor-command" => {
+                idx += 1;
+                let Some(value) = raw_args.get(idx) else {
+                    return Err(EvalError::invalid_cli(
+                        "--extractor-command requires a program",
+                    ));
+                };
+                options.extractor_command = Some(value.clone());
+            }
+            "--extractor-arg" => {
+                idx += 1;
+                let Some(value) = raw_args.get(idx) else {
+                    return Err(EvalError::invalid_cli("--extractor-arg requires a value"));
+                };
+                options.extractor_args.push(value.clone());
             }
             "--seeded-fault" => {
                 idx += 1;
@@ -715,6 +802,27 @@ mod tests {
             "mneme-v1".to_owned(),
         ])?;
         assert_eq!(options.target_kind, TargetKind::MnemeV1);
+        Ok(())
+    }
+
+    #[test]
+    fn parse_suite_accepts_command_target_and_extractor_command() -> Result<(), EvalError> {
+        let (_, options) = parse_suite_args(vec![
+            "--suite".to_owned(),
+            "model".to_owned(),
+            "--target".to_owned(),
+            "mneme-v1-command".to_owned(),
+            "--extractor-command".to_owned(),
+            "evals/fixtures/command-extractor.sh".to_owned(),
+            "--extractor-arg".to_owned(),
+            "--example".to_owned(),
+        ])?;
+        assert_eq!(options.target_kind, TargetKind::MnemeV1Command);
+        assert_eq!(
+            options.extractor_command.as_deref(),
+            Some("evals/fixtures/command-extractor.sh")
+        );
+        assert_eq!(options.extractor_args, vec!["--example"]);
         Ok(())
     }
 

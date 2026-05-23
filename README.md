@@ -68,6 +68,15 @@ cargo run -p mneme-eval -- run --suite core --target fake
 cargo run -p mneme-eval -- run --suite core --target mneme-v1
 ```
 
+Run the opt-in command extraction suite:
+
+```sh
+cargo run -p mneme-eval -- validate --suite model
+cargo run -p mneme-eval -- run --suite model \
+  --target mneme-v1-command \
+  --extractor-command evals/fixtures/command-extractor.sh
+```
+
 Run the acceptance gate:
 
 ```sh
@@ -88,6 +97,7 @@ cargo test --workspace --all-targets
 cargo run -p mneme-cli -- doctor
 cargo run -p mneme-eval -- acceptance --suite core --target fake
 cargo run -p mneme-eval -- acceptance --suite core --target mneme-v1
+cargo run -p mneme-eval -- acceptance --suite model --target mneme-v1-command --extractor-command evals/fixtures/command-extractor.sh
 ```
 
 Generated eval reports and local stores are ignored. Public scenarios under
