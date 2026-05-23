@@ -54,6 +54,16 @@ pub(crate) struct Expected {
     pub(crate) audit: Option<AuditExpected>,
 }
 
+impl Expected {
+    fn is_empty(&self) -> bool {
+        self.event_append.is_none()
+            && self.claims.is_empty()
+            && self.context_pack.is_none()
+            && self.budget.is_none()
+            && self.audit.is_none()
+    }
+}
+
 #[derive(Debug, Clone, Deserialize)]
 #[serde(deny_unknown_fields)]
 pub(crate) struct EventAppendExpected {
@@ -107,6 +117,12 @@ fn validate_scenario(scenario: &Scenario, path: &Path) -> Result<(), EvalError> 
             path.display()
         )));
     }
+    if scenario.budget.daily_cloud_tokens == 0 {
+        return Err(EvalError::scenario(format!(
+            "scenario {} has a zero daily_cloud_tokens budget",
+            scenario.id
+        )));
+    }
     if scenario.events.is_empty() {
         return Err(EvalError::scenario(format!(
             "scenario {} has no events",
@@ -126,6 +142,79 @@ fn validate_scenario(scenario: &Scenario, path: &Path) -> Result<(), EvalError> 
                 "scenario {} event {} has empty text",
                 scenario.id,
                 idx + 1
+            )));
+        }
+    }
+    if scenario.expected.is_empty() {
+        return Err(EvalError::scenario(format!(
+            "scenario {} has no expected checks",
+            scenario.id
+        )));
+    }
+    for (idx, claim) in scenario.expected.claims.iter().enumerate() {
+        if claim.subject.trim().is_empty() {
+            return Err(EvalError::scenario(format!(
+                "scenario {} expected claim {} has an empty subject",
+                scenario.id,
+                idx + 1
+            )));
+        }
+        if claim.predicate.trim().is_empty() {
+            return Err(EvalError::scenario(format!(
+                "scenario {} expected claim {} has an empty predicate",
+                scenario.id,
+                idx + 1
+            )));
+        }
+        if claim.object.trim().is_empty() {
+            return Err(EvalError::scenario(format!(
+                "scenario {} expected claim {} has an empty object",
+                scenario.id,
+                idx + 1
+            )));
+        }
+        if claim
+            .status
+            .as_ref()
+            .is_some_and(|status| status.trim().is_empty())
+        {
+            return Err(EvalError::scenario(format!(
+                "scenario {} expected claim {} has an empty status",
+                scenario.id,
+                idx + 1
+            )));
+        }
+        if claim
+            .scope
+            .as_ref()
+            .is_some_and(|scope| scope.trim().is_empty())
+        {
+            return Err(EvalError::scenario(format!(
+                "scenario {} expected claim {} has an empty scope",
+                scenario.id,
+                idx + 1
+            )));
+        }
+    }
+    if let Some(context_pack) = &scenario.expected.context_pack {
+        if context_pack
+            .must_include
+            .iter()
+            .any(|needle| needle.trim().is_empty())
+        {
+            return Err(EvalError::scenario(format!(
+                "scenario {} context_pack has an empty must_include entry",
+                scenario.id
+            )));
+        }
+        if context_pack
+            .must_not_include
+            .iter()
+            .any(|needle| needle.trim().is_empty())
+        {
+            return Err(EvalError::scenario(format!(
+                "scenario {} context_pack has an empty must_not_include entry",
+                scenario.id
             )));
         }
     }

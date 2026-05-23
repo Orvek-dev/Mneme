@@ -28,6 +28,16 @@ jobs:
         run: cargo test --workspace --all-targets
       - name: Eval harness doctor
         run: cargo run -p mneme-eval -- doctor
+      - name: Eval scenario validation
+        run: cargo run -p mneme-eval -- validate --suite core
+      - name: Eval invalid fixture check
+        run: |
+          for scenario in evals/fixtures/invalid/*.yaml; do
+            if cargo run -p mneme-eval -- validate "$scenario"; then
+              echo "invalid scenario unexpectedly passed validation: $scenario"
+              exit 1
+            fi
+          done
       - name: Eval core suite
         run: cargo run -p mneme-eval -- run --suite core
       - name: Eval seeded fault check
