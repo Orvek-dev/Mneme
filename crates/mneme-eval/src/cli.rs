@@ -3,9 +3,10 @@ use std::fs;
 use std::path::{Path, PathBuf};
 
 use mneme_core::{BuildStage, PRODUCT_NAME};
+use serde::Serialize;
 
 use crate::error::EvalError;
-use crate::report::{EvalReport, ScenarioReport};
+use crate::report::{EvalReport, ScenarioReport, ScenarioValidationReport, ValidationReport};
 use crate::runtime::{replay_scenario, FaultMode, ReplayOptions};
 use crate::scenario::load_scenario;
 
@@ -26,10 +27,11 @@ pub fn run_cli(args: impl IntoIterator<Item = String>) -> Result<(), EvalError> 
             println!("{}", env!("CARGO_PKG_VERSION"));
             Ok(())
         }
+        "validate" => run_validate(args.collect()),
         "replay" => run_replay(args.collect()),
         "run" => run_suite(args.collect()),
         _ => Err(EvalError::invalid_cli(format!(
-            "unknown mneme-eval command: {command}\navailable commands: doctor, version, replay, run"
+            "unknown mneme-eval command: {command}\navailable commands: doctor, version, validate, replay, run"
         ))),
     }
 }
@@ -56,6 +58,44 @@ impl Default for CommandOptions {
             fault_mode: FaultMode::None,
         }
     }
+}
+
+#[derive(Debug, Clone)]
+enum ValidationTarget {
+    Scenario(PathBuf),
+    Suite(String),
+}
+
+fn run_validate(raw_args: Vec<String>) -> Result<(), EvalError> {
+    let (target, options) = parse_validate_args(raw_args)?;
+    let paths = match target {
+        ValidationTarget::Scenario(path) => vec![path],
+        ValidationTarget::Suite(suite) => scenario_paths_for_suite(&suite)?,
+    };
+    let report = validate_paths(paths);
+    emit_validation_report(&report, &options)?;
+    if report.ok {
+        Ok(())
+    } else {
+        Err(EvalError::scenario("scenario validation failed"))
+    }
+}
+
+fn validate_paths(paths: Vec<PathBuf>) -> ValidationReport {
+    let results = paths
+        .iter()
+        .map(|path| match load_scenario(path) {
+            Ok(scenario) => ScenarioValidationReport::pass(
+                path.display().to_string(),
+                scenario.id,
+                scenario.tags,
+            ),
+            Err(error) => {
+                ScenarioValidationReport::fail(path.display().to_string(), error.to_string())
+            }
+        })
+        .collect();
+    ValidationReport::from_results(results)
 }
 
 fn run_replay(raw_args: Vec<String>) -> Result<(), EvalError> {
@@ -95,6 +135,56 @@ fn run_suite(raw_args: Vec<String>) -> Result<(), EvalError> {
         Ok(())
     } else {
         Err(EvalError::scenario("eval failed"))
+    }
+}
+
+fn parse_validate_args(
+    raw_args: Vec<String>,
+) -> Result<(ValidationTarget, CommandOptions), EvalError> {
+    let mut path = None;
+    let mut suite = None;
+    let mut options = CommandOptions::default();
+    let mut idx = 0;
+    while idx < raw_args.len() {
+        match raw_args[idx].as_str() {
+            "--suite" => {
+                idx += 1;
+                let Some(value) = raw_args.get(idx) else {
+                    return Err(EvalError::invalid_cli("--suite requires a name"));
+                };
+                suite = Some(value.clone());
+            }
+            "--json" => options.json = true,
+            "--report" => {
+                idx += 1;
+                let Some(value) = raw_args.get(idx) else {
+                    return Err(EvalError::invalid_cli("--report requires a path"));
+                };
+                options.report_path = Some(PathBuf::from(value));
+            }
+            value if value.starts_with('-') => {
+                return Err(EvalError::invalid_cli(format!(
+                    "unknown validate option: {value}"
+                )));
+            }
+            value => {
+                if path.is_some() {
+                    return Err(EvalError::invalid_cli("validate accepts one scenario path"));
+                }
+                path = Some(PathBuf::from(value));
+            }
+        }
+        idx += 1;
+    }
+    match (path, suite) {
+        (Some(path), None) => Ok((ValidationTarget::Scenario(path), options)),
+        (None, Some(suite)) => Ok((ValidationTarget::Suite(suite), options)),
+        (None, None) => Err(EvalError::invalid_cli(
+            "usage: mneme-eval validate <scenario.yaml> [--json] [--report <path>] or mneme-eval validate --suite <name> [--json] [--report <path>]",
+        )),
+        (Some(_), Some(_)) => Err(EvalError::invalid_cli(
+            "validate accepts either one scenario path or --suite, not both",
+        )),
     }
 }
 
@@ -234,8 +324,28 @@ fn emit_report(report: &EvalReport, options: &CommandOptions) -> Result<(), Eval
     Ok(())
 }
 
-fn write_report(path: &Path, report: &EvalReport) -> Result<(), EvalError> {
-    if let Some(parent) = path.parent() {
+fn emit_validation_report(
+    report: &ValidationReport,
+    options: &CommandOptions,
+) -> Result<(), EvalError> {
+    if let Some(path) = &options.report_path {
+        write_report(path, report)?;
+    }
+    if options.json {
+        let json = serde_json::to_string_pretty(report)
+            .map_err(|source| EvalError::json(Path::new("<stdout>"), source))?;
+        println!("{json}");
+    } else {
+        print_validation_report(report);
+    }
+    Ok(())
+}
+
+fn write_report<T: Serialize>(path: &Path, report: &T) -> Result<(), EvalError> {
+    if let Some(parent) = path
+        .parent()
+        .filter(|parent| !parent.as_os_str().is_empty())
+    {
         fs::create_dir_all(parent).map_err(|source| EvalError::io("create dir", parent, source))?;
     }
     let json =
@@ -250,6 +360,23 @@ fn print_human_report(report: &EvalReport) {
     );
     for scenario in &report.results {
         print_scenario_report(scenario);
+    }
+}
+
+fn print_validation_report(report: &ValidationReport) {
+    println!(
+        "validation: {} scenario(s), {} valid, {} invalid",
+        report.scenario_count, report.valid, report.invalid
+    );
+    for result in &report.results {
+        let status = if result.ok { "PASS" } else { "FAIL" };
+        match &result.scenario_id {
+            Some(scenario_id) => println!("- {status} {} ({scenario_id})", result.path),
+            None => println!("- {status} {}", result.path),
+        }
+        if let Some(error) = &result.error {
+            println!("  - {error}");
+        }
     }
 }
 
@@ -278,6 +405,42 @@ mod tests {
     fn parse_replay_requires_path() {
         let result = parse_replay_args(vec!["--json".to_owned()]);
         assert!(result.is_err());
+    }
+
+    #[test]
+    fn parse_validate_requires_a_target() {
+        let result = parse_validate_args(vec!["--json".to_owned()]);
+        assert!(result.is_err());
+    }
+
+    #[test]
+    fn parse_validate_rejects_mixed_targets() {
+        let result = parse_validate_args(vec![
+            "scenario.yaml".to_owned(),
+            "--suite".to_owned(),
+            "core".to_owned(),
+        ]);
+        assert!(result.is_err());
+    }
+
+    #[test]
+    fn validate_paths_reports_invalid_scenarios() -> Result<(), Box<dyn std::error::Error>> {
+        let path = env::temp_dir().join(format!("mneme-eval-invalid-{}.yaml", std::process::id()));
+        fs::write(
+            &path,
+            "id: invalid-empty-events\nevents: []\nexpected:\n  event_append:\n    count: 1\n",
+        )?;
+
+        let report = validate_paths(vec![path.clone()]);
+        let _ = fs::remove_file(path);
+
+        assert!(!report.ok);
+        assert_eq!(report.invalid, 1);
+        assert!(report.results[0]
+            .error
+            .as_deref()
+            .is_some_and(|error| error.contains("has no events")));
+        Ok(())
     }
 
     #[test]

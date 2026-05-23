@@ -11,6 +11,8 @@ This project follows the spirit of Keep a Changelog.
   checks, citation checks, audit checks, and seeded fault modes.
 - Added initial core scenarios for explicit remember, budget hard-cap, and
   secret blocking.
+- Added `mneme-eval validate` for scenario contract checks before replay.
+- Added public eval scenario format documentation and invalid fixture coverage.
 
 ## [0.0.1] - 2026-05-24
 
