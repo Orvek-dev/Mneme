@@ -61,6 +61,8 @@ tags:
   - recall
 budget:
   daily_cloud_tokens: 100
+persistence:
+  restart_after_event: 1
 events:
   - speaker_id: user
     actor_agent_id: codex
@@ -110,6 +112,10 @@ Each expected claim requires:
 - `tags`: labels used for filtering, reporting, and later suite curation.
 - `budget.daily_cloud_tokens`: deterministic fake token cap. Defaults to
   `100000` and must be greater than zero.
+- `persistence.restart_after_event`: asks compatible targets to persist state
+  and reload after the 1-based event index. It must be within the event count.
+  Targets without real persistence may treat this as an in-process checkpoint,
+  but product targets should use their storage adapter.
 - `events[].actor_agent_id`: agent acting on behalf of the speaker.
 - `events[].scope`: memory scope. Defaults to `private`.
 - `events[].trust_level`: input trust level. Defaults to `trusted_user`.
