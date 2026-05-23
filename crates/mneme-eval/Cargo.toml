@@ -6,6 +6,9 @@ rust-version.workspace = true
 
 [dependencies]
 mneme-core = { path = "../mneme-core" }
+serde = { version = "1.0", features = ["derive"] }
+serde_json = "1.0"
+serde_yaml = "0.9"
 
 [lints]
 workspace = true

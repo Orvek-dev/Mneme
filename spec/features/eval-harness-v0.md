@@ -43,9 +43,9 @@ reports.
 
 | Requirement | Evidence target | Status |
 | --- | --- | --- |
-| REQ-EVAL-001 | scenario loader tests | mapped |
-| REQ-EVAL-002 | isolated temp database tests | mapped |
-| REQ-EVAL-003 | fake component determinism tests | mapped |
-| REQ-EVAL-004 | failure report snapshot tests | mapped |
-| REQ-EVAL-005 | gitignore and generated-output tests | mapped |
-| REQ-EVAL-006 | seeded-fault tests | mapped |
+| REQ-EVAL-001 | scenario loader tests and `mneme-eval run --suite core` | verified |
+| REQ-EVAL-002 | per-scenario fake runtime state in replay tests | verified |
+| REQ-EVAL-003 | fake component determinism tests | verified |
+| REQ-EVAL-004 | failure report fields in replay output | verified |
+| REQ-EVAL-005 | `.gitignore` rules for `evals/reports/*` | verified |
+| REQ-EVAL-006 | `--seeded-fault skip-claims` / `leak-secrets` tests | verified |
