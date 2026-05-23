@@ -38,6 +38,7 @@ Run a suite:
 ```sh
 cargo run -p mneme-eval -- run --suite core --target fake
 cargo run -p mneme-eval -- run --suite core --target mneme-v1
+cargo run -p mneme-eval -- run --suite model --target mneme-v1-command --extractor-command evals/fixtures/command-extractor.sh
 ```
 
 Run the full harness acceptance gate:
@@ -45,6 +46,7 @@ Run the full harness acceptance gate:
 ```sh
 cargo run -p mneme-eval -- acceptance --suite core --target fake
 cargo run -p mneme-eval -- acceptance --suite core --target mneme-v1
+cargo run -p mneme-eval -- acceptance --suite model --target mneme-v1-command --extractor-command evals/fixtures/command-extractor.sh
 ```
 
 Use `--json` for machine-readable output and `--report <path>` to write a JSON
@@ -52,6 +54,11 @@ report.
 
 `fake` is the default target. CI passes targets explicitly so future adapters
 cannot silently change what is being tested.
+
+The `model` suite is opt-in and is intended for command-backed/model-backed
+extraction checks. Use `mneme-v1-command` with `--extractor-command`; the
+tracked fixture at `evals/fixtures/command-extractor.sh` is deterministic and
+does not require provider credentials.
 
 ## Schema
 

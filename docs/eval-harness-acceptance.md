@@ -8,6 +8,7 @@ Run it locally with:
 ```sh
 cargo run -p mneme-eval -- acceptance --suite core --target fake
 cargo run -p mneme-eval -- acceptance --suite core --target mneme-v1
+cargo run -p mneme-eval -- acceptance --suite model --target mneme-v1-command --extractor-command evals/fixtures/command-extractor.sh
 ```
 
 Use JSON output for automation:
@@ -15,6 +16,7 @@ Use JSON output for automation:
 ```sh
 cargo run -p mneme-eval -- acceptance --suite core --target fake --json
 cargo run -p mneme-eval -- acceptance --suite core --target mneme-v1 --json
+cargo run -p mneme-eval -- acceptance --suite model --target mneme-v1-command --extractor-command evals/fixtures/command-extractor.sh --json
 ```
 
 ## Required Gates
@@ -24,8 +26,8 @@ The acceptance command must pass every gate:
 - `scenario.validation`: all scenarios in the selected suite validate.
 - `invalid-fixtures.rejected`: malformed fixtures are rejected.
 - `target.core-suite`: the selected target passes the core suite.
-- `report.contract`: eval reports include schema version, target, counts, and
-  results.
+- `report.contract`: eval reports include schema version, target, target
+  metadata, counts, and results.
 - `seeded-fault.skip-claims`: a missing-claim regression is detected.
 - `seeded-fault.leak-secrets`: a secret-leak regression is detected.
 - `seeded-fault.drop-citations`: a missing-citation regression is detected.
@@ -57,6 +59,13 @@ The current `core` suite does not yet cover:
 - UI behavior;
 - performance benchmarks.
 
+The opt-in `model` suite covers:
+
+- implicit preference extraction through a command-backed adapter;
+- no-claim handling for non-memory events;
+- secret blocking after command extraction;
+- explicit correction lifecycle after command extraction.
+
 These gaps are acceptable before Mneme v1 starts because the v1 target can be
 added behind the same adapter boundary and expanded against the same acceptance
 gate.
@@ -65,6 +74,7 @@ gate.
 
 - `fake`: harness proof target.
 - `mneme-v1`: personal-memory v1 core target.
+- `mneme-v1-command`: opt-in command extractor target for model-suite checks.
 
 ## Phase 1 Entry Rule
 

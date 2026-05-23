@@ -13,10 +13,13 @@ cargo test --workspace --all-targets
 cargo run -p mneme-cli -- doctor
 cargo run -p mneme-eval -- doctor
 cargo run -p mneme-eval -- validate --suite core
+cargo run -p mneme-eval -- validate --suite model
 cargo run -p mneme-eval -- run --suite core --target fake
 cargo run -p mneme-eval -- run --suite core --target mneme-v1
+cargo run -p mneme-eval -- run --suite model --target mneme-v1-command --extractor-command evals/fixtures/command-extractor.sh
 cargo run -p mneme-eval -- acceptance --suite core --target fake
 cargo run -p mneme-eval -- acceptance --suite core --target mneme-v1
+cargo run -p mneme-eval -- acceptance --suite model --target mneme-v1-command --extractor-command evals/fixtures/command-extractor.sh
 ```
 
 Run a local CLI smoke check with an isolated store:

@@ -349,6 +349,7 @@ mod tests {
             &target,
             TargetRunOptions {
                 fault_mode: FaultMode::SkipClaims,
+                command_extractor: None,
             },
         )?;
         assert!(!report.ok);

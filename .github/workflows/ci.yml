@@ -52,6 +52,8 @@ jobs:
           grep -q "command-backed extraction" "${RUNNER_TEMP}/mneme-command-extractor-context.json"
       - name: Eval scenario validation
         run: cargo run -p mneme-eval -- validate --suite core
+      - name: Eval model suite validation
+        run: cargo run -p mneme-eval -- validate --suite model
       - name: Eval invalid fixture check
         run: |
           for scenario in evals/fixtures/invalid/*.yaml; do
@@ -64,6 +66,14 @@ jobs:
         run: cargo run -p mneme-eval -- run --suite core --target fake
       - name: Eval Mneme v1 core suite
         run: cargo run -p mneme-eval -- run --suite core --target mneme-v1
+      - name: Eval command extractor model suite
+        run: |
+          cargo run -p mneme-eval -- run --suite model \
+            --target mneme-v1-command \
+            --extractor-command evals/fixtures/command-extractor.sh \
+            --json | tee "${RUNNER_TEMP}/mneme-model-suite.json"
+          grep -q '"target": "mneme-v1-command"' "${RUNNER_TEMP}/mneme-model-suite.json"
+          grep -q '"protocol": "mneme.extractor.command.v1"' "${RUNNER_TEMP}/mneme-model-suite.json"
       - name: Eval seeded fault check
         run: |
           if cargo run -p mneme-eval -- run --suite core --target fake --seeded-fault skip-claims; then
@@ -74,3 +84,8 @@ jobs:
         run: cargo run -p mneme-eval -- acceptance --suite core --target fake
       - name: Eval Mneme v1 acceptance gate
         run: cargo run -p mneme-eval -- acceptance --suite core --target mneme-v1
+      - name: Eval command extractor model acceptance gate
+        run: |
+          cargo run -p mneme-eval -- acceptance --suite model \
+            --target mneme-v1-command \
+            --extractor-command evals/fixtures/command-extractor.sh

@@ -10,11 +10,12 @@ between public fixtures and a concrete Mneme implementation.
   detection.
 - `mneme-v1`: deterministic in-process adapter over the Mneme v1 personal core
   in `mneme-core`.
+- `mneme-v1-command`: opt-in adapter over the same core using
+  `CommandExtractor`.
 
 `mneme-v1` uses `mneme-core`'s default `RuleBasedExtractor`. Model-backed
-experiments can use `CommandExtractor` through product code or a future opt-in
-eval target, but the default CI target stays deterministic so public checks do
-not require provider credentials.
+experiments can use `mneme-v1-command`, but the default core checks stay
+deterministic so public acceptance does not require provider credentials.
 
 The fake target is the default. CI still passes `--target fake` explicitly so a
 future Mneme implementation cannot silently change what is being tested.
@@ -29,6 +30,12 @@ Mneme v1 must also pass the same gate:
 
 ```sh
 cargo run -p mneme-eval -- acceptance --suite core --target mneme-v1
+```
+
+Command extraction should pass the opt-in model suite:
+
+```sh
+cargo run -p mneme-eval -- acceptance --suite model --target mneme-v1-command --extractor-command evals/fixtures/command-extractor.sh
 ```
 
 ## Target Responsibilities
@@ -58,8 +65,10 @@ storage engine:
 - `budget`: deterministic budget counters.
 - `audit`: read/write evidence.
 
-This keeps `mneme-eval run --suite core --target fake` and a future
-`mneme-eval run --suite core --target mneme-v1` comparable.
+This keeps `mneme-eval run --suite core --target fake`,
+`mneme-eval run --suite core --target mneme-v1`, and
+`mneme-eval run --suite model --target mneme-v1-command` comparable at the
+report level.
 
 ## Seeded Faults
 
@@ -78,6 +87,7 @@ Eval reports include:
 
 - `report_schema_version`
 - `target`
+- `target_metadata`
 - `ok`
 - `scenario_count`
 - `passed`
