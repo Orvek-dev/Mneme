@@ -22,9 +22,16 @@ jobs:
           cargo fmt --all --check
           cargo clippy --workspace --all-targets -- -D warnings
           cargo test --workspace --all-targets
-          cargo run -p mneme-eval -- doctor
           cargo run -p mneme-cli -- doctor
-          cargo run -p mneme-eval -- run --suite core
+          cargo run -p mneme-eval -- doctor
+          STORE="${RUNNER_TEMP}/mneme-cli-release-smoke.json"
+          cargo run -p mneme-cli -- remember "user prefers local-first tools" --store "${STORE}"
+          cargo run -p mneme-cli -- context "local-first" --store "${STORE}" --json | grep -q "local-first tools"
+          cargo run -p mneme-eval -- validate --suite core
+          cargo run -p mneme-eval -- run --suite core --target fake
+          cargo run -p mneme-eval -- run --suite core --target mneme-v1
+          cargo run -p mneme-eval -- acceptance --suite core --target fake
+          cargo run -p mneme-eval -- acceptance --suite core --target mneme-v1
       - name: Create GitHub release
         env:
           # Orvek-dev currently caps GITHUB_TOKEN to read-only. Set a
