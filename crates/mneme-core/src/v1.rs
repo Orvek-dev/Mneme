@@ -7,8 +7,9 @@
 
 use std::fmt;
 use std::fs;
-use std::io;
+use std::io::{self, Write};
 use std::path::{Path, PathBuf};
+use std::process::{Command, Stdio};
 
 use serde::{Deserialize, Serialize};
 
@@ -57,8 +58,8 @@ impl MnemeEngine {
     }
 
     /// Appends one user event and extracts a claim when allowed by budget.
-    pub fn ingest_event(&mut self, input: EventInput) {
-        self.ingest_event_with_extractor(input, &RuleBasedExtractor);
+    pub fn ingest_event(&mut self, input: EventInput) -> Result<(), ExtractorError> {
+        self.ingest_event_with_extractor(input, &RuleBasedExtractor)
     }
 
     /// Appends one user event using the provided extraction adapter.
@@ -66,7 +67,7 @@ impl MnemeEngine {
         &mut self,
         input: EventInput,
         extractor: &(impl MnemeExtractor + ?Sized),
-    ) {
+    ) -> Result<(), ExtractorError> {
         let event = EventRecord {
             id: next_id("event", self.events.len() + 1),
             speaker_id: input.speaker_id,
@@ -94,16 +95,16 @@ impl MnemeEngine {
                 target_id: event.id.clone(),
             });
             self.events.push(event);
-            return;
+            return Ok(());
         }
         self.budget.spent_tokens = self.budget.spent_tokens.saturating_add(token_estimate);
 
         if self.apply_lifecycle_event(&event) {
             self.events.push(event);
-            return;
+            return Ok(());
         }
 
-        if let Some(extracted) = extractor.extract(&event) {
+        if let Some(extracted) = extractor.extract(&event)? {
             let claim = claim_from_extracted(
                 &event,
                 self.claims.len() + 1,
@@ -118,6 +119,7 @@ impl MnemeEngine {
         }
 
         self.events.push(event);
+        Ok(())
     }
 
     fn apply_lifecycle_event(&mut self, event: &EventRecord) -> bool {
@@ -254,11 +256,199 @@ impl MnemeEngine {
 /// Adapter boundary for extracting memory claims from events.
 pub trait MnemeExtractor {
     /// Extracts one claim candidate from an event, when the adapter can find one.
-    fn extract(&self, event: &EventRecord) -> Option<ExtractedClaim>;
+    fn extract(&self, event: &EventRecord) -> Result<Option<ExtractedClaim>, ExtractorError>;
 }
+
+/// Stable JSON protocol version used by command-backed extraction adapters.
+pub const EXTRACTOR_COMMAND_SCHEMA_VERSION: &str = "mneme.extractor.command.v1";
+
+/// Request passed to an external extraction command over stdin.
+#[derive(Debug, Clone, Serialize, Deserialize)]
+#[serde(deny_unknown_fields)]
+pub struct ExtractorCommandRequest {
+    /// Protocol schema version.
+    pub schema_version: String,
+    /// Event to inspect for memory-worthy claims.
+    pub event: EventRecord,
+}
+
+impl ExtractorCommandRequest {
+    /// Creates a command request from an engine event.
+    #[must_use]
+    pub fn for_event(event: &EventRecord) -> Self {
+        Self {
+            schema_version: EXTRACTOR_COMMAND_SCHEMA_VERSION.to_owned(),
+            event: event.clone(),
+        }
+    }
+}
+
+/// Response returned by an external extraction command over stdout.
+#[derive(Debug, Clone, Serialize, Deserialize)]
+#[serde(deny_unknown_fields)]
+pub struct ExtractorCommandResponse {
+    /// Protocol schema version.
+    pub schema_version: String,
+    /// Optional claim candidate. Use `null` when no claim should be persisted.
+    pub claim: Option<ExtractedClaim>,
+}
+
+impl ExtractorCommandResponse {
+    /// Creates a response that contains a claim.
+    #[must_use]
+    pub fn from_claim(claim: ExtractedClaim) -> Self {
+        Self {
+            schema_version: EXTRACTOR_COMMAND_SCHEMA_VERSION.to_owned(),
+            claim: Some(claim),
+        }
+    }
+
+    /// Creates a response that intentionally extracts no claim.
+    #[must_use]
+    pub fn no_claim() -> Self {
+        Self {
+            schema_version: EXTRACTOR_COMMAND_SCHEMA_VERSION.to_owned(),
+            claim: None,
+        }
+    }
+}
+
+/// Extraction adapter that delegates claim extraction to an external command.
+#[derive(Debug, Clone)]
+pub struct CommandExtractor {
+    program: String,
+    args: Vec<String>,
+}
+
+impl CommandExtractor {
+    /// Creates a command-backed extractor without invoking a shell.
+    #[must_use]
+    pub fn new(program: impl Into<String>, args: Vec<String>) -> Self {
+        Self {
+            program: program.into(),
+            args,
+        }
+    }
+
+    /// Command program path or name.
+    #[must_use]
+    pub fn program(&self) -> &str {
+        &self.program
+    }
+
+    /// Command arguments.
+    #[must_use]
+    pub fn args(&self) -> &[String] {
+        &self.args
+    }
+}
+
+impl MnemeExtractor for CommandExtractor {
+    fn extract(&self, event: &EventRecord) -> Result<Option<ExtractedClaim>, ExtractorError> {
+        let request = ExtractorCommandRequest::for_event(event);
+        let request_json = serde_json::to_vec(&request)
+            .map_err(|source| ExtractorError::new(format!("encode extractor request: {source}")))?;
+        let mut child = Command::new(&self.program)
+            .args(&self.args)
+            .stdin(Stdio::piped())
+            .stdout(Stdio::piped())
+            .stderr(Stdio::piped())
+            .spawn()
+            .map_err(|source| {
+                ExtractorError::new(format!(
+                    "start extractor command {}: {source}",
+                    self.program
+                ))
+            })?;
+
+        {
+            let mut stdin = child.stdin.take().ok_or_else(|| {
+                ExtractorError::new(format!("open stdin for extractor command {}", self.program))
+            })?;
+            stdin.write_all(&request_json).map_err(|source| {
+                ExtractorError::new(format!(
+                    "write extractor request to {}: {source}",
+                    self.program
+                ))
+            })?;
+            stdin.write_all(b"\n").map_err(|source| {
+                ExtractorError::new(format!(
+                    "finish extractor request to {}: {source}",
+                    self.program
+                ))
+            })?;
+        }
+
+        let output = child.wait_with_output().map_err(|source| {
+            ExtractorError::new(format!(
+                "wait for extractor command {}: {source}",
+                self.program
+            ))
+        })?;
+        if !output.status.success() {
+            let stderr = String::from_utf8_lossy(&output.stderr);
+            return Err(ExtractorError::new(format!(
+                "extractor command {} exited with status {}: {}",
+                self.program,
+                output.status,
+                truncate_for_error(stderr.trim())
+            )));
+        }
+
+        if output.stdout.is_empty() {
+            return Err(ExtractorError::new(format!(
+                "extractor command {} returned empty stdout",
+                self.program
+            )));
+        }
+
+        let response: ExtractorCommandResponse =
+            serde_json::from_slice(&output.stdout).map_err(|source| {
+                ExtractorError::new(format!(
+                    "parse extractor response from {}: {source}",
+                    self.program
+                ))
+            })?;
+        if response.schema_version != EXTRACTOR_COMMAND_SCHEMA_VERSION {
+            return Err(ExtractorError::new(format!(
+                "unsupported extractor response schema: {}",
+                response.schema_version
+            )));
+        }
+        if let Some(claim) = &response.claim {
+            validate_extracted_claim(claim)?;
+        }
+        Ok(response.claim)
+    }
+}
+
+/// Error returned by extraction adapters.
+#[derive(Debug, Clone, Eq, PartialEq)]
+pub struct ExtractorError {
+    message: String,
+}
+
+impl ExtractorError {
+    /// Creates an extractor error.
+    #[must_use]
+    pub fn new(message: impl Into<String>) -> Self {
+        Self {
+            message: message.into(),
+        }
+    }
+}
+
+impl fmt::Display for ExtractorError {
+    fn fmt(&self, formatter: &mut fmt::Formatter<'_>) -> fmt::Result {
+        formatter.write_str(&self.message)
+    }
+}
+
+impl std::error::Error for ExtractorError {}
 
 /// Claim candidate returned by an extraction adapter before engine persistence.
 #[derive(Debug, Clone, Eq, PartialEq, Serialize, Deserialize)]
+#[serde(deny_unknown_fields)]
 pub struct ExtractedClaim {
     /// Claim subject.
     pub subject: String,
@@ -303,9 +493,11 @@ impl RuleBasedExtractor {
 }
 
 impl MnemeExtractor for RuleBasedExtractor {
-    fn extract(&self, event: &EventRecord) -> Option<ExtractedClaim> {
-        let marker = find_remember_marker(&event.text)?;
-        Some(extracted_claim_from_text(event, marker))
+    fn extract(&self, event: &EventRecord) -> Result<Option<ExtractedClaim>, ExtractorError> {
+        let Some(marker) = find_remember_marker(&event.text) else {
+            return Ok(None);
+        };
+        Ok(Some(extracted_claim_from_text(event, marker)))
     }
 }
 
@@ -719,6 +911,31 @@ fn looks_like_secret(text: &str) -> bool {
         || lower.contains("password=")
 }
 
+fn validate_extracted_claim(claim: &ExtractedClaim) -> Result<(), ExtractorError> {
+    for (field, value) in [
+        ("subject", claim.subject.as_str()),
+        ("predicate", claim.predicate.as_str()),
+        ("object", claim.object.as_str()),
+    ] {
+        if value.trim().is_empty() {
+            return Err(ExtractorError::new(format!(
+                "extractor response claim {field} must not be empty"
+            )));
+        }
+    }
+    Ok(())
+}
+
+fn truncate_for_error(value: &str) -> String {
+    const LIMIT: usize = 500;
+    let truncated = value.chars().take(LIMIT).collect::<String>();
+    if value.chars().count() > LIMIT {
+        format!("{truncated}...")
+    } else {
+        truncated
+    }
+}
+
 fn estimate_tokens(text: &str) -> u32 {
     let count = text.split_whitespace().count();
     u32::try_from(count).unwrap_or(u32::MAX).max(1)
@@ -733,7 +950,7 @@ mod tests {
     use super::*;
 
     #[test]
-    fn captures_explicit_personal_memory() {
+    fn captures_explicit_personal_memory() -> Result<(), Box<dyn std::error::Error>> {
         let mut engine = MnemeEngine::new(MnemeConfig {
             daily_cloud_tokens: 100,
         });
@@ -743,7 +960,7 @@ mod tests {
             text: "remember: user prefers local-first tools".to_owned(),
             scope: "private".to_owned(),
             trust_level: "trusted_user".to_owned(),
-        });
+        })?;
         let context = engine.build_context_pack("user preferences");
         let snapshot = engine.snapshot();
 
@@ -757,15 +974,24 @@ mod tests {
             .audit
             .iter()
             .any(|event| event.kind == AuditKind::ClaimWrite));
+        Ok(())
     }
 
     #[test]
-    fn custom_extractor_can_write_claim_without_rule_marker() {
+    fn custom_extractor_can_write_claim_without_rule_marker(
+    ) -> Result<(), Box<dyn std::error::Error>> {
         struct StaticExtractor;
 
         impl MnemeExtractor for StaticExtractor {
-            fn extract(&self, _event: &EventRecord) -> Option<ExtractedClaim> {
-                Some(ExtractedClaim::new("user", "prefers", "adapter extraction"))
+            fn extract(
+                &self,
+                _event: &EventRecord,
+            ) -> Result<Option<ExtractedClaim>, ExtractorError> {
+                Ok(Some(ExtractedClaim::new(
+                    "user",
+                    "prefers",
+                    "adapter extraction",
+                )))
             }
         }
 
@@ -781,26 +1007,30 @@ mod tests {
                 trust_level: "trusted_user".to_owned(),
             },
             &StaticExtractor,
-        );
+        )?;
         let snapshot = engine.snapshot();
 
         assert_eq!(snapshot.claims.len(), 1);
         assert_eq!(snapshot.claims[0].object, "adapter extraction");
         assert_eq!(snapshot.claims[0].source_event_ids, vec!["event-001"]);
         assert_eq!(snapshot.claims[0].status, ClaimStatus::Active);
+        Ok(())
     }
 
     #[test]
-    fn extractor_output_still_passes_secret_blocking() {
+    fn extractor_output_still_passes_secret_blocking() -> Result<(), Box<dyn std::error::Error>> {
         struct SecretExtractor;
 
         impl MnemeExtractor for SecretExtractor {
-            fn extract(&self, _event: &EventRecord) -> Option<ExtractedClaim> {
-                Some(ExtractedClaim::new(
+            fn extract(
+                &self,
+                _event: &EventRecord,
+            ) -> Result<Option<ExtractedClaim>, ExtractorError> {
+                Ok(Some(ExtractedClaim::new(
                     "user",
                     "note",
                     "API_KEY=FAKE_TEST_VALUE",
-                ))
+                )))
             }
         }
 
@@ -816,17 +1046,18 @@ mod tests {
                 trust_level: "trusted_user".to_owned(),
             },
             &SecretExtractor,
-        );
+        )?;
         let context = engine.build_context_pack("API key");
         let snapshot = engine.snapshot();
 
         assert_eq!(snapshot.claims.len(), 1);
         assert_eq!(snapshot.claims[0].status, ClaimStatus::BlockedSecret);
         assert!(context.items.is_empty());
+        Ok(())
     }
 
     #[test]
-    fn budget_hard_cap_blocks_claim_extraction() {
+    fn budget_hard_cap_blocks_claim_extraction() -> Result<(), Box<dyn std::error::Error>> {
         let mut engine = MnemeEngine::new(MnemeConfig {
             daily_cloud_tokens: 2,
         });
@@ -836,7 +1067,7 @@ mod tests {
             text: "remember: user prefers local-first tools".to_owned(),
             scope: "private".to_owned(),
             trust_level: "trusted_user".to_owned(),
-        });
+        })?;
         let snapshot = engine.snapshot();
 
         assert_eq!(snapshot.events.len(), 1);
@@ -846,10 +1077,11 @@ mod tests {
             .audit
             .iter()
             .any(|event| event.kind == AuditKind::BudgetBlock));
+        Ok(())
     }
 
     #[test]
-    fn blocked_secret_claims_are_omitted_from_context() {
+    fn blocked_secret_claims_are_omitted_from_context() -> Result<(), Box<dyn std::error::Error>> {
         let mut engine = MnemeEngine::new(MnemeConfig {
             daily_cloud_tokens: 100,
         });
@@ -859,7 +1091,7 @@ mod tests {
             text: "remember: user note API_KEY=FAKE_TEST_VALUE".to_owned(),
             scope: "private".to_owned(),
             trust_level: "trusted_user".to_owned(),
-        });
+        })?;
         let context = engine.build_context_pack("API key");
         let snapshot = engine.snapshot();
 
@@ -867,10 +1099,12 @@ mod tests {
         assert_eq!(snapshot.claims[0].status, ClaimStatus::BlockedSecret);
         assert!(context.items.is_empty());
         assert_eq!(context.omitted.len(), 1);
+        Ok(())
     }
 
     #[test]
-    fn correction_supersedes_old_claim_and_writes_replacement() {
+    fn correction_supersedes_old_claim_and_writes_replacement(
+    ) -> Result<(), Box<dyn std::error::Error>> {
         let mut engine = MnemeEngine::new(MnemeConfig {
             daily_cloud_tokens: 100,
         });
@@ -880,14 +1114,14 @@ mod tests {
             text: "remember: user prefers local-first tools".to_owned(),
             scope: "private".to_owned(),
             trust_level: "trusted_user".to_owned(),
-        });
+        })?;
         engine.ingest_event(EventInput {
             speaker_id: "user".to_owned(),
             actor_agent_id: Some("codex".to_owned()),
             text: "correct: user prefers local-first tools -> user prefers desktop IDE".to_owned(),
             scope: "private".to_owned(),
             trust_level: "trusted_user".to_owned(),
-        });
+        })?;
         let context = engine.build_context_pack("desktop IDE");
         let snapshot = engine.snapshot();
 
@@ -904,10 +1138,11 @@ mod tests {
             .audit
             .iter()
             .any(|event| event.kind == AuditKind::ClaimUpdate));
+        Ok(())
     }
 
     #[test]
-    fn forgotten_claims_are_omitted_from_context() {
+    fn forgotten_claims_are_omitted_from_context() -> Result<(), Box<dyn std::error::Error>> {
         let mut engine = MnemeEngine::new(MnemeConfig {
             daily_cloud_tokens: 100,
         });
@@ -917,14 +1152,14 @@ mod tests {
             text: "remember: user prefers local-first tools".to_owned(),
             scope: "private".to_owned(),
             trust_level: "trusted_user".to_owned(),
-        });
+        })?;
         engine.ingest_event(EventInput {
             speaker_id: "user".to_owned(),
             actor_agent_id: None,
             text: "forget: user prefers local-first tools".to_owned(),
             scope: "private".to_owned(),
             trust_level: "trusted_user".to_owned(),
-        });
+        })?;
         let context = engine.build_context_pack("local-first");
         let snapshot = engine.snapshot();
 
@@ -932,6 +1167,7 @@ mod tests {
         assert_eq!(snapshot.claims[0].status, ClaimStatus::Forgotten);
         assert!(context.items.is_empty());
         assert_eq!(context.omitted[0].reason, "forgotten");
+        Ok(())
     }
 
     #[test]
@@ -951,7 +1187,7 @@ mod tests {
             text: "remember: user prefers durable memory".to_owned(),
             scope: "private".to_owned(),
             trust_level: "trusted_user".to_owned(),
-        });
+        })?;
 
         let mut store = JsonFileStore::new(path.clone());
         engine.persist(&mut store)?;
@@ -973,5 +1209,47 @@ mod tests {
 
         let _ = std::fs::remove_file(&path);
         Ok(())
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn command_extractor_reads_protocol_response() -> Result<(), Box<dyn std::error::Error>> {
+        let response = serde_json::to_string(&ExtractorCommandResponse::from_claim(
+            ExtractedClaim::new("user", "prefers", "command extraction"),
+        ))?;
+        let extractor = CommandExtractor::new(
+            "/bin/sh",
+            vec![
+                "-c".to_owned(),
+                format!("cat >/dev/null; printf '%s\\n' '{}'", response),
+            ],
+        );
+        let event = EventRecord {
+            id: "event-001".to_owned(),
+            speaker_id: "user".to_owned(),
+            actor_agent_id: Some("model-wrapper".to_owned()),
+            text: "the user likes command-backed extraction".to_owned(),
+            scope: "private".to_owned(),
+            trust_level: "trusted_user".to_owned(),
+        };
+
+        let claim = extractor
+            .extract(&event)?
+            .ok_or_else(|| ExtractorError::new("expected claim"))?;
+
+        assert_eq!(claim.object, "command extraction");
+        Ok(())
+    }
+
+    #[test]
+    fn command_response_rejects_empty_claim_fields() -> Result<(), Box<dyn std::error::Error>> {
+        let claim = ExtractedClaim::new("user", "prefers", " ");
+        match validate_extracted_claim(&claim) {
+            Ok(()) => Err("empty object should fail".into()),
+            Err(error) => {
+                assert!(error.to_string().contains("object"));
+                Ok(())
+            }
+        }
     }
 }
