@@ -4,6 +4,8 @@ This project follows the spirit of Keep a Changelog.
 
 ## Unreleased
 
+## [0.1.0] - 2026-05-24
+
 ### Added
 
 - Added the first Eval Harness v0 scenario replay implementation.
