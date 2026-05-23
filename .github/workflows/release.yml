@@ -23,6 +23,7 @@ jobs:
           cargo clippy --workspace --all-targets -- -D warnings
           cargo test --workspace --all-targets
           cargo run -p mneme-eval -- doctor
+          cargo run -p mneme-cli -- doctor
           cargo run -p mneme-eval -- run --suite core
       - name: Create GitHub release
         env:
