@@ -2,6 +2,16 @@
 
 This project follows the spirit of Keep a Changelog.
 
+## Unreleased
+
+### Added
+
+- Added the first Eval Harness v0 scenario replay implementation.
+- Added deterministic fake claim extraction, budget checks, context-pack
+  checks, citation checks, audit checks, and seeded fault modes.
+- Added initial core scenarios for explicit remember, budget hard-cap, and
+  secret blocking.
+
 ## [0.0.1] - 2026-05-24
 
 ### Added
