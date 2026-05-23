@@ -3,6 +3,7 @@
 mod cli;
 mod error;
 mod fake;
+mod mneme_v1;
 mod report;
 mod runtime;
 mod scenario;

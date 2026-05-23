@@ -7,12 +7,14 @@ Run it locally with:
 
 ```sh
 cargo run -p mneme-eval -- acceptance --suite core --target fake
+cargo run -p mneme-eval -- acceptance --suite core --target mneme-v1
 ```
 
 Use JSON output for automation:
 
 ```sh
 cargo run -p mneme-eval -- acceptance --suite core --target fake --json
+cargo run -p mneme-eval -- acceptance --suite core --target mneme-v1 --json
 ```
 
 ## Required Gates
@@ -56,6 +58,11 @@ These gaps are acceptable before Mneme v1 starts because the v1 target can be
 added behind the same adapter boundary and expanded against the same acceptance
 gate.
 
+## Active Targets
+
+- `fake`: harness proof target.
+- `mneme-v1`: personal-memory v1 core target.
+
 ## Phase 1 Entry Rule
 
 Mneme v1 implementation can start when all are true:
@@ -65,3 +72,12 @@ Mneme v1 implementation can start when all are true:
 - `docs/eval-target-adapter-contract.md` describes how a v1 target plugs into
   the harness.
 - generated reports and local harness files remain ignored.
+
+## Phase 1 Completion Rule
+
+The first Mneme v1 core slice is complete when all are true:
+
+- CI passes `cargo run -p mneme-eval -- run --suite core --target mneme-v1`.
+- CI passes
+  `cargo run -p mneme-eval -- acceptance --suite core --target mneme-v1`.
+- `mneme-core` owns the personal-memory domain model and in-memory engine.

@@ -3,6 +3,13 @@
 //! This crate starts intentionally small. Eval Harness v0 should define the
 //! first executable contracts before product runtime behavior grows here.
 
+mod v1;
+
+pub use v1::{
+    AuditKind, AuditRecord, BudgetState, ClaimRecord, ClaimStatus, ContextItem, ContextPack,
+    EngineSnapshot, EventInput, EventRecord, MnemeConfig, MnemeEngine, OmittedContextItem,
+};
+
 /// Public product name.
 pub const PRODUCT_NAME: &str = "Mneme";
 
@@ -11,6 +18,8 @@ pub const PRODUCT_NAME: &str = "Mneme";
 pub enum BuildStage {
     /// Repository scaffold is ready; Eval Harness v0 is next.
     Bootstrap,
+    /// Personal-memory v1 core is available behind eval harness gates.
+    PersonalCoreV1,
 }
 
 impl BuildStage {
@@ -19,6 +28,7 @@ impl BuildStage {
     pub const fn as_str(self) -> &'static str {
         match self {
             Self::Bootstrap => "bootstrap",
+            Self::PersonalCoreV1 => "personal-core-v1",
         }
     }
 }
@@ -31,5 +41,6 @@ mod tests {
     fn exposes_bootstrap_stage() {
         assert_eq!(PRODUCT_NAME, "Mneme");
         assert_eq!(BuildStage::Bootstrap.as_str(), "bootstrap");
+        assert_eq!(BuildStage::PersonalCoreV1.as_str(), "personal-core-v1");
     }
 }

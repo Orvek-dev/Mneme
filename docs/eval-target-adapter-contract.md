@@ -8,6 +8,8 @@ between public fixtures and a concrete Mneme implementation.
 - `fake`: deterministic in-process target used to prove the harness, scenario
   checks, report shape, budget behavior, audit checks, and seeded fault
   detection.
+- `mneme-v1`: deterministic in-process adapter over the Mneme v1 personal core
+  in `mneme-core`.
 
 The fake target is the default. CI still passes `--target fake` explicitly so a
 future Mneme implementation cannot silently change what is being tested.
@@ -16,6 +18,12 @@ Before adding a production target, keep the fake target passing:
 
 ```sh
 cargo run -p mneme-eval -- acceptance --suite core --target fake
+```
+
+Mneme v1 must also pass the same gate:
+
+```sh
+cargo run -p mneme-eval -- acceptance --suite core --target mneme-v1
 ```
 
 ## Target Responsibilities
