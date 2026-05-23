@@ -4,6 +4,17 @@ This project follows the spirit of Keep a Changelog.
 
 ## Unreleased
 
+## [0.4.0] - 2026-05-24
+
+### Added
+
+- Added a public OpenAI command-extractor wrapper example using the Responses
+  API and Structured Outputs.
+- Added deterministic wrapper dry-run mode for CI and release verification
+  without provider credentials.
+- Added local secret prefiltering in the wrapper before provider calls.
+- Added public wrapper documentation and `.env.example` placeholders.
+
 ## [0.3.0] - 2026-05-24
 
 ### Added

@@ -41,9 +41,11 @@ jobs:
           cargo run -p mneme-eval -- run --suite core --target fake
           cargo run -p mneme-eval -- run --suite core --target mneme-v1
           cargo run -p mneme-eval -- run --suite model --target mneme-v1-command --extractor-command evals/fixtures/command-extractor.sh
+          MNEME_OPENAI_DRY_RUN=1 cargo run -p mneme-eval -- run --suite model --target mneme-v1-command --extractor-command wrappers/openai_extractor.py
           cargo run -p mneme-eval -- acceptance --suite core --target fake
           cargo run -p mneme-eval -- acceptance --suite core --target mneme-v1
           cargo run -p mneme-eval -- acceptance --suite model --target mneme-v1-command --extractor-command evals/fixtures/command-extractor.sh
+          MNEME_OPENAI_DRY_RUN=1 cargo run -p mneme-eval -- acceptance --suite model --target mneme-v1-command --extractor-command wrappers/openai_extractor.py
       - name: Create GitHub release
         env:
           GH_TOKEN: ${{ github.token }}

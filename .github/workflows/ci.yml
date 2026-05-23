@@ -74,6 +74,16 @@ jobs:
             --json | tee "${RUNNER_TEMP}/mneme-model-suite.json"
           grep -q '"target": "mneme-v1-command"' "${RUNNER_TEMP}/mneme-model-suite.json"
           grep -q '"protocol": "mneme.extractor.command.v1"' "${RUNNER_TEMP}/mneme-model-suite.json"
+      - name: OpenAI wrapper dry-run model suite
+        env:
+          MNEME_OPENAI_DRY_RUN: "1"
+        run: |
+          cargo run -p mneme-eval -- run --suite model \
+            --target mneme-v1-command \
+            --extractor-command wrappers/openai_extractor.py \
+            --json | tee "${RUNNER_TEMP}/mneme-openai-wrapper-suite.json"
+          grep -q '"target": "mneme-v1-command"' "${RUNNER_TEMP}/mneme-openai-wrapper-suite.json"
+          grep -q '"protocol": "mneme.extractor.command.v1"' "${RUNNER_TEMP}/mneme-openai-wrapper-suite.json"
       - name: Eval seeded fault check
         run: |
           if cargo run -p mneme-eval -- run --suite core --target fake --seeded-fault skip-claims; then
@@ -89,3 +99,10 @@ jobs:
           cargo run -p mneme-eval -- acceptance --suite model \
             --target mneme-v1-command \
             --extractor-command evals/fixtures/command-extractor.sh
+      - name: OpenAI wrapper dry-run model acceptance gate
+        env:
+          MNEME_OPENAI_DRY_RUN: "1"
+        run: |
+          cargo run -p mneme-eval -- acceptance --suite model \
+            --target mneme-v1-command \
+            --extractor-command wrappers/openai_extractor.py
