@@ -21,16 +21,17 @@ export OPENAI_MODEL="gpt-5.4-mini"
 Write live reports under ignored `evals/reports/`:
 
 ```sh
-cargo run -p mneme-eval -- baseline --suite model \
-  --target mneme-v1-command \
-  --extractor-command wrappers/openai_extractor.py \
-  --iterations 3 \
-  --provider-label openai \
-  --model-label "${OPENAI_MODEL}" \
-  --run-label local-YYYYMMDD \
-  --live-provider \
-  --report evals/reports/openai-live-baseline.json \
-  --json
+./scripts/live-baseline.sh
+```
+
+The helper wraps the stable command with ignored report output and conservative
+metadata defaults. Override these values when needed:
+
+```sh
+export MNEME_LIVE_BASELINE_ITERATIONS=5
+export MNEME_LIVE_BASELINE_RUN_LABEL=local-YYYYMMDD
+export MNEME_LIVE_BASELINE_REPORT=evals/reports/openai-live-baseline.json
+./scripts/live-baseline.sh
 ```
 
 Use a `run_label` that identifies the local run without including private
