@@ -1,3 +1,5 @@
+use std::collections::BTreeMap;
+
 use crate::error::EvalError;
 use crate::fake::FakeEvalTarget;
 use crate::mneme_v1::{MnemeV1CommandEvalTarget, MnemeV1EvalTarget};
@@ -209,6 +211,7 @@ pub(crate) struct ActualState {
     pub(crate) budget: BudgetActual,
     pub(crate) audit: Vec<AuditEvent>,
     pub(crate) store: Option<StoreActual>,
+    pub(crate) quality: Option<QualityActual>,
 }
 
 #[derive(Debug, Clone)]
@@ -232,4 +235,73 @@ pub(crate) struct StoreActual {
     pub(crate) imported: bool,
     pub(crate) generation: Option<u64>,
     pub(crate) error_count: usize,
+}
+
+#[derive(Debug, Clone, Default)]
+pub(crate) struct QualityActual {
+    pub(crate) duplicate_active_groups: usize,
+    pub(crate) duplicate_active_claims: usize,
+    pub(crate) blocked_secret_count: usize,
+    pub(crate) inactive_claim_count: usize,
+    pub(crate) review_item_count: usize,
+    pub(crate) finding_kinds: Vec<String>,
+}
+
+pub(crate) fn build_quality_actual(claims: &[Claim]) -> QualityActual {
+    let mut active_groups = BTreeMap::<String, usize>::new();
+    let mut blocked_secret_count = 0;
+    let mut inactive_claim_count = 0;
+    for claim in claims {
+        match claim.status.as_str() {
+            "active" => {
+                *active_groups.entry(quality_claim_key(claim)).or_default() += 1;
+            }
+            "blocked_secret" => blocked_secret_count += 1,
+            "superseded" | "forgotten" => inactive_claim_count += 1,
+            _ => {}
+        }
+    }
+    let duplicate_active_groups = active_groups.values().filter(|count| **count > 1).count();
+    let duplicate_active_claims = active_groups
+        .values()
+        .filter(|count| **count > 1)
+        .sum::<usize>();
+    let mut finding_kinds = Vec::new();
+    if duplicate_active_groups > 0 {
+        finding_kinds.push("duplicate_active".to_owned());
+    }
+    if blocked_secret_count > 0 {
+        finding_kinds.push("blocked_secret".to_owned());
+    }
+    if inactive_claim_count > 0 {
+        finding_kinds.push("inactive_history".to_owned());
+    }
+    let review_item_count =
+        duplicate_active_groups + blocked_secret_count + usize::from(inactive_claim_count > 0);
+    QualityActual {
+        duplicate_active_groups,
+        duplicate_active_claims,
+        blocked_secret_count,
+        inactive_claim_count,
+        review_item_count,
+        finding_kinds,
+    }
+}
+
+fn quality_claim_key(claim: &Claim) -> String {
+    [
+        normalize_quality_value(&claim.subject),
+        normalize_quality_value(&claim.predicate),
+        normalize_quality_value(&claim.object),
+        normalize_quality_value(&claim.scope),
+    ]
+    .join("\u{1f}")
+}
+
+fn normalize_quality_value(value: &str) -> String {
+    value
+        .split_whitespace()
+        .collect::<Vec<_>>()
+        .join(" ")
+        .to_ascii_lowercase()
 }

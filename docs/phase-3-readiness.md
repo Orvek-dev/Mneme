@@ -139,3 +139,8 @@ Phase 22 shipped the **Personal Runtime Hardening MVP** in `v0.28.0`, adding
 `mneme repair --check`, repair JSON reports with mode/action/health status,
 legacy-compatible schema normalization through `mneme repair`, and
 quality-gate checks for valid and repairable store lifecycle paths.
+
+Phase 23 shipped the **Memory Quality & Review Loop MVP** in `v0.29.0`, adding
+`mneme quality`, quality findings inside review artifacts, eval checks for
+duplicate/blocked/inactive review queues, and quality-gate checks that safe
+quality reports do not leak blocked-secret text.

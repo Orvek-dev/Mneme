@@ -61,14 +61,15 @@ It builds from this repository and installs only the `mneme` binary:
 mneme doctor
 mneme init
 mneme doctor --json
+mneme quality --json
 ```
 
 The full quality gate installs into a temporary root with `--debug` and smokes
 the installed binary before release. It also checks `mneme doctor --json`
 before and after workspace initialization, validates invalid-profile and
 invalid-store doctor reports, checks `mneme repair --check` for valid and
-repairable stores, and verifies the generated agent hook profile through
-`scripts/mneme-agent-hook.sh`.
+repairable stores, checks `mneme quality` review queue output, and verifies the
+generated agent hook profile through `scripts/mneme-agent-hook.sh`.
 
 ## Publication Policy
 
