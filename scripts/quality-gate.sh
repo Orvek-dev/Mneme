@@ -20,6 +20,18 @@ STORE="${TMP_ROOT}/mneme-quality-gate-cli.json"
 rm -f "$STORE"
 cargo run -p mneme-cli -- remember "user prefers local-first tools" --store "$STORE"
 cargo run -p mneme-cli -- context "local-first" --store "$STORE" --json | grep -q "local-first tools"
+cargo run -p mneme-cli -- validate --store "$STORE"
+EXPORT_STORE="${TMP_ROOT}/mneme-quality-gate-export.json"
+IMPORT_STORE="${TMP_ROOT}/mneme-quality-gate-import.json"
+rm -f "$EXPORT_STORE" "$IMPORT_STORE" "$IMPORT_STORE.bak"
+cargo run -p mneme-cli -- export "$EXPORT_STORE" --store "$STORE"
+cargo run -p mneme-cli -- import "$EXPORT_STORE" --store "$IMPORT_STORE"
+cargo run -p mneme-cli -- compact --store "$IMPORT_STORE"
+cargo run -p mneme-cli -- validate --store "$IMPORT_STORE"
+cargo run -p mneme-cli -- remember "user prefers repairable stores" --store "$IMPORT_STORE"
+printf '{not-json\n' > "$IMPORT_STORE"
+cargo run -p mneme-cli -- repair --store "$IMPORT_STORE"
+cargo run -p mneme-cli -- validate --store "$IMPORT_STORE"
 
 COMMAND_STORE="${TMP_ROOT}/mneme-quality-gate-command.json"
 rm -f "$COMMAND_STORE"
@@ -34,6 +46,7 @@ cargo run -p mneme-cli -- context "command-backed" --store "$COMMAND_STORE" --js
 
 cargo run -p mneme-eval -- validate --suite core
 cargo run -p mneme-eval -- validate --suite model
+cargo run -p mneme-eval -- validate --suite runtime
 
 for scenario in evals/fixtures/invalid/*.yaml; do
   if cargo run -p mneme-eval -- validate "$scenario"; then
@@ -44,6 +57,8 @@ done
 
 cargo run -p mneme-eval -- run --suite core --target fake
 cargo run -p mneme-eval -- run --suite core --target mneme-v1
+cargo run -p mneme-eval -- run --suite runtime --target fake
+cargo run -p mneme-eval -- run --suite runtime --target mneme-v1
 cargo run -p mneme-eval -- run --suite model --target mneme-v1-command --extractor-command evals/fixtures/command-extractor.sh
 
 MNEME_OPENAI_DRY_RUN=1 cargo run -p mneme-eval -- run --suite model \
@@ -57,6 +72,8 @@ fi
 
 cargo run -p mneme-eval -- acceptance --suite core --target fake
 cargo run -p mneme-eval -- acceptance --suite core --target mneme-v1
+cargo run -p mneme-eval -- acceptance --suite runtime --target fake
+cargo run -p mneme-eval -- acceptance --suite runtime --target mneme-v1
 cargo run -p mneme-eval -- acceptance --suite model --target mneme-v1-command --extractor-command evals/fixtures/command-extractor.sh
 
 MNEME_OPENAI_DRY_RUN=1 cargo run -p mneme-eval -- acceptance --suite model \

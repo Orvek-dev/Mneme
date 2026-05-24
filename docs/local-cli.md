@@ -14,6 +14,8 @@ cargo run -p mneme-cli -- correct "user prefers local-first tools" "user prefers
 cargo run -p mneme-cli -- forget "user prefers desktop IDE"
 cargo run -p mneme-cli -- context "desktop IDE"
 cargo run -p mneme-cli -- snapshot --json
+cargo run -p mneme-cli -- validate --json
+cargo run -p mneme-cli -- compact
 ```
 
 The default store is `.mneme/mneme-v1.json` under the current working
@@ -24,6 +26,36 @@ Use `--store <path>` to isolate experiments:
 ```sh
 cargo run -p mneme-cli -- remember "user prefers local-first tools" --store /tmp/mneme.json
 cargo run -p mneme-cli -- context "local-first" --store /tmp/mneme.json --json
+```
+
+## Store Maintenance
+
+The local JSON store includes schema metadata and generation tracking. Writes
+are atomic, and replacing an existing store creates `<store>.bak`.
+
+Validate the current store:
+
+```sh
+cargo run -p mneme-cli -- validate --store /tmp/mneme.json --json
+```
+
+Export and import a validated store:
+
+```sh
+cargo run -p mneme-cli -- export /tmp/mneme-export.json --store /tmp/mneme.json
+cargo run -p mneme-cli -- import /tmp/mneme-export.json --store /tmp/mneme-restored.json
+```
+
+Compact inactive lifecycle records:
+
+```sh
+cargo run -p mneme-cli -- compact --store /tmp/mneme.json --json
+```
+
+Repair a corrupted current store from `<store>.bak`:
+
+```sh
+cargo run -p mneme-cli -- repair --store /tmp/mneme.json --json
 ```
 
 ## Event Options

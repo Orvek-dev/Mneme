@@ -15,6 +15,16 @@ eval update land in the same PR.
 - Context packs include active claims only.
 - Read/write operations emit audit records.
 - JSON file persistence round-trips events, claims, budget, and audit state.
+- JSON stores include `schema_version`, metadata, generation, engine version,
+  timestamps, and migration history.
+- JSON store saves are atomic and create `<store>.bak` before replacing an
+  existing store.
+- Store validation detects unsupported schema versions, duplicate IDs, missing
+  required fields, missing claim source events, invalid budgets, and empty
+  audit targets.
+- Store repair can restore an invalid current store from a valid backup.
+- Compaction removes inactive claims while preserving active claim recall and
+  citations.
 - Extraction adapters propose claims; the engine owns IDs, provenance, safety,
   audit, and lifecycle state.
 
@@ -24,9 +34,10 @@ eval update land in the same PR.
   and `baseline`.
 - Eval reports include `report_schema_version`, target metadata, counts, and
   per-scenario results.
-- The `core` suite must pass for `fake` and `mneme-v1`.
+- The `core` and `runtime` suites must pass for `fake` and `mneme-v1`.
 - `mneme-cli` supports `doctor`, `remember`, `correct`, `forget`, `context`,
-  `snapshot`, and `version`.
+  `snapshot`, `validate`, `export`, `import`, `compact`, `repair`, and
+  `version`.
 - `mneme-cli --store <path>` isolates local state.
 - `scripts/quality-gate.sh` is the local and release verification entry point.
 - `scripts/public-safety-check.sh` guards against known private/public-safety
@@ -35,7 +46,8 @@ eval update land in the same PR.
 ## Unstable Areas
 
 - Rust type names and module placement are not semver-stable before 1.0.
-- JSON store schema has no migration system yet.
+- JSON store schema migration is minimal and limited to v1 local state
+  normalization.
 - Extraction is deterministic by default; production LLM extraction is not
   implemented.
 - Storage is local JSON only and does not handle concurrent writers.

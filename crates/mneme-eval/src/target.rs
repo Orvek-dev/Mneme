@@ -204,4 +204,17 @@ pub(crate) struct ActualState {
     pub(crate) context_pack: Option<ContextPack>,
     pub(crate) budget: BudgetActual,
     pub(crate) audit: Vec<AuditEvent>,
+    pub(crate) store: Option<StoreActual>,
+}
+
+#[derive(Debug, Clone, Default)]
+pub(crate) struct StoreActual {
+    pub(crate) schema_version: Option<u32>,
+    pub(crate) valid: bool,
+    pub(crate) backup_present: bool,
+    pub(crate) repair_performed: bool,
+    pub(crate) compacted: bool,
+    pub(crate) imported: bool,
+    pub(crate) generation: Option<u64>,
+    pub(crate) error_count: usize,
 }

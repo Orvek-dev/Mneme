@@ -2,7 +2,7 @@ use crate::error::EvalError;
 use crate::scenario::{ContextPackExpected, Scenario};
 use crate::target::{
     ActualState, AuditEvent, Claim, ContextItem, ContextPack, EvalTarget, EvalTargetMetadata,
-    FaultMode, OmittedItem, RecordedEvent, TargetRunOptions,
+    FaultMode, OmittedItem, RecordedEvent, StoreActual, TargetRunOptions,
 };
 
 pub(crate) struct FakeEvalTarget;
@@ -81,6 +81,12 @@ fn run_fake_runtime(scenario: &Scenario, options: TargetRunOptions) -> ActualSta
         actual.events.push(event);
     }
 
+    let mut compacted = false;
+    if scenario.maintenance.compact_after_events {
+        compact_actual(&mut actual);
+        compacted = true;
+    }
+
     if let Some(context_expected) = &scenario.expected.context_pack {
         actual.context_pack = Some(build_context_pack(
             &actual.claims,
@@ -93,7 +99,41 @@ fn run_fake_runtime(scenario: &Scenario, options: TargetRunOptions) -> ActualSta
         });
     }
 
+    if scenario.expected.store.is_some()
+        || scenario.maintenance.export_import_roundtrip
+        || scenario.maintenance.compact_after_events
+        || scenario.maintenance.repair_from_backup
+    {
+        actual.store = Some(StoreActual {
+            schema_version: Some(mneme_core::MNEME_STATE_SCHEMA_VERSION),
+            valid: true,
+            backup_present: scenario.maintenance.repair_from_backup
+                || scenario.maintenance.export_import_roundtrip,
+            repair_performed: scenario.maintenance.repair_from_backup,
+            compacted,
+            imported: scenario.maintenance.export_import_roundtrip,
+            generation: Some(1),
+            error_count: 0,
+        });
+    }
+
     actual
+}
+
+fn compact_actual(actual: &mut ActualState) {
+    actual.claims.retain(|claim| claim.status == "active");
+    let kept_event_ids = actual
+        .claims
+        .iter()
+        .flat_map(|claim| claim.source_event_ids.iter().cloned())
+        .collect::<std::collections::BTreeSet<_>>();
+    actual
+        .events
+        .retain(|event| kept_event_ids.contains(event.id.as_str()));
+    actual.audit.push(AuditEvent {
+        kind: "state.compact".to_owned(),
+        target_id: "fake".to_owned(),
+    });
 }
 
 fn apply_lifecycle_event(actual: &mut ActualState, event: &RecordedEvent) -> bool {

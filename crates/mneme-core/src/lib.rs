@@ -6,11 +6,14 @@
 mod v1;
 
 pub use v1::{
-    AuditKind, AuditRecord, BudgetState, ClaimRecord, ClaimStatus, CommandExtractor, ContextItem,
-    ContextPack, EngineSnapshot, EventInput, EventRecord, ExtractedClaim, ExtractorCommandRequest,
-    ExtractorCommandResponse, ExtractorError, InMemoryStore, JsonFileStore, MnemeConfig,
-    MnemeEngine, MnemeExtractor, MnemeState, MnemeStore, OmittedContextItem, RuleBasedExtractor,
-    StoreError, EXTRACTOR_COMMAND_SCHEMA_VERSION,
+    validate_state, AuditKind, AuditRecord, BudgetState, ClaimRecord, ClaimStatus,
+    CommandExtractor, CompactionReport, ContextItem, ContextPack, EngineSnapshot, EventInput,
+    EventRecord, ExtractedClaim, ExtractorCommandRequest, ExtractorCommandResponse, ExtractorError,
+    InMemoryStore, JsonFileStore, MigrationRecord, MnemeConfig, MnemeEngine, MnemeExtractor,
+    MnemeState, MnemeStore, OmittedContextItem, RuleBasedExtractor, StateMetadata,
+    StateValidationIssue, StateValidationReport, StoreError, StoreFileInspection, StoreFileStatus,
+    StoreInspection, StoreRepairReport, ValidationSeverity, EXTRACTOR_COMMAND_SCHEMA_VERSION,
+    MNEME_STATE_SCHEMA_VERSION,
 };
 
 /// Public product name.

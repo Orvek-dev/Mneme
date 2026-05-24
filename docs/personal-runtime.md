@@ -1,0 +1,73 @@
+# Personal Runtime
+
+Mneme v1 is still pre-1.0, but the local personal runtime now has a stable
+maintenance surface for single-user development.
+
+## Store Format
+
+The default local store is `.mneme/mneme-v1.json`. The JSON state includes:
+
+- `schema_version`
+- `metadata.store_id`
+- `metadata.generation`
+- `metadata.created_at_unix_seconds`
+- `metadata.updated_at_unix_seconds`
+- `metadata.engine_version`
+- `metadata.migration_history`
+- `budget`, `events`, `claims`, and `audit`
+
+Missing schema metadata from older stores is treated as legacy state and is
+normalized on the next successful save.
+
+## Write Safety
+
+`JsonFileStore` writes through a same-directory temporary file and then replaces
+the current store. When a current store exists, it is copied to
+`<store>.bak` before replacement.
+
+This is intended for a single local user. Concurrent writers are still outside
+the v1 contract.
+
+## Maintenance Commands
+
+Validate the current store:
+
+```sh
+cargo run -p mneme-cli -- validate --store /tmp/mneme.json --json
+```
+
+Export and import a store:
+
+```sh
+cargo run -p mneme-cli -- export /tmp/mneme-export.json --store /tmp/mneme.json
+cargo run -p mneme-cli -- import /tmp/mneme-export.json --store /tmp/mneme-restored.json
+```
+
+Compact inactive lifecycle records while preserving active recall:
+
+```sh
+cargo run -p mneme-cli -- compact --store /tmp/mneme.json
+```
+
+Repair a corrupted current store from its backup:
+
+```sh
+cargo run -p mneme-cli -- repair --store /tmp/mneme.json --json
+```
+
+## Eval Coverage
+
+The `runtime` suite checks:
+
+- export/import round trips;
+- compaction after correction;
+- repair from backup after current-store corruption;
+- secret blocking after persisted import/export.
+
+Run it locally:
+
+```sh
+cargo run -p mneme-eval -- validate --suite runtime
+cargo run -p mneme-eval -- run --suite runtime --target mneme-v1
+cargo run -p mneme-eval -- acceptance --suite runtime --target mneme-v1
+```

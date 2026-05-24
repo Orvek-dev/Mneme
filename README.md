@@ -21,7 +21,9 @@ Mneme is pre-1.0. The useful surface today is local development and evaluation:
 - budget checks happen before extraction;
 - secret-like data is blocked from active context;
 - corrections and forgets are auditable lifecycle transitions;
-- extraction and storage are behind adapter boundaries.
+- local JSON stores include schema metadata, atomic writes, backups, repair,
+  import/export, and compaction;
+- extraction and storage are behind adapter boundaries;
 - model-backed extraction experiments can use a provider-neutral command
   adapter without adding API keys to the repo.
 - a public OpenAI wrapper example can run through the same command protocol,
@@ -48,6 +50,8 @@ cargo run -p mneme-cli -- context "local-first" --store "$STORE" --json
 cargo run -p mneme-cli -- correct "user prefers local-first tools" "user prefers desktop IDE" --store "$STORE"
 cargo run -p mneme-cli -- forget "user prefers desktop IDE" --store "$STORE"
 cargo run -p mneme-cli -- snapshot --store "$STORE" --json
+cargo run -p mneme-cli -- validate --store "$STORE"
+cargo run -p mneme-cli -- compact --store "$STORE"
 ```
 
 Without `--store`, the CLI writes to `.mneme/mneme-v1.json` in the current
@@ -70,6 +74,13 @@ Validate and run the public core suite:
 cargo run -p mneme-eval -- validate --suite core
 cargo run -p mneme-eval -- run --suite core --target fake
 cargo run -p mneme-eval -- run --suite core --target mneme-v1
+```
+
+Run the runtime maintenance suite:
+
+```sh
+cargo run -p mneme-eval -- validate --suite runtime
+cargo run -p mneme-eval -- run --suite runtime --target mneme-v1
 ```
 
 Run the opt-in command extraction suite:
@@ -108,6 +119,7 @@ Run the acceptance gate:
 ```sh
 cargo run -p mneme-eval -- acceptance --suite core --target fake
 cargo run -p mneme-eval -- acceptance --suite core --target mneme-v1
+cargo run -p mneme-eval -- acceptance --suite runtime --target mneme-v1
 ```
 
 Use `--json` for machine-readable reports.
@@ -141,6 +153,7 @@ spec/               feature specs and verification maps
 ## Documentation
 
 - [Local CLI](docs/local-cli.md)
+- [Personal Runtime](docs/personal-runtime.md)
 - [Eval Scenario Format](docs/eval-scenario-format.md)
 - [Eval Acceptance Gate](docs/eval-harness-acceptance.md)
 - [Eval Target Adapter Contract](docs/eval-target-adapter-contract.md)
