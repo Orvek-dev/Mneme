@@ -24,7 +24,8 @@ Mneme is pre-1.0. The useful surface today is local development and evaluation:
 - secret-like data is blocked from active context;
 - corrections and forgets are auditable lifecycle transitions;
 - stored claims can be reviewed and changed by stable claim ID;
-- stored memory can be exported as Markdown or JSON review artifacts;
+- stored memory can be exported as Markdown or JSON review artifacts with
+  sensitive claim text redacted by default;
 - local JSON stores include schema metadata, write locks, atomic writes,
   backups, repair, import/export, and compaction;
 - agents can open and close task sessions with scoped context and post-task

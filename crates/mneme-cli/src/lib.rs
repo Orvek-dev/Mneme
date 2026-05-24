@@ -468,10 +468,12 @@ Export the current store state to JSON.
 Example:
   mneme export /tmp/mneme-export.json --store /tmp/mneme.json"#;
 
-const MNEME_REVIEW_HELP: &str = r#"Usage: mneme review <path> [--store <path>] [--format markdown|json] [--json]
+const MNEME_REVIEW_HELP: &str = r#"Usage: mneme review <path> [--store <path>] [--format markdown|json] [--include-sensitive] [--json]
 
 Export a memory review artifact summarizing stored claims, lifecycle status,
-scope distribution, source events, sessions, and store metadata.
+scope distribution, source events, sessions, and store metadata. Sensitive
+claim text is redacted by default. Use --include-sensitive only for local,
+private inspection.
 
 Examples:
   mneme review /tmp/mneme-review.md --store /tmp/mneme.json
@@ -565,6 +567,7 @@ struct ClaimsOptions {
 struct ReviewOptions {
     common: CommonOptions,
     format: ReviewFormat,
+    include_sensitive: bool,
 }
 
 impl Default for ReviewOptions {
@@ -572,6 +575,7 @@ impl Default for ReviewOptions {
         Self {
             common: CommonOptions::default(),
             format: ReviewFormat::Markdown,
+            include_sensitive: false,
         }
     }
 }
@@ -696,10 +700,32 @@ struct ReviewReport {
     blocked_secret_claim_count: usize,
     superseded_claim_count: usize,
     forgotten_claim_count: usize,
+    redaction: ReviewRedactionReport,
     status_counts: Vec<ClaimStatusCount>,
     scope_counts: Vec<ClaimScopeCount>,
     claims: Vec<ClaimSummary>,
     sessions: Vec<SessionSummary>,
+}
+
+#[derive(Debug, Serialize)]
+struct ReviewRedactionReport {
+    enabled: bool,
+    policy: String,
+    redacted_claim_count: usize,
+    redacted_field_count: usize,
+}
+
+#[derive(Debug, Default)]
+struct ReviewRedactionCounters {
+    claim_count: usize,
+    field_count: usize,
+}
+
+#[derive(Debug, Clone, Copy)]
+enum ReviewClaimField {
+    Subject,
+    Predicate,
+    Object,
 }
 
 #[derive(Debug, Serialize)]
@@ -1052,7 +1078,13 @@ fn run_review(raw_args: Vec<String>, writer: &mut impl Write) -> Result<(), CliE
     let store_path = resolve_store_path(&options.common)?;
     let engine = load_engine(&store_path)?;
     let snapshot = engine.snapshot();
-    let report = build_review_report(&store_path, &path, options.format, &snapshot);
+    let report = build_review_report(
+        &store_path,
+        &path,
+        options.format,
+        !options.include_sensitive,
+        &snapshot,
+    );
     write_review_artifact(&path, &report, options.format)?;
     emit_review_report(&report, options.common.json, writer)
 }
@@ -1672,6 +1704,9 @@ fn parse_review_args(raw_args: Vec<String>) -> Result<(PathBuf, ReviewOptions), 
                 idx += 1;
                 options.format = parse_review_format(required_arg(&raw_args, idx, "--format")?)?;
             }
+            "--include-sensitive" => {
+                options.include_sensitive = true;
+            }
             value if value.starts_with('-') => {
                 return Err(CliError::invalid_cli(format!(
                     "unknown review option: {value}"
@@ -1683,7 +1718,7 @@ fn parse_review_args(raw_args: Vec<String>) -> Result<(PathBuf, ReviewOptions), 
     }
     if positionals.len() != 1 {
         return Err(CliError::invalid_cli(
-            "usage: mneme review <path> [--store <path>] [--format markdown|json] [--json]",
+            "usage: mneme review <path> [--store <path>] [--format markdown|json] [--include-sensitive] [--json]",
         ));
     }
     Ok((PathBuf::from(positionals.remove(0)), options))
@@ -2046,6 +2081,7 @@ fn build_review_report(
     store_path: &Path,
     path: &Path,
     format: ReviewFormat,
+    redact_sensitive: bool,
     snapshot: &EngineSnapshot,
 ) -> ReviewReport {
     let active_claim_count = count_claims_with_status(&snapshot.claims, ClaimStatus::Active);
@@ -2058,6 +2094,12 @@ fn build_review_report(
     for claim in &snapshot.claims {
         *scope_counts.entry(claim.scope.clone()).or_default() += 1;
     }
+    let mut redaction_counters = ReviewRedactionCounters::default();
+    let claims = snapshot
+        .claims
+        .iter()
+        .map(|claim| review_claim_summary(claim, redact_sensitive, &mut redaction_counters))
+        .collect();
     ReviewReport {
         command: "review".to_owned(),
         store: store_path.display().to_string(),
@@ -2072,6 +2114,16 @@ fn build_review_report(
         blocked_secret_claim_count,
         superseded_claim_count,
         forgotten_claim_count,
+        redaction: ReviewRedactionReport {
+            enabled: redact_sensitive,
+            policy: if redact_sensitive {
+                "default_safe".to_owned()
+            } else {
+                "include_sensitive".to_owned()
+            },
+            redacted_claim_count: redaction_counters.claim_count,
+            redacted_field_count: redaction_counters.field_count,
+        },
         status_counts: vec![
             ClaimStatusCount {
                 status: ClaimStatus::Active.as_str().to_owned(),
@@ -2094,13 +2146,105 @@ fn build_review_report(
             .into_iter()
             .map(|(scope, count)| ClaimScopeCount { scope, count })
             .collect(),
-        claims: snapshot.claims.iter().map(ClaimSummary::from).collect(),
+        claims,
         sessions: snapshot.sessions.iter().map(SessionSummary::from).collect(),
     }
 }
 
 fn count_claims_with_status(claims: &[ClaimRecord], status: ClaimStatus) -> usize {
     claims.iter().filter(|claim| claim.status == status).count()
+}
+
+fn review_claim_summary(
+    claim: &ClaimRecord,
+    redact_sensitive: bool,
+    counters: &mut ReviewRedactionCounters,
+) -> ClaimSummary {
+    let mut redacted_fields = 0;
+    let subject = redact_review_field(
+        &claim.subject,
+        claim.status,
+        ReviewClaimField::Subject,
+        redact_sensitive,
+        &mut redacted_fields,
+    );
+    let predicate = redact_review_field(
+        &claim.predicate,
+        claim.status,
+        ReviewClaimField::Predicate,
+        redact_sensitive,
+        &mut redacted_fields,
+    );
+    let object = redact_review_field(
+        &claim.object,
+        claim.status,
+        ReviewClaimField::Object,
+        redact_sensitive,
+        &mut redacted_fields,
+    );
+    if redacted_fields > 0 {
+        counters.claim_count += 1;
+        counters.field_count += redacted_fields;
+    }
+    ClaimSummary {
+        id: claim.id.clone(),
+        subject,
+        predicate,
+        object,
+        status: claim.status.as_str().to_owned(),
+        scope: claim.scope.clone(),
+        source_event_ids: claim.source_event_ids.clone(),
+    }
+}
+
+fn redact_review_field(
+    value: &str,
+    status: ClaimStatus,
+    field: ReviewClaimField,
+    redact_sensitive: bool,
+    redacted_fields: &mut usize,
+) -> String {
+    if !redact_sensitive {
+        return value.to_owned();
+    }
+    let blocked_secret_object =
+        status == ClaimStatus::BlockedSecret && matches!(field, ReviewClaimField::Object);
+    if blocked_secret_object {
+        *redacted_fields += 1;
+        return "[redacted:blocked_secret]".to_owned();
+    }
+    if looks_like_sensitive_text(value) {
+        *redacted_fields += 1;
+        return "[redacted:secret_like]".to_owned();
+    }
+    value.to_owned()
+}
+
+fn looks_like_sensitive_text(value: &str) -> bool {
+    let lower = value.to_ascii_lowercase();
+    lower.contains("api_key=")
+        || lower.contains("api key")
+        || lower.contains("secret=")
+        || lower.contains("token=")
+        || lower.contains("access_token=")
+        || lower.contains("password=")
+        || contains_key_like_prefix(value)
+}
+
+fn contains_key_like_prefix(value: &str) -> bool {
+    value.split_whitespace().any(|part| {
+        let token = part.trim_matches(|character: char| {
+            !(character.is_ascii_alphanumeric() || character == '-' || character == '_')
+        });
+        if let Some(rest) = token.strip_prefix("sk-") {
+            rest.len() >= 16
+                && rest.chars().all(|character| {
+                    character.is_ascii_alphanumeric() || character == '-' || character == '_'
+                })
+        } else {
+            false
+        }
+    })
 }
 
 fn write_review_artifact(
@@ -2135,6 +2279,12 @@ fn render_review_markdown(report: &ReviewReport) -> String {
     output.push_str(&format!("- Events: `{}`\n", report.event_count));
     output.push_str(&format!("- Claims: `{}`\n", report.claim_count));
     output.push_str(&format!("- Sessions: `{}`\n", report.session_count));
+    output.push_str(&format!(
+        "- Redaction: `{}` (redacted claims: `{}`, redacted fields: `{}`)\n",
+        report.redaction.policy,
+        report.redaction.redacted_claim_count,
+        report.redaction.redacted_field_count
+    ));
 
     output.push_str("\n## Claim Status Counts\n\n");
     output.push_str("| Status | Count |\n");
@@ -2527,6 +2677,7 @@ mod tests {
         let review_text = String::from_utf8(review_output)?;
         assert!(review_text.contains("Usage: mneme review <path>"));
         assert!(review_text.contains("--format markdown|json"));
+        assert!(review_text.contains("--include-sensitive"));
         Ok(())
     }
 
@@ -2853,7 +3004,8 @@ mod tests {
         let path = temp_store_path("review-artifact-store");
         let markdown_path = temp_store_path("review-artifact").with_extension("md");
         let json_path = temp_store_path("review-artifact").with_extension("review.json");
-        for path in [&path, &markdown_path, &json_path] {
+        let raw_json_path = temp_store_path("review-artifact").with_extension("raw-review.json");
+        for path in [&path, &markdown_path, &json_path, &raw_json_path] {
             let _ = std::fs::remove_file(path);
             let _ = std::fs::remove_file(format!("{}.bak", path.display()));
         }
@@ -2946,14 +3098,22 @@ mod tests {
         assert!(markdown_report.contains("\"command\": \"review\""));
         assert!(markdown_report.contains("\"format\": \"markdown\""));
         assert!(markdown_report.contains("\"blocked_secret_claim_count\": 1"));
+        assert!(markdown_report.contains("\"enabled\": true"));
+        assert!(markdown_report.contains("\"policy\": \"default_safe\""));
+        assert!(markdown_report.contains("\"redacted_claim_count\": 1"));
+        assert!(markdown_report.contains("[redacted:blocked_secret]"));
+        assert!(!markdown_report.contains("API_KEY=FAKE_TEST_VALUE"));
 
         let markdown = std::fs::read_to_string(&markdown_path)?;
         assert!(markdown.contains("# Mneme Memory Review"));
         assert!(markdown.contains("Claim Status Counts"));
+        assert!(markdown.contains("Redaction: `default_safe`"));
         assert!(markdown.contains("claim-001"));
         assert!(markdown.contains("superseded"));
         assert!(markdown.contains("forgotten"));
         assert!(markdown.contains("blocked_secret"));
+        assert!(markdown.contains("[redacted:blocked_secret]"));
+        assert!(!markdown.contains("API_KEY=FAKE_TEST_VALUE"));
         assert!(markdown.contains("project-alpha"));
         assert!(markdown.contains("event-001"));
         assert!(markdown.contains("session-001"));
@@ -2974,14 +3134,37 @@ mod tests {
         )?;
         let stdout_text = String::from_utf8(json_stdout)?;
         assert!(stdout_text.contains("\"format\": \"json\""));
+        assert!(stdout_text.contains("\"policy\": \"default_safe\""));
+        assert!(!stdout_text.contains("API_KEY=FAKE_TEST_VALUE"));
 
         let json = std::fs::read_to_string(&json_path)?;
         assert!(json.contains("\"format\": \"json\""));
         assert!(json.contains("\"scope\": \"project-alpha\""));
         assert!(json.contains("\"blocked_secret_claim_count\": 1"));
+        assert!(json.contains("\"object\": \"[redacted:blocked_secret]\""));
+        assert!(json.contains("\"redacted_claim_count\": 1"));
+        assert!(!json.contains("API_KEY=FAKE_TEST_VALUE"));
         assert!(json.contains("\"session_count\": 1"));
 
-        for path in [&path, &markdown_path, &json_path] {
+        run_cli_with_writer(
+            vec![
+                "mneme".to_owned(),
+                "review".to_owned(),
+                raw_json_path.display().to_string(),
+                "--format".to_owned(),
+                "json".to_owned(),
+                "--include-sensitive".to_owned(),
+                "--store".to_owned(),
+                path.display().to_string(),
+            ],
+            &mut Vec::new(),
+        )?;
+        let raw_json = std::fs::read_to_string(&raw_json_path)?;
+        assert!(raw_json.contains("\"enabled\": false"));
+        assert!(raw_json.contains("\"policy\": \"include_sensitive\""));
+        assert!(raw_json.contains("API_KEY=FAKE_TEST_VALUE"));
+
+        for path in [&path, &markdown_path, &json_path, &raw_json_path] {
             let _ = std::fs::remove_file(path);
             let _ = std::fs::remove_file(format!("{}.bak", path.display()));
         }

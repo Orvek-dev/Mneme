@@ -37,6 +37,8 @@ eval update land in the same PR.
   claims.
 - Review artifacts summarize store metadata, claim status counts, scope counts,
   source event IDs, and session summaries without mutating store state.
+- Review artifacts redact blocked-secret and obvious secret-like claim text by
+  default; raw sensitive review export requires `--include-sensitive`.
 - Extraction adapters propose claims; the engine owns IDs, provenance, safety,
   audit, and lifecycle state.
 

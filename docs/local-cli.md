@@ -81,7 +81,7 @@ cargo run -p mneme-cli -- correct --claim-id claim-002 "user prefers terminal wo
 Unknown or inactive claim IDs fail before writing a lifecycle event.
 
 Use `review` when the inspection output should become a file that can be read
-or attached outside the CLI:
+or attached outside the CLI. Sensitive claim text is redacted by default:
 
 ```sh
 cargo run -p mneme-cli -- review /tmp/mneme-review.md --store /tmp/mneme.json
@@ -89,7 +89,8 @@ cargo run -p mneme-cli -- review /tmp/mneme-review.json --format json --store /t
 ```
 
 Markdown artifacts are optimized for human review. JSON artifacts carry the
-same counts and summaries for scripts.
+same counts and summaries for scripts. Use `--include-sensitive` only for
+local private inspection when raw blocked-secret claim text is required.
 
 ## Store Maintenance
 
