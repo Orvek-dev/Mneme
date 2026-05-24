@@ -543,6 +543,11 @@ fn check_store(expected: &StoreExpected, actual: &ActualState) -> Vec<CheckRepor
         store.repair_performed,
     ));
     checks.push(check_store_bool(
+        "store.restored",
+        expected.restored,
+        store.restored,
+    ));
+    checks.push(check_store_bool(
         "store.compacted",
         expected.compacted,
         store.compacted,

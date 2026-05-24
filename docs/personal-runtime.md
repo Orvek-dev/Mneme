@@ -28,7 +28,7 @@ pre-normalized file as `<store>.bak`.
 the current store. When a current store exists, it is copied to
 `<store>.bak` before replacement.
 
-Save and repair operations first create `<store>.lock` with exclusive
+Save, repair, and restore operations first create `<store>.lock` with exclusive
 `create_new` semantics. If the lock file already exists, the write is not
 attempted and callers receive a `store_lock` conflict. The lock is removed when
 the write attempt finishes.
@@ -63,7 +63,8 @@ private inspection.
 `mneme curate` turns those findings into a dry-run cleanup plan. Add `--apply`
 to forget redundant duplicate active claims by ID. Add `--compact` only when
 non-active records, including blocked-secret, superseded, and forgotten claims,
-should be removed after review.
+should be removed after review. Applied curation reports include restore
+commands so the previous backup can be checked and rolled back if needed.
 
 Validate the current store:
 
@@ -100,13 +101,25 @@ legacy store schema:
 cargo run -p mneme-cli -- repair --store /tmp/mneme.json --json
 ```
 
+Check and run an explicit rollback from a valid backup:
+
+```sh
+cargo run -p mneme-cli -- restore --check --store /tmp/mneme.json --json
+cargo run -p mneme-cli -- restore --store /tmp/mneme.json --json
+```
+
+`mneme restore` is intentionally separate from repair. Repair is for an invalid
+or legacy-compatible current store. Restore is an explicit user rollback from a
+valid `<store>.bak`; the pre-restore current file becomes the new backup.
+
 ## Eval Coverage
 
-The `runtime` suite checks:
+The core and runtime suites check:
 
 - export/import round trips;
 - compaction after correction;
 - guided curation before/after quality;
+- restore from backup after applied curation and compaction;
 - repair from backup after current-store corruption;
 - repair readiness checks in the release quality gate;
 - secret blocking after persisted import/export.

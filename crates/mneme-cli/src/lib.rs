@@ -17,7 +17,7 @@ use mneme_core::{
     MnemeConfig, MnemeEngine, MnemeExtractor, MnemeState, MnemeStore, RuleBasedExtractor,
     SessionBeginInput, SessionBeginReport, SessionEndInput, SessionEndReport, SessionError,
     SessionRecord, StateValidationReport, StoreError, StoreErrorKind, StoreFileInspection,
-    StoreFileStatus, StoreInspection, StoreRepairReport, ValidationSeverity,
+    StoreFileStatus, StoreInspection, StoreRepairReport, StoreRestoreReport, ValidationSeverity,
     DEFAULT_CONTEXT_MAX_ITEMS, PRODUCT_NAME,
 };
 use serde::Serialize;
@@ -237,8 +237,9 @@ fn run_cli_with_writer(
         "import" => run_command_or_help("import", raw_args, writer, run_import),
         "compact" => run_command_or_help("compact", raw_args, writer, run_compact),
         "repair" => run_command_or_help("repair", raw_args, writer, run_repair),
+        "restore" => run_command_or_help("restore", raw_args, writer, run_restore),
         _ => Err(CliError::invalid_cli(format!(
-            "unknown mneme command: {command}\navailable commands: init, doctor, version, ingest, remember, correct, forget, claims, quality, curate, context, snapshot, begin, end, hook, validate, export, review, import, compact, repair"
+            "unknown mneme command: {command}\navailable commands: init, doctor, version, ingest, remember, correct, forget, claims, quality, curate, context, snapshot, begin, end, hook, validate, export, review, import, compact, repair, restore"
         ))),
     }
 }
@@ -287,7 +288,7 @@ fn print_help(command: Option<&str>, writer: &mut impl Write) -> Result<(), CliE
         None => MNEME_HELP,
         Some(command) => command_help(command).ok_or_else(|| {
             CliError::invalid_cli(format!(
-                "unknown mneme help topic: {command}\navailable help topics: init, doctor, version, ingest, remember, correct, forget, claims, quality, curate, context, snapshot, begin, end, hook, validate, export, review, import, compact, repair"
+                "unknown mneme help topic: {command}\navailable help topics: init, doctor, version, ingest, remember, correct, forget, claims, quality, curate, context, snapshot, begin, end, hook, validate, export, review, import, compact, repair, restore"
             ))
         })?,
     };
@@ -318,6 +319,7 @@ fn command_help(command: &str) -> Option<&'static str> {
         "import" => Some(MNEME_IMPORT_HELP),
         "compact" => Some(MNEME_COMPACT_HELP),
         "repair" => Some(MNEME_REPAIR_HELP),
+        "restore" => Some(MNEME_RESTORE_HELP),
         _ => None,
     }
 }
@@ -348,8 +350,9 @@ Commands:
   export      Export the current store state to JSON.
   review      Export a human-readable memory review artifact.
   import      Import a store state from JSON.
-  compact     Remove inactive claims and unreferenced events.
+  compact     Remove non-active claims and unreferenced events.
   repair      Restore the current store from its backup when possible.
+  restore     Roll back the current store from a valid backup.
 
 Common options:
   --store <path>  Use an isolated JSON store.
@@ -363,6 +366,7 @@ Examples:
   mneme curate --store /tmp/mneme.json --json
   mneme context "local-first" --store /tmp/mneme.json --json
   mneme hook begin "Draft setup plan" --query "local-first" --store /tmp/mneme.json
+  mneme restore --check --store /tmp/mneme.json --json
   mneme help begin"#;
 
 const MNEME_INIT_HELP: &str = r#"Usage: mneme init [--store <path>] [--config <path>] [--agent <id>] [--scope <scope>] [--max-items <n>] [--bin <path>] [--no-bin] [--force] [--json]
@@ -532,7 +536,7 @@ Example:
 
 const MNEME_COMPACT_HELP: &str = r#"Usage: mneme compact [--store <path>] [--json]
 
-Remove inactive claims and unreferenced events.
+Remove non-active claims and unreferenced events.
 
 Example:
   mneme compact --store /tmp/mneme.json"#;
@@ -548,6 +552,19 @@ Example:
   mneme repair --check --store /tmp/mneme.json --json
   mneme repair --store /tmp/mneme.json"#;
 
+const MNEME_RESTORE_HELP: &str = r#"Usage:
+  mneme restore --check [--store <path>] [--json]
+  mneme restore [--store <path>] [--json]
+
+Inspect or roll back the current store from a valid <store>.bak file. Restore
+is explicit and works even when the current store is valid. Before replacing the
+current store, Mneme preserves that current file as the new backup so the
+restore can be reversed.
+
+Example:
+  mneme restore --check --store /tmp/mneme.json --json
+  mneme restore --store /tmp/mneme.json --json"#;
+
 #[derive(Debug, Clone, Default)]
 struct CommonOptions {
     json: bool,
@@ -562,6 +579,12 @@ struct DoctorOptions {
 
 #[derive(Debug, Clone, Default)]
 struct RepairOptions {
+    common: CommonOptions,
+    check: bool,
+}
+
+#[derive(Debug, Clone, Default)]
+struct RestoreOptions {
     common: CommonOptions,
     check: bool,
 }
@@ -1114,6 +1137,23 @@ struct RepairCliReport {
     repair: Option<StoreRepairReport>,
 }
 
+#[derive(Debug, Serialize)]
+struct RestoreCliReport {
+    command: &'static str,
+    mode: &'static str,
+    ok: bool,
+    store: String,
+    backup_path: String,
+    action: String,
+    current_status: StoreFileStatus,
+    backup_status: StoreFileStatus,
+    restore_available: bool,
+    recommendations: Vec<String>,
+    inspection: StoreInspection,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    restore: Option<StoreRestoreReport>,
+}
+
 enum CorrectTarget {
     Text {
         old_claim: String,
@@ -1360,6 +1400,16 @@ fn run_curate(raw_args: Vec<String>, writer: &mut impl Write) -> Result<(), CliE
         None
     };
     let changed = applied.event_count > 0 || applied.compaction.is_some();
+    if changed {
+        plan.next_commands.push(format!(
+            "mneme restore --check --store \"{}\" --json",
+            store_path.display()
+        ));
+        plan.next_commands.push(format!(
+            "mneme restore --store \"{}\" --json",
+            store_path.display()
+        ));
+    }
     let report = MemoryCurationReport {
         command: "curate".to_owned(),
         store: store_path.display().to_string(),
@@ -1810,6 +1860,63 @@ fn run_repair(raw_args: Vec<String>, writer: &mut impl Write) -> Result<(), CliE
     }
 }
 
+fn run_restore(raw_args: Vec<String>, writer: &mut impl Write) -> Result<(), CliError> {
+    let options = parse_restore_args(raw_args)?;
+    let store_path = resolve_store_path(&options.common)?;
+    let store = JsonFileStore::new(store_path.clone());
+    if options.check {
+        let inspection = store.inspect();
+        let action = restore_check_action(&inspection);
+        let ok = restore_action_ok(action);
+        let report = RestoreCliReport {
+            command: "restore",
+            mode: "check",
+            ok,
+            store: store_path.display().to_string(),
+            backup_path: inspection.backup_path.clone(),
+            action: action.to_owned(),
+            current_status: inspection.current.status,
+            backup_status: inspection.backup.status,
+            restore_available: restore_available(&inspection),
+            recommendations: restore_recommendations(action, &store_path),
+            inspection,
+            restore: None,
+        };
+        return emit_restore_report(&report, options.common.json, writer);
+    }
+
+    let restore = store
+        .restore_from_backup()
+        .map_err(|source| CliError::store_error("restore store", &store_path, source))?;
+    let ok = restore.restored && restore.after.current.status == StoreFileStatus::Valid;
+    let action = restore.action.clone();
+    let inspection = restore.after.clone();
+    let report = RestoreCliReport {
+        command: "restore",
+        mode: "restore",
+        ok,
+        store: store_path.display().to_string(),
+        backup_path: inspection.backup_path.clone(),
+        action: action.clone(),
+        current_status: inspection.current.status,
+        backup_status: inspection.backup.status,
+        restore_available: restore_available(&inspection),
+        recommendations: restore_recommendations(&action, &store_path),
+        inspection,
+        restore: Some(restore),
+    };
+    emit_restore_report(&report, options.common.json, writer)?;
+    if report.ok {
+        Ok(())
+    } else {
+        Err(CliError::store(
+            "restore store",
+            &store_path,
+            "store could not be restored from backup",
+        ))
+    }
+}
+
 fn parse_repair_args(raw_args: Vec<String>) -> Result<RepairOptions, CliError> {
     let mut options = RepairOptions::default();
     let mut idx = 0;
@@ -1830,6 +1937,34 @@ fn parse_repair_args(raw_args: Vec<String>) -> Result<RepairOptions, CliError> {
             value => {
                 return Err(CliError::invalid_cli(format!(
                     "unexpected repair argument: {value}"
+                )));
+            }
+        }
+        idx += 1;
+    }
+    Ok(options)
+}
+
+fn parse_restore_args(raw_args: Vec<String>) -> Result<RestoreOptions, CliError> {
+    let mut options = RestoreOptions::default();
+    let mut idx = 0;
+    while idx < raw_args.len() {
+        if parse_common_option(&raw_args, &mut idx, &mut options.common)? {
+            idx += 1;
+            continue;
+        }
+        match raw_args[idx].as_str() {
+            "--check" => {
+                options.check = true;
+            }
+            value if value.starts_with('-') => {
+                return Err(CliError::invalid_cli(format!(
+                    "unknown restore option: {value}"
+                )));
+            }
+            value => {
+                return Err(CliError::invalid_cli(format!(
+                    "unexpected restore argument: {value}"
                 )));
             }
         }
@@ -2923,6 +3058,22 @@ fn repair_action_ok(action: &str) -> bool {
     )
 }
 
+fn restore_check_action(inspection: &StoreInspection) -> &'static str {
+    if restore_available(inspection) {
+        "restore_available"
+    } else {
+        "backup_unavailable"
+    }
+}
+
+fn restore_available(inspection: &StoreInspection) -> bool {
+    inspection.backup.status == StoreFileStatus::Valid
+}
+
+fn restore_action_ok(action: &str) -> bool {
+    matches!(action, "restore_available" | "restored_from_backup")
+}
+
 fn store_file_needs_normalization(file: &StoreFileInspection) -> bool {
     file.validation.as_ref().is_some_and(|validation| {
         validation.issues.iter().any(|issue| {
@@ -2965,6 +3116,30 @@ fn repair_recommendations(action: &str, store_path: &Path) -> Vec<String> {
             "no valid backup is available for automatic repair".to_owned(),
             "inspect the store manually or run `mneme init --force` only if overwriting is intentional"
                 .to_owned(),
+        ],
+        _ => Vec::new(),
+    }
+}
+
+fn restore_recommendations(action: &str, store_path: &Path) -> Vec<String> {
+    match action {
+        "restore_available" => vec![format!(
+            "run `mneme restore --store \"{}\"` to replace current with backup; current will become the new backup",
+            store_path.display()
+        )],
+        "restored_from_backup" => vec![
+            format!(
+                "run `mneme validate --store \"{}\"` to verify the restored store",
+                store_path.display()
+            ),
+            format!(
+                "run `mneme restore --store \"{}\"` again to swap back to the pre-restore current store",
+                store_path.display()
+            ),
+        ],
+        "backup_unavailable" => vec![
+            "no valid backup is available for restore".to_owned(),
+            "run `mneme validate` and inspect the store before making further changes".to_owned(),
         ],
         _ => Vec::new(),
     }
@@ -4332,6 +4507,43 @@ fn emit_repair_report(
     Ok(())
 }
 
+fn emit_restore_report(
+    report: &RestoreCliReport,
+    json: bool,
+    writer: &mut impl Write,
+) -> Result<(), CliError> {
+    if json {
+        return write_json(writer, report);
+    }
+    writeln!(
+        writer,
+        "mneme: restore {} (mode={}, action={}, ok={})",
+        report.store, report.mode, report.action, report.ok
+    )
+    .map_err(|source| CliError::io("write", Path::new("<stdout>"), source))?;
+    writeln!(
+        writer,
+        "mneme: current={} backup={} restore_available={}",
+        store_file_status(report.current_status),
+        store_file_status(report.backup_status),
+        report.restore_available
+    )
+    .map_err(|source| CliError::io("write", Path::new("<stdout>"), source))?;
+    if let Some(restore) = &report.restore {
+        writeln!(
+            writer,
+            "mneme: restored={} current_preserved_as_backup={}",
+            restore.restored, restore.current_preserved_as_backup
+        )
+        .map_err(|source| CliError::io("write", Path::new("<stdout>"), source))?;
+    }
+    for recommendation in &report.recommendations {
+        writeln!(writer, "recommendation: {recommendation}")
+            .map_err(|source| CliError::io("write", Path::new("<stdout>"), source))?;
+    }
+    Ok(())
+}
+
 fn write_json<T: Serialize>(writer: &mut impl Write, value: &T) -> Result<(), CliError> {
     let json = serde_json::to_string_pretty(value).map_err(CliError::json)?;
     writeln!(writer, "{json}")
@@ -4354,6 +4566,7 @@ mod tests {
         assert!(text.contains("claims"));
         assert!(text.contains("quality"));
         assert!(text.contains("curate"));
+        assert!(text.contains("restore"));
         assert!(text.contains("review"));
 
         let mut init_output = Vec::new();
@@ -4427,6 +4640,20 @@ mod tests {
         let repair_text = String::from_utf8(repair_output)?;
         assert!(repair_text.contains("mneme repair --check"));
         assert!(repair_text.contains("normalize"));
+
+        let mut restore_output = Vec::new();
+        run_cli_with_writer(
+            vec![
+                "mneme".to_owned(),
+                "restore".to_owned(),
+                "--help".to_owned(),
+            ],
+            &mut restore_output,
+        )?;
+        let restore_text = String::from_utf8(restore_output)?;
+        assert!(restore_text.contains("Usage:"));
+        assert!(restore_text.contains("mneme restore --check"));
+        assert!(restore_text.contains("roll back"));
         Ok(())
     }
 
@@ -5125,9 +5352,140 @@ mod tests {
         assert!(apply.contains("\"duplicate_active_group_count\": 0"));
         assert!(apply.contains("\"blocked_secret_claim_count\": 0"));
         assert!(apply.contains("\"inactive_claim_count\": 0"));
+        assert!(apply.contains("mneme restore --check"));
         assert!(!apply.contains("API_KEY=FAKE_TEST_VALUE"));
         assert!(backup_path.exists());
 
+        let mut final_quality_output = Vec::new();
+        run_cli_with_writer(
+            vec![
+                "mneme".to_owned(),
+                "quality".to_owned(),
+                "--store".to_owned(),
+                path.display().to_string(),
+                "--json".to_owned(),
+            ],
+            &mut final_quality_output,
+        )?;
+        let final_quality = String::from_utf8(final_quality_output)?;
+        assert!(final_quality.contains("\"health\": \"ok\""));
+        assert!(final_quality.contains("\"review_item_count\": 0"));
+
+        let _ = std::fs::remove_file(&path);
+        let _ = std::fs::remove_file(&backup_path);
+        Ok(())
+    }
+
+    #[test]
+    fn restore_rolls_back_curated_store_from_backup() -> Result<(), Box<dyn std::error::Error>> {
+        let path = temp_store_path("restore-curation");
+        let backup_path = std::path::PathBuf::from(format!("{}.bak", path.display()));
+        let _ = std::fs::remove_file(&path);
+        let _ = std::fs::remove_file(&backup_path);
+
+        for claim in [
+            "user prefers reversible curation",
+            "user prefers reversible curation",
+            "user token API_KEY=FAKE_TEST_VALUE",
+            "user prefers old restore notes",
+        ] {
+            run_cli_with_writer(
+                vec![
+                    "mneme".to_owned(),
+                    "remember".to_owned(),
+                    claim.to_owned(),
+                    "--store".to_owned(),
+                    path.display().to_string(),
+                ],
+                &mut Vec::new(),
+            )?;
+        }
+        run_cli_with_writer(
+            vec![
+                "mneme".to_owned(),
+                "correct".to_owned(),
+                "--claim-id".to_owned(),
+                "claim-004".to_owned(),
+                "user prefers current restore notes".to_owned(),
+                "--store".to_owned(),
+                path.display().to_string(),
+            ],
+            &mut Vec::new(),
+        )?;
+        run_cli_with_writer(
+            vec![
+                "mneme".to_owned(),
+                "curate".to_owned(),
+                "--apply".to_owned(),
+                "--compact".to_owned(),
+                "--store".to_owned(),
+                path.display().to_string(),
+            ],
+            &mut Vec::new(),
+        )?;
+
+        let mut check_output = Vec::new();
+        run_cli_with_writer(
+            vec![
+                "mneme".to_owned(),
+                "restore".to_owned(),
+                "--check".to_owned(),
+                "--store".to_owned(),
+                path.display().to_string(),
+                "--json".to_owned(),
+            ],
+            &mut check_output,
+        )?;
+        let check = String::from_utf8(check_output)?;
+        assert!(check.contains("\"command\": \"restore\""));
+        assert!(check.contains("\"mode\": \"check\""));
+        assert!(check.contains("\"action\": \"restore_available\""));
+        assert!(check.contains("\"restore_available\": true"));
+
+        let mut restore_output = Vec::new();
+        run_cli_with_writer(
+            vec![
+                "mneme".to_owned(),
+                "restore".to_owned(),
+                "--store".to_owned(),
+                path.display().to_string(),
+                "--json".to_owned(),
+            ],
+            &mut restore_output,
+        )?;
+        let restore = String::from_utf8(restore_output)?;
+        assert!(restore.contains("\"mode\": \"restore\""));
+        assert!(restore.contains("\"action\": \"restored_from_backup\""));
+        assert!(restore.contains("\"restored\": true"));
+        assert!(restore.contains("\"current_preserved_as_backup\": true"));
+
+        let mut restored_quality_output = Vec::new();
+        run_cli_with_writer(
+            vec![
+                "mneme".to_owned(),
+                "quality".to_owned(),
+                "--store".to_owned(),
+                path.display().to_string(),
+                "--json".to_owned(),
+            ],
+            &mut restored_quality_output,
+        )?;
+        let restored_quality = String::from_utf8(restored_quality_output)?;
+        assert!(restored_quality.contains("\"health\": \"attention_required\""));
+        assert!(restored_quality.contains("\"duplicate_active_group_count\": 1"));
+        assert!(restored_quality.contains("\"blocked_secret_claim_count\": 1"));
+        assert!(restored_quality.contains("\"inactive_claim_count\": 1"));
+        assert!(!restored_quality.contains("API_KEY=FAKE_TEST_VALUE"));
+
+        run_cli_with_writer(
+            vec![
+                "mneme".to_owned(),
+                "restore".to_owned(),
+                "--store".to_owned(),
+                path.display().to_string(),
+            ],
+            &mut Vec::new(),
+        )?;
         let mut final_quality_output = Vec::new();
         run_cli_with_writer(
             vec![

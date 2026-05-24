@@ -36,6 +36,7 @@ mneme context "local-first" --store "$STORE" --json
 mneme quality --store "$STORE" --json
 mneme curate --store "$STORE" --json
 mneme repair --check --store "$STORE" --json
+mneme restore --check --store "$STORE" --json
 mneme hook doctor --store "$STORE"
 scripts/mneme-agent-hook.sh doctor
 MNEME_AGENT_HOOK_CONFIG=examples/mneme-agent-hook.env.example scripts/mneme-agent-hook.sh doctor

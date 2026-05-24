@@ -232,6 +232,7 @@ pub(crate) struct StoreActual {
     pub(crate) valid: bool,
     pub(crate) backup_present: bool,
     pub(crate) repair_performed: bool,
+    pub(crate) restored: bool,
     pub(crate) compacted: bool,
     pub(crate) imported: bool,
     pub(crate) generation: Option<u64>,

@@ -1104,6 +1104,37 @@ impl JsonFileStore {
             after: self.inspect(),
         })
     }
+
+    /// Restores the current store from a valid backup even when current is valid.
+    ///
+    /// The current file is copied to the backup path before the older backup
+    /// state replaces it, so a restore can be reversed by restoring again.
+    pub fn restore_from_backup(&self) -> Result<StoreRestoreReport, StoreError> {
+        let _lock = acquire_store_lock(&self.path)?;
+        let before = self.inspect();
+        if before.backup.status != StoreFileStatus::Valid {
+            return Ok(StoreRestoreReport {
+                restored: false,
+                action: "backup_unavailable".to_owned(),
+                current_preserved_as_backup: false,
+                before,
+                after: self.inspect(),
+            });
+        }
+
+        let state = read_state_file(&self.backup_path())?
+            .ok_or_else(|| StoreError::new("backup disappeared before restore"))?;
+        backup_current_file(&self.path)?;
+        let current_preserved_as_backup = before.current.status != StoreFileStatus::Missing;
+        write_state_atomic(&self.path, &state.prepared_for_save())?;
+        Ok(StoreRestoreReport {
+            restored: true,
+            action: "restored_from_backup".to_owned(),
+            current_preserved_as_backup,
+            before,
+            after: self.inspect(),
+        })
+    }
 }
 
 impl MnemeStore for JsonFileStore {
@@ -1353,6 +1384,21 @@ pub struct StoreRepairReport {
     /// Inspection before repair.
     pub before: StoreInspection,
     /// Inspection after repair.
+    pub after: StoreInspection,
+}
+
+/// Result of explicitly restoring the current store from backup.
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct StoreRestoreReport {
+    /// Whether the current store was restored from backup.
+    pub restored: bool,
+    /// Stable action identifier.
+    pub action: String,
+    /// Whether the previous current file was preserved as the new backup.
+    pub current_preserved_as_backup: bool,
+    /// Inspection before restore.
+    pub before: StoreInspection,
+    /// Inspection after restore.
     pub after: StoreInspection,
 }
 
@@ -2859,6 +2905,53 @@ mod tests {
             .any(|record| record.from_schema_version == 1
                 && record.to_schema_version == MNEME_STATE_SCHEMA_VERSION));
         assert_eq!(store.inspect().backup.schema_version, Some(1));
+
+        let _ = std::fs::remove_file(&path);
+        let _ = std::fs::remove_file(store.backup_path());
+        let _ = std::fs::remove_file(store.lock_path());
+        Ok(())
+    }
+
+    #[test]
+    fn restore_swaps_current_store_with_valid_backup() -> Result<(), Box<dyn std::error::Error>> {
+        let path = temp_store_path("restore-backup");
+        let _ = std::fs::remove_file(&path);
+        let _ = std::fs::remove_file(backup_path_for(&path));
+        let _ = std::fs::remove_file(lock_path_for(&path));
+
+        let mut engine = MnemeEngine::new(MnemeConfig::default());
+        engine.ingest_event(EventInput {
+            speaker_id: "user".to_owned(),
+            actor_agent_id: None,
+            text: "remember: user prefers before restore".to_owned(),
+            scope: "private".to_owned(),
+            trust_level: "trusted_user".to_owned(),
+        })?;
+        let mut store = JsonFileStore::new(path.clone());
+        engine.persist(&mut store)?;
+
+        engine.ingest_event(EventInput {
+            speaker_id: "user".to_owned(),
+            actor_agent_id: None,
+            text: "remember: user prefers after restore".to_owned(),
+            scope: "private".to_owned(),
+            trust_level: "trusted_user".to_owned(),
+        })?;
+        engine.persist(&mut store)?;
+
+        let before_restore = store.load()?.ok_or("state should exist")?;
+        assert_eq!(before_restore.claims.len(), 2);
+        assert_eq!(store.inspect().backup.claim_count, Some(1));
+
+        let restore = store.restore_from_backup()?;
+        assert!(restore.restored);
+        assert_eq!(restore.action, "restored_from_backup");
+        assert!(restore.current_preserved_as_backup);
+
+        let restored = store.load()?.ok_or("state should exist")?;
+        assert_eq!(restored.claims.len(), 1);
+        assert_eq!(restored.claims[0].object, "before restore");
+        assert_eq!(store.inspect().backup.claim_count, Some(2));
 
         let _ = std::fs::remove_file(&path);
         let _ = std::fs::remove_file(store.backup_path());
