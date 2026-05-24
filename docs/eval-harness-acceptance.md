@@ -84,8 +84,10 @@ The current suites do not yet cover:
 
 The opt-in `model` suite covers:
 
-- implicit preference extraction through a command-backed adapter;
-- no-claim handling for non-memory events;
+- implicit durable preference extraction through a command-backed adapter;
+- communication, format, and project-scoped preference extraction;
+- no-claim handling for small talk, transient instructions, and quoted sample
+  data;
 - secret blocking after command extraction;
 - explicit correction lifecycle after command extraction.
 

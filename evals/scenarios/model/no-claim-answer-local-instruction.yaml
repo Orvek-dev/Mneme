@@ -1,0 +1,30 @@
+id: model-no-claim-answer-local-instruction
+tags:
+  - model
+  - command-extractor
+  - no-claim
+  - over-extraction
+  - category-no-claim
+  - category-over-extraction
+budget:
+  daily_cloud_tokens: 100
+events:
+  - speaker_id: user
+    actor_agent_id: codex
+    scope: private
+    trust_level: trusted_user
+    text: "In this answer, do not mention Mneme."
+expected:
+  event_append:
+    count: 1
+  claims:
+    - subject: user
+      predicate: prefers
+      object: not mentioning Mneme
+      must_not_exist: true
+    - subject: user
+      predicate: avoids
+      object: Mneme
+      must_not_exist: true
+  budget:
+    hard_cap_violations: 0

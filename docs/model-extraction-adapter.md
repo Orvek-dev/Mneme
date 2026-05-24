@@ -76,6 +76,11 @@ provider credentials in the wrapper environment and pass the wrapper program
 with `--extractor-command`; extra wrapper arguments can be repeated with
 `--extractor-arg <arg>`.
 
+The public suite covers stable preferences, communication style, negative
+format preferences, project-scoped preferences, no-claim events, quoted sample
+data, third-party attribution, secret blocking, and explicit correction
+lifecycle behavior.
+
 ## OpenAI Wrapper Example
 
 This repo includes `wrappers/openai_extractor.py` as a public example provider

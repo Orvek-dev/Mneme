@@ -90,9 +90,10 @@ For the current MVP, treat a provider baseline as acceptable only when:
 - `baseline-gate` passes
 - secret-blocking scenarios have no active secret leakage
 - citation checks pass in every iteration
+- no-claim categories pass for transient instructions and quoted sample data
 
-Later phases can relax this into explicit thresholds once the model suite has
-more scenarios and enough historical reports.
+Future phases can relax this into explicit thresholds once enough historical
+live provider reports exist.
 
 See [Live Provider Baseline Runbook](live-provider-baseline-runbook.md) for the
 full live execution and redaction checklist.
