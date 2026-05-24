@@ -50,6 +50,8 @@ eval update land in the same PR.
   file and text patterns before release.
 - `scripts/package-check.sh` verifies workspace package assembly and blocks
   known private or generated files from package contents.
+- `scripts/distribution-policy-check.sh` guards the current pending-license
+  state and disabled registry publication policy.
 
 ## Unstable Areas
 
