@@ -18,6 +18,9 @@ use serde::{Deserialize, Serialize};
 /// Current persisted state schema version for v1 local stores.
 pub const MNEME_STATE_SCHEMA_VERSION: u32 = 2;
 
+/// Default maximum number of context items returned by retrieval.
+pub const DEFAULT_CONTEXT_MAX_ITEMS: usize = 8;
+
 /// Personal-memory engine for Mneme v1.
 #[derive(Debug, Clone)]
 pub struct MnemeEngine {
@@ -197,14 +200,11 @@ impl MnemeEngine {
     pub fn build_context_pack_with(&mut self, query: ContextQuery) -> ContextPack {
         let query_text = query.text;
         let allowed_scopes = normalize_allowed_scopes(query.allowed_scopes);
-        let query_terms = query_text
-            .split_whitespace()
-            .map(|term| term.to_ascii_lowercase())
-            .collect::<Vec<_>>();
-        let mut items = Vec::new();
+        let query_terms = normalize_query_terms(&query_text);
+        let mut candidates = Vec::new();
         let mut omitted = Vec::new();
 
-        for claim in &self.claims {
+        for (claim_index, claim) in self.claims.iter().enumerate() {
             if claim.status != ClaimStatus::Active {
                 omitted.push(OmittedContextItem {
                     claim_id: claim.id.clone(),
@@ -223,21 +223,42 @@ impl MnemeEngine {
             }
 
             let claim_text = claim.text();
-            let claim_text_lower = claim_text.to_ascii_lowercase();
-            let matches_query = query_terms.is_empty()
-                || query_terms
-                    .iter()
-                    .any(|term| claim_text_lower.contains(term));
-            if matches_query {
-                items.push(ContextItem {
-                    claim_id: claim.id.clone(),
-                    claim_text,
-                    source_event_ids: claim.source_event_ids.clone(),
+            if let Some(relevance) = score_context_match(&query_text, &query_terms, &claim_text) {
+                candidates.push(RankedContextCandidate {
+                    claim_index,
+                    item: ContextItem {
+                        claim_id: claim.id.clone(),
+                        claim_text,
+                        source_event_ids: claim.source_event_ids.clone(),
+                        score: relevance.score,
+                        matched_terms: relevance.matched_terms,
+                        match_reason: relevance.reason,
+                    },
                 });
             } else {
                 omitted.push(OmittedContextItem {
                     claim_id: claim.id.clone(),
                     reason: "low_relevance".to_owned(),
+                });
+            }
+        }
+
+        candidates.sort_by(|left, right| {
+            right
+                .item
+                .score
+                .cmp(&left.item.score)
+                .then_with(|| left.claim_index.cmp(&right.claim_index))
+        });
+
+        let mut items = Vec::new();
+        for candidate in candidates {
+            if items.len() < query.max_items {
+                items.push(candidate.item);
+            } else {
+                omitted.push(OmittedContextItem {
+                    claim_id: candidate.item.claim_id,
+                    reason: format!("context_budget_exceeded:max_items={}", query.max_items),
                 });
             }
         }
@@ -257,10 +278,10 @@ impl MnemeEngine {
     /// Starts an agent session and returns task-scoped context.
     pub fn begin_session(&mut self, input: SessionBeginInput) -> SessionBeginReport {
         let query = input.query.unwrap_or_else(|| input.task.clone());
-        let context_pack = self.build_context_pack_with(ContextQuery::with_allowed_scopes(
-            query.clone(),
-            input.allowed_scopes,
-        ));
+        let context_pack = self.build_context_pack_with(
+            ContextQuery::with_allowed_scopes(query.clone(), input.allowed_scopes)
+                .with_max_items(input.max_items),
+        );
         let session = SessionRecord {
             id: next_id("session", self.sessions.len() + 1),
             task: input.task,
@@ -794,6 +815,9 @@ pub struct SessionBeginInput {
     /// Memory scopes that can be retrieved at session begin.
     #[serde(default = "default_allowed_scopes")]
     pub allowed_scopes: Vec<String>,
+    /// Maximum number of context items returned at session begin.
+    #[serde(default = "default_context_max_items")]
+    pub max_items: usize,
 }
 
 /// Input used to end an agent session.
@@ -1328,7 +1352,11 @@ pub struct ContextQuery {
     /// Query text used for relevance matching.
     pub text: String,
     /// Memory scopes the caller is authorized to retrieve.
+    #[serde(default = "default_allowed_scopes")]
     pub allowed_scopes: Vec<String>,
+    /// Maximum number of relevant items returned to the caller.
+    #[serde(default = "default_context_max_items")]
+    pub max_items: usize,
 }
 
 impl ContextQuery {
@@ -1338,6 +1366,7 @@ impl ContextQuery {
         Self {
             text: text.into(),
             allowed_scopes: default_allowed_scopes(),
+            max_items: DEFAULT_CONTEXT_MAX_ITEMS,
         }
     }
 
@@ -1350,7 +1379,15 @@ impl ContextQuery {
         Self {
             text: text.into(),
             allowed_scopes: allowed_scopes.into_iter().map(Into::into).collect(),
+            max_items: DEFAULT_CONTEXT_MAX_ITEMS,
         }
+    }
+
+    /// Sets the maximum number of context items returned by retrieval.
+    #[must_use]
+    pub const fn with_max_items(mut self, max_items: usize) -> Self {
+        self.max_items = max_items;
+        self
     }
 }
 
@@ -1363,6 +1400,12 @@ pub struct ContextItem {
     pub claim_text: String,
     /// Source event IDs cited by this context item.
     pub source_event_ids: Vec<String>,
+    /// Deterministic relevance score used for ranking.
+    pub score: u32,
+    /// Query terms matched by this item.
+    pub matched_terms: Vec<String>,
+    /// Stable reason describing why this item matched.
+    pub match_reason: String,
 }
 
 /// Context candidate intentionally omitted from the pack.
@@ -1840,8 +1883,90 @@ fn estimate_tokens(text: &str) -> u32 {
     u32::try_from(count).unwrap_or(u32::MAX).max(1)
 }
 
+#[derive(Debug, Clone)]
+struct RankedContextCandidate {
+    claim_index: usize,
+    item: ContextItem,
+}
+
+#[derive(Debug, Clone)]
+struct ContextMatch {
+    score: u32,
+    matched_terms: Vec<String>,
+    reason: String,
+}
+
+fn score_context_match(
+    query_text: &str,
+    query_terms: &[String],
+    claim_text: &str,
+) -> Option<ContextMatch> {
+    if query_terms.is_empty() {
+        return Some(ContextMatch {
+            score: 0,
+            matched_terms: Vec::new(),
+            reason: "empty_query".to_owned(),
+        });
+    }
+
+    let claim_text_lower = claim_text.to_ascii_lowercase();
+    let matched_terms = query_terms
+        .iter()
+        .filter(|term| claim_text_lower.contains(term.as_str()))
+        .cloned()
+        .collect::<Vec<_>>();
+    if matched_terms.is_empty() {
+        return None;
+    }
+
+    let phrase = normalize_query_phrase(query_text);
+    let phrase_matches = matched_terms.len() > 1 && claim_text_lower.contains(&phrase);
+    let term_score = u32::try_from(matched_terms.len())
+        .unwrap_or(u32::MAX / 10)
+        .saturating_mul(10);
+    let score = if phrase_matches {
+        term_score.saturating_add(5)
+    } else {
+        term_score
+    };
+
+    Some(ContextMatch {
+        score,
+        matched_terms,
+        reason: if phrase_matches {
+            "phrase_match".to_owned()
+        } else {
+            "term_match".to_owned()
+        },
+    })
+}
+
+fn normalize_query_terms(text: &str) -> Vec<String> {
+    let mut terms = Vec::new();
+    for raw in text.split_whitespace() {
+        let term = normalize_query_token(raw);
+        if !term.is_empty() && !terms.contains(&term) {
+            terms.push(term);
+        }
+    }
+    terms
+}
+
+fn normalize_query_phrase(text: &str) -> String {
+    normalize_query_terms(text).join(" ")
+}
+
+fn normalize_query_token(raw: &str) -> String {
+    raw.trim_matches(|ch: char| ch.is_ascii_punctuation())
+        .to_ascii_lowercase()
+}
+
 fn default_allowed_scopes() -> Vec<String> {
     vec!["private".to_owned()]
+}
+
+const fn default_context_max_items() -> usize {
+    DEFAULT_CONTEXT_MAX_ITEMS
 }
 
 fn normalize_allowed_scopes(scopes: Vec<String>) -> BTreeSet<String> {
@@ -2061,6 +2186,49 @@ mod tests {
             project_context.items[0].claim_text,
             "user prefers project roadmap reviews"
         );
+        Ok(())
+    }
+
+    #[test]
+    fn context_query_ranks_and_caps_relevant_items() -> Result<(), Box<dyn std::error::Error>> {
+        let mut engine = MnemeEngine::new(MnemeConfig {
+            daily_cloud_tokens: 100,
+        });
+        for text in [
+            "remember: user prefers launch templates",
+            "remember: user prefers review summaries",
+            "remember: user prefers launch review checklists",
+            "remember: user prefers color palettes",
+        ] {
+            engine.ingest_event(EventInput {
+                speaker_id: "user".to_owned(),
+                actor_agent_id: None,
+                text: text.to_owned(),
+                scope: "private".to_owned(),
+                trust_level: "trusted_user".to_owned(),
+            })?;
+        }
+
+        let context =
+            engine.build_context_pack_with(ContextQuery::new("launch review").with_max_items(2));
+
+        assert_eq!(context.items.len(), 2);
+        assert_eq!(
+            context.items[0].claim_text,
+            "user prefers launch review checklists"
+        );
+        assert_eq!(context.items[0].score, 25);
+        assert_eq!(context.items[0].matched_terms, vec!["launch", "review"]);
+        assert_eq!(context.items[0].match_reason, "phrase_match");
+        assert_eq!(context.items[1].claim_text, "user prefers launch templates");
+        assert!(context
+            .omitted
+            .iter()
+            .any(|item| item.reason == "context_budget_exceeded:max_items=2"));
+        assert!(context
+            .omitted
+            .iter()
+            .any(|item| item.reason == "low_relevance"));
         Ok(())
     }
 
@@ -2349,6 +2517,7 @@ mod tests {
             actor_agent_id: Some("codex".to_owned()),
             query: Some("local-first".to_owned()),
             allowed_scopes: vec!["private".to_owned()],
+            max_items: DEFAULT_CONTEXT_MAX_ITEMS,
         });
         assert_eq!(begin.session.id, "session-001");
         assert_eq!(begin.session.status, SessionStatus::Active);
@@ -2399,6 +2568,7 @@ mod tests {
             actor_agent_id: Some("codex".to_owned()),
             query: Some("release notes".to_owned()),
             allowed_scopes: vec!["private".to_owned()],
+            max_items: DEFAULT_CONTEXT_MAX_ITEMS,
         });
         assert!(denied.context_pack.items.is_empty());
         assert!(denied
@@ -2412,6 +2582,7 @@ mod tests {
             actor_agent_id: Some("codex".to_owned()),
             query: Some("release notes".to_owned()),
             allowed_scopes: vec!["team".to_owned()],
+            max_items: DEFAULT_CONTEXT_MAX_ITEMS,
         });
         assert_eq!(allowed.context_pack.items.len(), 1);
         assert_eq!(allowed.session.context_claim_ids, vec!["claim-001"]);

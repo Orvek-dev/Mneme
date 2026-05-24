@@ -14,6 +14,8 @@ eval update land in the same PR.
 - Forgets mark active claims as `forgotten`.
 - Context packs include active claims only when their scope is allowed by the
   retrieval query.
+- Context items are deterministically ranked, carry score and match metadata,
+  and are capped by the retrieval query's item budget.
 - Read/write operations emit audit records.
 - JSON file persistence round-trips events, claims, budget, and audit state.
 - JSON stores include `schema_version`, metadata, generation, engine version,

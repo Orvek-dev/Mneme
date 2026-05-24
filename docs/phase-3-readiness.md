@@ -88,3 +88,7 @@ disabled, and adding a distribution policy check to package verification.
 Phase 10 shipped the **Scope & Permission Guard MVP** in `v0.16.0`, adding
 scoped `ContextQuery` retrieval, CLI allowed-scope options for `context` and
 `begin`, and eval/quality-gate checks for denied and allowed retrieval paths.
+
+Phase 11 shipped the **Deterministic Context Ranking & Budget MVP** in
+`v0.17.0`, adding ranked context item metadata, retrieval item caps, budget
+omission reasons, and eval/quality-gate checks for ranked capped retrieval.

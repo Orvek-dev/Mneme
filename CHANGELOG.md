@@ -4,6 +4,20 @@ This project follows the spirit of Keep a Changelog.
 
 ## Unreleased
 
+## [0.17.0] - 2026-05-24
+
+### Added
+
+- Added deterministic context ranking metadata (`score`, `matched_terms`, and
+  `match_reason`) to context-pack items.
+- Added a default context item cap and explicit `--max-items` controls for
+  `mneme context` and `mneme begin`.
+- Added context budget omission reasons with
+  `context_budget_exceeded:max_items=<n>`.
+- Added eval harness checks for context item count and expected ranked order.
+- Added a core eval scenario and quality-gate smoke checks for ranked,
+  budget-capped retrieval.
+
 ## [0.16.0] - 2026-05-24
 
 ### Added

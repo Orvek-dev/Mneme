@@ -4,6 +4,7 @@ use crate::target::{
     ActualState, AuditEvent, Claim, ContextItem, ContextPack, EvalTarget, EvalTargetMetadata,
     FaultMode, OmittedItem, RecordedEvent, SessionActual, StoreActual, TargetRunOptions,
 };
+use mneme_core::DEFAULT_CONTEXT_MAX_ITEMS;
 
 pub(crate) struct FakeEvalTarget;
 
@@ -388,16 +389,13 @@ fn build_context_pack(
     expected: &ContextPackExpected,
     options: TargetRunOptions,
 ) -> ContextPack {
-    let query_terms = expected
-        .query
-        .split_whitespace()
-        .map(|term| term.to_ascii_lowercase())
-        .collect::<Vec<_>>();
+    let query_terms = normalize_query_terms(&expected.query);
     let allowed_scopes = effective_allowed_scopes(&expected.allowed_scopes);
-    let mut items = Vec::new();
+    let max_items = expected.max_items.unwrap_or(DEFAULT_CONTEXT_MAX_ITEMS);
+    let mut candidates = Vec::new();
     let mut omitted = Vec::new();
 
-    for claim in claims {
+    for (claim_index, claim) in claims.iter().enumerate() {
         if claim.status != "active" {
             omitted.push(OmittedItem {
                 claim_id: claim.id.clone(),
@@ -413,26 +411,47 @@ fn build_context_pack(
             continue;
         }
         let claim_text = claim.text();
-        let claim_text_lower = claim_text.to_ascii_lowercase();
-        let matches_query = query_terms.is_empty()
-            || query_terms
-                .iter()
-                .any(|term| claim_text_lower.contains(term));
-        if matches_query || !expected.must_include.is_empty() {
+        if let Some(relevance) = score_context_match(&expected.query, &query_terms, &claim_text) {
             let source_event_ids = if options.fault_mode == FaultMode::DropCitations {
                 Vec::new()
             } else {
                 claim.source_event_ids.clone()
             };
-            items.push(ContextItem {
-                claim_id: claim.id.clone(),
-                claim_text,
-                source_event_ids,
+            candidates.push(RankedContextCandidate {
+                claim_index,
+                item: ContextItem {
+                    claim_id: claim.id.clone(),
+                    claim_text,
+                    source_event_ids,
+                    score: relevance.score,
+                    matched_terms: relevance.matched_terms,
+                    match_reason: relevance.reason,
+                },
             });
         } else {
             omitted.push(OmittedItem {
                 claim_id: claim.id.clone(),
                 reason: "low_relevance".to_owned(),
+            });
+        }
+    }
+
+    candidates.sort_by(|left, right| {
+        right
+            .item
+            .score
+            .cmp(&left.item.score)
+            .then_with(|| left.claim_index.cmp(&right.claim_index))
+    });
+
+    let mut items = Vec::new();
+    for candidate in candidates {
+        if items.len() < max_items {
+            items.push(candidate.item);
+        } else {
+            omitted.push(OmittedItem {
+                claim_id: candidate.item.claim_id,
+                reason: format!("context_budget_exceeded:max_items={max_items}"),
             });
         }
     }
@@ -451,8 +470,11 @@ fn build_context_pack_for_query(
         &ContextPackExpected {
             query: query.to_owned(),
             allowed_scopes: allowed_scopes.to_vec(),
+            max_items: None,
+            item_count: None,
             must_include: Vec::new(),
             must_not_include: Vec::new(),
+            expected_order: Vec::new(),
             omitted_reason_contains: Vec::new(),
             citation_required: false,
         },
@@ -466,4 +488,82 @@ fn effective_allowed_scopes(scopes: &[String]) -> Vec<String> {
     } else {
         scopes.iter().map(|scope| scope.trim().to_owned()).collect()
     }
+}
+
+#[derive(Debug, Clone)]
+struct RankedContextCandidate {
+    claim_index: usize,
+    item: ContextItem,
+}
+
+#[derive(Debug, Clone)]
+struct ContextMatch {
+    score: u32,
+    matched_terms: Vec<String>,
+    reason: String,
+}
+
+fn score_context_match(
+    query_text: &str,
+    query_terms: &[String],
+    claim_text: &str,
+) -> Option<ContextMatch> {
+    if query_terms.is_empty() {
+        return Some(ContextMatch {
+            score: 0,
+            matched_terms: Vec::new(),
+            reason: "empty_query".to_owned(),
+        });
+    }
+
+    let claim_text_lower = claim_text.to_ascii_lowercase();
+    let matched_terms = query_terms
+        .iter()
+        .filter(|term| claim_text_lower.contains(term.as_str()))
+        .cloned()
+        .collect::<Vec<_>>();
+    if matched_terms.is_empty() {
+        return None;
+    }
+
+    let phrase = normalize_query_phrase(query_text);
+    let phrase_matches = matched_terms.len() > 1 && claim_text_lower.contains(&phrase);
+    let term_score = u32::try_from(matched_terms.len())
+        .unwrap_or(u32::MAX / 10)
+        .saturating_mul(10);
+    let score = if phrase_matches {
+        term_score.saturating_add(5)
+    } else {
+        term_score
+    };
+
+    Some(ContextMatch {
+        score,
+        matched_terms,
+        reason: if phrase_matches {
+            "phrase_match".to_owned()
+        } else {
+            "term_match".to_owned()
+        },
+    })
+}
+
+fn normalize_query_terms(text: &str) -> Vec<String> {
+    let mut terms = Vec::new();
+    for raw in text.split_whitespace() {
+        let term = normalize_query_token(raw);
+        if !term.is_empty() && !terms.contains(&term) {
+            terms.push(term);
+        }
+    }
+    terms
+}
+
+fn normalize_query_phrase(text: &str) -> String {
+    normalize_query_terms(text).join(" ")
+}
+
+fn normalize_query_token(raw: &str) -> String {
+    raw.trim_matches(|ch: char| ch.is_ascii_punctuation())
+        .to_ascii_lowercase()
 }
