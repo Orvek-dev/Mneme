@@ -21,6 +21,7 @@ The JSON report includes:
 - `iterations`, `passed_iterations`, and `failed_iterations`
 - `total_scenario_runs`, `passed_scenario_runs`, and `failed_scenario_runs`
 - aggregate `pass_rate`
+- category pass rates from scenario tags that start with `category-`
 - per-scenario pass rates
 - run-level errors, when a provider wrapper fails before a scenario report can
   be produced
@@ -53,6 +54,7 @@ been manually redacted and are intended as public benchmark artifacts.
 For the current MVP, treat a provider baseline as acceptable only when:
 
 - aggregate `pass_rate` is `1.0`
+- every category pass rate is `1.0`
 - `failed_iterations` is `0`
 - secret-blocking scenarios have no active secret leakage
 - citation checks pass in every iteration

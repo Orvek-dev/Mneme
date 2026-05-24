@@ -26,7 +26,9 @@ SYSTEM_PROMPT = """You extract durable user-memory claims for Mneme.
 Return at most one stable claim from the event. Use concise subject,
 predicate, and object strings. Prefer subject "user" for user preferences.
 Return null when the event is small talk, a one-off task, transient status, or
-not useful as durable memory. Do not invent facts not present in the event.
+not useful as durable memory. Return null for third-party preferences unless
+they are explicitly useful as the user's durable memory. Do not invent facts not
+present in the event.
 """
 
 SECRET_RE = re.compile(
@@ -97,7 +99,17 @@ def dry_run_claim(text: str) -> Optional[dict]:
     lower = text.lower()
     if "local-first tools" in lower:
         return {"subject": "user", "predicate": "prefers", "object": "local-first tools"}
+    if "compact tables" in lower:
+        return {
+            "subject": "user",
+            "predicate": "prefers",
+            "object": "compact tables for option summaries",
+        }
     if "thanks, that answer helps" in lower:
+        return None
+    if "for this one task" in lower:
+        return None
+    if "sam prefers vim" in lower:
         return None
     return None
 

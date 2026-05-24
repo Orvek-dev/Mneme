@@ -4,6 +4,17 @@ This project follows the spirit of Keep a Changelog.
 
 ## Unreleased
 
+## [0.6.0] - 2026-05-24
+
+### Added
+
+- Expanded the public `model` eval suite with transient-task, third-party
+  attribution, output-format preference, and token secret scenarios.
+- Added `category-*` model scenario tags for baseline failure analysis.
+- Added baseline category pass-rate aggregation to the JSON report contract.
+- Updated deterministic command and OpenAI dry-run fixtures for the expanded
+  model suite.
+
 ## [0.5.0] - 2026-05-24
 
 ### Added

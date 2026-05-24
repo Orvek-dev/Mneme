@@ -12,8 +12,8 @@ adding live provider calls to public CI.
 - [REQ-LIVE-BASE-002][Testability] The baseline command shall repeat a suite
   for a bounded number of iterations.
 - [REQ-LIVE-BASE-003][Observability] Baseline reports shall include iteration
-  counts, aggregate scenario pass rate, per-scenario pass rates, and run-level
-  errors.
+  counts, aggregate scenario pass rate, category pass rates, per-scenario pass
+  rates, and run-level errors.
 - [REQ-LIVE-BASE-004][Privacy] Live provider baselines shall be local and
   opt-in; public CI shall use dry-run mode only.
 - [REQ-LIVE-BASE-005][Documentation] Public docs shall explain dry-run and
@@ -27,7 +27,7 @@ adding live provider calls to public CI.
 | --- | --- | --- |
 | REQ-LIVE-BASE-001 | `mneme-eval baseline` command | verified |
 | REQ-LIVE-BASE-002 | `--iterations` parser with max bound | verified |
-| REQ-LIVE-BASE-003 | `BaselineReport` JSON contract | verified |
+| REQ-LIVE-BASE-003 | `BaselineReport` JSON contract and category summaries | verified |
 | REQ-LIVE-BASE-004 | CI uses `MNEME_OPENAI_DRY_RUN=1` | verified |
 | REQ-LIVE-BASE-005 | `docs/live-provider-baseline.md` | verified |
 | REQ-LIVE-BASE-006 | CI and release workflow baseline steps | verified |
