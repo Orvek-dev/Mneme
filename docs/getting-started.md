@@ -59,6 +59,8 @@ mneme restore --check --store "$STORE" --json
 `.mneme/` is ignored by git.
 Use `mneme init --extractor-command ./mneme-extractor-wrapper` when wrapper
 `end` calls should use command extraction for session-end `--remember` notes.
+`scripts/mneme-agent-hook.sh doctor` will show the configured extractor command
+but will not execute it unless `--check-extractor` is passed.
 
 ## Agent Session Flow
 

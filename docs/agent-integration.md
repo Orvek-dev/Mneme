@@ -117,7 +117,11 @@ Use `mneme doctor --json` when an agent installer needs a structured health
 report for the current workspace store and profile before enabling hooks.
 
 `scripts/mneme-agent-hook.sh doctor` runs an isolated temporary-store smoke test
-covering hook doctor, begin, and end.
+covering hook doctor, begin, and end. It also prints runtime diagnostics for
+profile loading, selected `mneme` source, store, agent, scope, max item cap, and
+extractor command. The default doctor path does not run configured command
+extractors. Add `--check-extractor` only when you intentionally want to execute
+the configured extractor command.
 
 ## Session Records
 
