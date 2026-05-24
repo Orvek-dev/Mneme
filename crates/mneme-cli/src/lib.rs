@@ -16,8 +16,9 @@ use mneme_core::{
     ContextPack, ContextQuery, EngineSnapshot, EventInput, ExtractorError, JsonFileStore,
     MnemeConfig, MnemeEngine, MnemeExtractor, MnemeState, MnemeStore, RuleBasedExtractor,
     SessionBeginInput, SessionBeginReport, SessionEndInput, SessionEndReport, SessionError,
-    SessionRecord, StateValidationReport, StoreError, StoreErrorKind, StoreFileStatus,
-    StoreInspection, StoreRepairReport, DEFAULT_CONTEXT_MAX_ITEMS, PRODUCT_NAME,
+    SessionRecord, StateValidationReport, StoreError, StoreErrorKind, StoreFileInspection,
+    StoreFileStatus, StoreInspection, StoreRepairReport, ValidationSeverity,
+    DEFAULT_CONTEXT_MAX_ITEMS, PRODUCT_NAME,
 };
 use serde::Serialize;
 
@@ -508,11 +509,15 @@ Remove inactive claims and unreferenced events.
 Example:
   mneme compact --store /tmp/mneme.json"#;
 
-const MNEME_REPAIR_HELP: &str = r#"Usage: mneme repair [--store <path>] [--json]
+const MNEME_REPAIR_HELP: &str = r#"Usage:
+  mneme repair [--store <path>] [--json]
+  mneme repair --check [--store <path>] [--json]
 
-Restore the current store from its backup when possible.
+Inspect repair readiness without mutating files, restore a corrupted current
+store from backup, or normalize a compatible legacy store schema.
 
 Example:
+  mneme repair --check --store /tmp/mneme.json --json
   mneme repair --store /tmp/mneme.json"#;
 
 #[derive(Debug, Clone, Default)]
@@ -525,6 +530,12 @@ struct CommonOptions {
 struct DoctorOptions {
     common: CommonOptions,
     config_path: Option<PathBuf>,
+}
+
+#[derive(Debug, Clone, Default)]
+struct RepairOptions {
+    common: CommonOptions,
+    check: bool,
 }
 
 #[derive(Debug, Clone)]
@@ -965,8 +976,18 @@ struct CompactReport {
 
 #[derive(Debug, Serialize)]
 struct RepairCliReport {
+    command: &'static str,
+    mode: &'static str,
+    ok: bool,
     store: String,
-    repair: StoreRepairReport,
+    action: String,
+    current_status: StoreFileStatus,
+    backup_status: StoreFileStatus,
+    repair_available: bool,
+    recommendations: Vec<String>,
+    inspection: StoreInspection,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    repair: Option<StoreRepairReport>,
 }
 
 enum CorrectTarget {
@@ -1518,18 +1539,50 @@ fn run_compact(raw_args: Vec<String>, writer: &mut impl Write) -> Result<(), Cli
 }
 
 fn run_repair(raw_args: Vec<String>, writer: &mut impl Write) -> Result<(), CliError> {
-    let options = parse_no_position_args(raw_args, "repair")?;
-    let store_path = resolve_store_path(&options)?;
+    let options = parse_repair_args(raw_args)?;
+    let store_path = resolve_store_path(&options.common)?;
     let store = JsonFileStore::new(store_path.clone());
+    if options.check {
+        let inspection = store.inspect();
+        let action = repair_check_action(&inspection);
+        let ok = repair_action_ok(action);
+        let report = RepairCliReport {
+            command: "repair",
+            mode: "check",
+            ok,
+            store: store_path.display().to_string(),
+            action: action.to_owned(),
+            current_status: inspection.current.status,
+            backup_status: inspection.backup.status,
+            repair_available: inspection.repair_available,
+            recommendations: repair_recommendations(action, &store_path),
+            inspection,
+            repair: None,
+        };
+        return emit_repair_report(&report, options.common.json, writer);
+    }
+
     let repair = store
         .repair_from_backup()
         .map_err(|source| CliError::store_error("repair store", &store_path, source))?;
+    let ok = repair.repaired || repair.after.current.status == StoreFileStatus::Valid;
+    let action = repair.action.clone();
+    let inspection = repair.after.clone();
     let report = RepairCliReport {
+        command: "repair",
+        mode: "repair",
+        ok,
         store: store_path.display().to_string(),
-        repair,
+        action: action.clone(),
+        current_status: inspection.current.status,
+        backup_status: inspection.backup.status,
+        repair_available: inspection.repair_available,
+        recommendations: repair_recommendations(&action, &store_path),
+        inspection,
+        repair: Some(repair),
     };
-    emit_repair_report(&report, options.json, writer)?;
-    if report.repair.repaired || report.repair.after.current.status == StoreFileStatus::Valid {
+    emit_repair_report(&report, options.common.json, writer)?;
+    if report.ok {
         Ok(())
     } else {
         Err(CliError::store(
@@ -1538,6 +1591,34 @@ fn run_repair(raw_args: Vec<String>, writer: &mut impl Write) -> Result<(), CliE
             "store could not be repaired",
         ))
     }
+}
+
+fn parse_repair_args(raw_args: Vec<String>) -> Result<RepairOptions, CliError> {
+    let mut options = RepairOptions::default();
+    let mut idx = 0;
+    while idx < raw_args.len() {
+        if parse_common_option(&raw_args, &mut idx, &mut options.common)? {
+            idx += 1;
+            continue;
+        }
+        match raw_args[idx].as_str() {
+            "--check" => {
+                options.check = true;
+            }
+            value if value.starts_with('-') => {
+                return Err(CliError::invalid_cli(format!(
+                    "unknown repair option: {value}"
+                )));
+            }
+            value => {
+                return Err(CliError::invalid_cli(format!(
+                    "unexpected repair argument: {value}"
+                )));
+            }
+        }
+        idx += 1;
+    }
+    Ok(options)
 }
 
 fn parse_doctor_args(raw_args: Vec<String>) -> Result<DoctorOptions, CliError> {
@@ -2569,6 +2650,78 @@ fn doctor_recommendations(
     recommendations
 }
 
+fn repair_check_action(inspection: &StoreInspection) -> &'static str {
+    if inspection.current.status == StoreFileStatus::Valid {
+        if store_file_needs_normalization(&inspection.current) {
+            "normalization_available"
+        } else {
+            "current_valid"
+        }
+    } else if inspection.repair_available {
+        "repair_available"
+    } else {
+        "backup_unavailable"
+    }
+}
+
+fn repair_action_ok(action: &str) -> bool {
+    matches!(
+        action,
+        "current_valid"
+            | "normalization_available"
+            | "normalized_current"
+            | "repair_available"
+            | "restored_from_backup"
+    )
+}
+
+fn store_file_needs_normalization(file: &StoreFileInspection) -> bool {
+    file.validation.as_ref().is_some_and(|validation| {
+        validation.issues.iter().any(|issue| {
+            issue.severity == ValidationSeverity::Warning
+                && matches!(
+                    issue.code.as_str(),
+                    "schema.legacy"
+                        | "schema.old"
+                        | "metadata.store_id_missing"
+                        | "metadata.generation_zero"
+                )
+        })
+    })
+}
+
+fn repair_recommendations(action: &str, store_path: &Path) -> Vec<String> {
+    match action {
+        "current_valid" => vec!["no repair is needed; the current store is valid".to_owned()],
+        "normalization_available" => vec![format!(
+            "run `mneme repair --store \"{}\"` to normalize legacy-compatible schema metadata",
+            store_path.display()
+        )],
+        "normalized_current" => vec![
+            "legacy-compatible schema metadata was normalized and the previous file was kept as backup"
+                .to_owned(),
+            format!(
+                "run `mneme validate --store \"{}\"` to verify the normalized store",
+                store_path.display()
+            ),
+        ],
+        "repair_available" => vec![format!(
+            "run `mneme repair --store \"{}\"` to restore the current store from backup",
+            store_path.display()
+        )],
+        "restored_from_backup" => vec![format!(
+            "run `mneme validate --store \"{}\"` to verify the restored store",
+            store_path.display()
+        )],
+        "backup_unavailable" => vec![
+            "no valid backup is available for automatic repair".to_owned(),
+            "inspect the store manually or run `mneme init --force` only if overwriting is intentional"
+                .to_owned(),
+        ],
+        _ => Vec::new(),
+    }
+}
+
 fn resolve_init_bin_path(options: &InitOptions) -> Result<Option<PathBuf>, CliError> {
     if !options.include_bin {
         return Ok(None);
@@ -3355,10 +3508,33 @@ fn emit_repair_report(
     }
     writeln!(
         writer,
-        "mneme: repair {} (action={}, repaired={})",
-        report.store, report.repair.action, report.repair.repaired
+        "mneme: repair {} (mode={}, action={}, ok={})",
+        report.store, report.mode, report.action, report.ok
     )
-    .map_err(|source| CliError::io("write", Path::new("<stdout>"), source))
+    .map_err(|source| CliError::io("write", Path::new("<stdout>"), source))?;
+    writeln!(
+        writer,
+        "mneme: current={} backup={} repair_available={}",
+        store_file_status(report.current_status),
+        store_file_status(report.backup_status),
+        report.repair_available
+    )
+    .map_err(|source| CliError::io("write", Path::new("<stdout>"), source))?;
+    if let Some(repair) = &report.repair {
+        writeln!(
+            writer,
+            "mneme: repaired={} before={} after={}",
+            repair.repaired,
+            store_file_status(repair.before.current.status),
+            store_file_status(repair.after.current.status)
+        )
+        .map_err(|source| CliError::io("write", Path::new("<stdout>"), source))?;
+    }
+    for recommendation in &report.recommendations {
+        writeln!(writer, "recommendation: {recommendation}")
+            .map_err(|source| CliError::io("write", Path::new("<stdout>"), source))?;
+    }
+    Ok(())
 }
 
 fn write_json<T: Serialize>(writer: &mut impl Write, value: &T) -> Result<(), CliError> {
@@ -3422,6 +3598,15 @@ mod tests {
         assert!(review_text.contains("Usage: mneme review <path>"));
         assert!(review_text.contains("--format markdown|json"));
         assert!(review_text.contains("--include-sensitive"));
+
+        let mut repair_output = Vec::new();
+        run_cli_with_writer(
+            vec!["mneme".to_owned(), "repair".to_owned(), "--help".to_owned()],
+            &mut repair_output,
+        )?;
+        let repair_text = String::from_utf8(repair_output)?;
+        assert!(repair_text.contains("mneme repair --check"));
+        assert!(repair_text.contains("normalize"));
         Ok(())
     }
 
@@ -4306,6 +4491,23 @@ mod tests {
         )?;
         std::fs::write(&path, "{not-json")?;
 
+        let mut check_output = Vec::new();
+        run_cli_with_writer(
+            vec![
+                "mneme".to_owned(),
+                "repair".to_owned(),
+                "--check".to_owned(),
+                "--store".to_owned(),
+                path.display().to_string(),
+                "--json".to_owned(),
+            ],
+            &mut check_output,
+        )?;
+        let check_text = String::from_utf8(check_output)?;
+        assert!(check_text.contains("\"mode\": \"check\""));
+        assert!(check_text.contains("\"action\": \"repair_available\""));
+        assert!(check_text.contains("\"ok\": true"));
+
         let mut repair_output = Vec::new();
         run_cli_with_writer(
             vec![
@@ -4319,6 +4521,22 @@ mod tests {
         )?;
         let repair_text = String::from_utf8(repair_output)?;
         assert!(repair_text.contains("\"repaired\": true"));
+        assert!(repair_text.contains("\"action\": \"restored_from_backup\""));
+
+        let mut valid_check_output = Vec::new();
+        run_cli_with_writer(
+            vec![
+                "mneme".to_owned(),
+                "repair".to_owned(),
+                "--check".to_owned(),
+                "--store".to_owned(),
+                path.display().to_string(),
+                "--json".to_owned(),
+            ],
+            &mut valid_check_output,
+        )?;
+        let valid_check_text = String::from_utf8(valid_check_output)?;
+        assert!(valid_check_text.contains("\"action\": \"current_valid\""));
 
         run_cli_with_writer(
             vec![

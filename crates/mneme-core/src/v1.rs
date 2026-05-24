@@ -1066,6 +1066,18 @@ impl JsonFileStore {
         let _lock = acquire_store_lock(&self.path)?;
         let before = self.inspect();
         if before.current.status == StoreFileStatus::Valid {
+            let state = read_state_file(&self.path)?
+                .ok_or_else(|| StoreError::new("current store disappeared before repair"))?;
+            if state_needs_normalization(&state) {
+                backup_current_file(&self.path)?;
+                write_state_atomic(&self.path, &state.prepared_for_save())?;
+                return Ok(StoreRepairReport {
+                    repaired: true,
+                    action: "normalized_current".to_owned(),
+                    before,
+                    after: self.inspect(),
+                });
+            }
             return Ok(StoreRepairReport {
                 repaired: false,
                 action: "current_valid".to_owned(),
@@ -1102,20 +1114,7 @@ impl MnemeStore for JsonFileStore {
     fn save(&mut self, state: &MnemeState) -> Result<(), StoreError> {
         let _lock = acquire_store_lock(&self.path)?;
         let prepared = state.prepared_for_save();
-        if self.path.exists() {
-            let backup_path = self.backup_path();
-            if let Some(parent) = backup_path
-                .parent()
-                .filter(|path| !path.as_os_str().is_empty())
-            {
-                fs::create_dir_all(parent).map_err(|source| {
-                    StoreError::new(format!("failed to create backup dir: {source}"))
-                })?;
-            }
-            fs::copy(&self.path, &backup_path).map_err(|source| {
-                StoreError::new(format!("failed to write backup state: {source}"))
-            })?;
-        }
+        backup_current_file(&self.path)?;
         write_state_atomic(&self.path, &prepared)
     }
 }
@@ -1148,6 +1147,30 @@ fn write_state_atomic(path: &Path, state: &MnemeState) -> Result<(), StoreError>
     }
     fs::rename(&temp_path, path)
         .map_err(|source| StoreError::new(format!("failed to replace state: {source}")))
+}
+
+fn backup_current_file(path: &Path) -> Result<(), StoreError> {
+    if !path.exists() {
+        return Ok(());
+    }
+    let backup_path = backup_path_for(path);
+    if let Some(parent) = backup_path
+        .parent()
+        .filter(|path| !path.as_os_str().is_empty())
+    {
+        fs::create_dir_all(parent)
+            .map_err(|source| StoreError::new(format!("failed to create backup dir: {source}")))?;
+    }
+    fs::copy(path, &backup_path)
+        .map(|_| ())
+        .map_err(|source| StoreError::new(format!("failed to write backup state: {source}")))
+}
+
+fn state_needs_normalization(state: &MnemeState) -> bool {
+    state.schema_version != MNEME_STATE_SCHEMA_VERSION
+        || state.metadata.store_id.trim().is_empty()
+        || state.metadata.created_at_unix_seconds == 0
+        || state.metadata.generation == 0
 }
 
 #[derive(Debug)]
@@ -2794,6 +2817,52 @@ mod tests {
 
         let _ = std::fs::remove_file(&path);
         let _ = std::fs::remove_file(store.backup_path());
+        Ok(())
+    }
+
+    #[test]
+    fn repair_normalizes_current_legacy_schema_store() -> Result<(), Box<dyn std::error::Error>> {
+        let path = temp_store_path("repair-normalizes-legacy");
+        let _ = std::fs::remove_file(&path);
+        let _ = std::fs::remove_file(backup_path_for(&path));
+        let _ = std::fs::remove_file(lock_path_for(&path));
+
+        let mut engine = MnemeEngine::new(MnemeConfig::default());
+        engine.ingest_event(EventInput {
+            speaker_id: "user".to_owned(),
+            actor_agent_id: None,
+            text: "remember: user prefers legacy migration safety".to_owned(),
+            scope: "private".to_owned(),
+            trust_level: "trusted_user".to_owned(),
+        })?;
+        let mut store = JsonFileStore::new(path.clone());
+        engine.persist(&mut store)?;
+
+        let mut legacy_state = store.load()?.ok_or("state should exist")?;
+        legacy_state.schema_version = 1;
+        write_state_atomic(&path, &legacy_state)?;
+
+        let inspection = store.inspect();
+        assert_eq!(inspection.current.status, StoreFileStatus::Valid);
+        assert_eq!(inspection.current.schema_version, Some(1));
+
+        let repair = store.repair_from_backup()?;
+        assert!(repair.repaired);
+        assert_eq!(repair.action, "normalized_current");
+
+        let normalized = store.load()?.ok_or("state should exist")?;
+        assert_eq!(normalized.schema_version, MNEME_STATE_SCHEMA_VERSION);
+        assert!(normalized
+            .metadata
+            .migration_history
+            .iter()
+            .any(|record| record.from_schema_version == 1
+                && record.to_schema_version == MNEME_STATE_SCHEMA_VERSION));
+        assert_eq!(store.inspect().backup.schema_version, Some(1));
+
+        let _ = std::fs::remove_file(&path);
+        let _ = std::fs::remove_file(store.backup_path());
+        let _ = std::fs::remove_file(store.lock_path());
         Ok(())
     }
 

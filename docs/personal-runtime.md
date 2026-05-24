@@ -17,8 +17,10 @@ currently `2` and includes:
 - `metadata.migration_history`
 - `budget`, `events`, `claims`, `sessions`, and `audit`
 
-Missing schema metadata from older stores is treated as legacy state and is
-normalized on the next successful save.
+Missing schema metadata from older stores is treated as legacy state.
+Compatible older schemas remain readable, and `mneme repair` can normalize
+schema metadata through the same atomic save path while keeping the
+pre-normalized file as `<store>.bak`.
 
 ## Write Safety
 
@@ -72,7 +74,14 @@ Compact inactive lifecycle records while preserving active recall:
 cargo run -p mneme-cli -- compact --store /tmp/mneme.json
 ```
 
-Repair a corrupted current store from its backup:
+Check repair readiness without mutating files:
+
+```sh
+cargo run -p mneme-cli -- repair --check --store /tmp/mneme.json --json
+```
+
+Repair a corrupted current store from its backup, or normalize a compatible
+legacy store schema:
 
 ```sh
 cargo run -p mneme-cli -- repair --store /tmp/mneme.json --json
@@ -85,6 +94,7 @@ The `runtime` suite checks:
 - export/import round trips;
 - compaction after correction;
 - repair from backup after current-store corruption;
+- repair readiness checks in the release quality gate;
 - secret blocking after persisted import/export.
 
 Run it locally:

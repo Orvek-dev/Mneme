@@ -134,3 +134,8 @@ Phase 21 shipped the **Workspace Health & Bootstrap Stabilization MVP** in
 `v0.27.0`, adding `mneme doctor --json`, richer plain doctor output, profile
 validation, and quality-gate checks for pre-init, post-init, invalid-profile,
 and invalid-store workspace health reports.
+
+Phase 22 shipped the **Personal Runtime Hardening MVP** in `v0.28.0`, adding
+`mneme repair --check`, repair JSON reports with mode/action/health status,
+legacy-compatible schema normalization through `mneme repair`, and
+quality-gate checks for valid and repairable store lifecycle paths.
