@@ -11,6 +11,8 @@ for the current local-first MVP and the verification required before releases.
   tooling.
 - `mneme-eval` exposes the `mneme-eval` binary and `run_cli` for harness-bound
   local tooling.
+- `mneme hook begin/end` expose the `mneme.agent_hook.v1` JSON contract for
+  local agent automation.
 
 New integrations should prefer `mneme-core` unless they specifically need to
 drive the command-line contracts.

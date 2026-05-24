@@ -27,6 +27,7 @@ Mneme is pre-1.0. The useful surface today is local development and evaluation:
   import/export, and compaction;
 - agents can open and close task sessions with scoped context and post-task
   memory writes;
+- agent hooks expose a stable JSON envelope for begin/end automation;
 - extraction and storage are behind adapter boundaries;
 - model-backed extraction experiments can use a provider-neutral command
   adapter without adding API keys to the repo;
@@ -70,6 +71,7 @@ cargo run -p mneme-cli -- validate --store "$STORE"
 cargo run -p mneme-cli -- compact --store "$STORE"
 cargo run -p mneme-cli -- begin "Draft setup plan" --query "local-first" --agent codex --store "$STORE" --json
 cargo run -p mneme-cli -- end session-001 --summary "Prepared a concise setup plan" --remember "user prefers concise setup plans" --store "$STORE" --json
+cargo run -p mneme-cli -- hook begin "Draft setup plan" --query "local-first" --agent codex --store "$STORE"
 ```
 
 Without `--store`, the CLI writes to `.mneme/mneme-v1.json` in the current
@@ -213,6 +215,7 @@ spec/               feature specs and verification maps
 - [Distribution Policy](docs/distribution-policy.md)
 - [Personal Runtime](docs/personal-runtime.md)
 - [Agent Integration](docs/agent-integration.md)
+- [Agent Hook Contract](docs/agent-hook-contract.md)
 - [Eval Scenario Format](docs/eval-scenario-format.md)
 - [Eval Acceptance Gate](docs/eval-harness-acceptance.md)
 - [Eval Target Adapter Contract](docs/eval-target-adapter-contract.md)
