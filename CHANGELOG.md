@@ -4,6 +4,18 @@ This project follows the spirit of Keep a Changelog.
 
 ## Unreleased
 
+## [0.25.0] - 2026-05-24
+
+### Added
+
+- Added `scripts/install-local.sh` for local `mneme` CLI installation through
+  `cargo install`.
+- Added install smoke checks for installed `mneme doctor`, `help`, `remember`,
+  `context`, and `review` flows.
+- Added local install documentation and first-run guidance centered on the
+  installed `mneme` command.
+- Added the Phase 19 local install and first-run UX feature spec.
+
 ## [0.24.0] - 2026-05-24
 
 ### Added

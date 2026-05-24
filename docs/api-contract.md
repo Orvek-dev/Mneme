@@ -55,6 +55,10 @@ cargo from the repository, and uses a local debug binary only when cargo is
 unavailable. The wrapper can load runtime profiles from
 `MNEME_AGENT_HOOK_CONFIG`, `MNEME_CONFIG`, or `.mneme/mneme-agent-hook.env`.
 
+Local users can install the CLI with `scripts/install-local.sh`. It installs
+the repository-local `mneme-cli` package as the `mneme` binary and runs a small
+doctor/help/review smoke check.
+
 Stable behavior remains defined by `docs/v1-stability.md`, public feature
 specs, eval scenarios, and the release quality gate.
 

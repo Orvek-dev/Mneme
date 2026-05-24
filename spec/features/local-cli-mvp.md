@@ -32,6 +32,8 @@ introducing a server, UI, or model dependency. It is a thin adapter over
   human or scripted inspection.
 - [REQ-CLI-009][Privacy] The CLI shall redact sensitive review artifact text by
   default and require explicit opt-in for raw sensitive review export.
+- [REQ-CLI-010][Ubiquitous] The repository shall provide a local install path
+  for the `mneme` CLI binary.
 
 ## Verification Map
 
@@ -46,3 +48,4 @@ introducing a server, UI, or model dependency. It is a thin adapter over
 | REQ-CLI-007 | `claims_review_and_id_lifecycle_controls` and quality gate | verified |
 | REQ-CLI-008 | `review_exports_markdown_and_json_artifacts` and quality gate | verified |
 | REQ-CLI-009 | `review_exports_markdown_and_json_artifacts` and quality gate | verified |
+| REQ-CLI-010 | `scripts/install-local.sh` and quality-gate install smoke | verified |

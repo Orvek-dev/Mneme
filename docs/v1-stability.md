@@ -61,6 +61,9 @@ eval update land in the same PR.
   `MNEME_CONFIG`, or `.mneme/mneme-agent-hook.env`; CLI flags override env,
   and env overrides profile values.
 - `mneme-cli --store <path>` isolates local state.
+- `scripts/install-local.sh` installs the local `mneme` CLI with
+  `cargo install --path crates/mneme-cli --locked` and smokes doctor/help/review
+  commands.
 - `scripts/quality-gate.sh` is the local and release verification entry point.
 - `RUSTDOCFLAGS="-D warnings" cargo doc --workspace --no-deps` must pass before
   release.

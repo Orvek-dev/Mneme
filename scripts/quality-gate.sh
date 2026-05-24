@@ -17,6 +17,28 @@ RUSTDOCFLAGS="-D warnings" cargo doc --workspace --no-deps
 cargo run -p mneme-cli -- doctor
 cargo run -p mneme-eval -- doctor
 
+INSTALL_ROOT="${TMP_ROOT}/mneme-quality-gate-install"
+INSTALL_STDOUT="${TMP_ROOT}/mneme-quality-gate-install.txt"
+INSTALL_DOCTOR="${TMP_ROOT}/mneme-quality-gate-installed-doctor.txt"
+INSTALL_HELP="${TMP_ROOT}/mneme-quality-gate-installed-help.txt"
+INSTALL_CONTEXT="${TMP_ROOT}/mneme-quality-gate-installed-context.json"
+INSTALL_STORE="${TMP_ROOT}/mneme-quality-gate-installed-cli.json"
+INSTALL_REVIEW="${TMP_ROOT}/mneme-quality-gate-installed-review.md"
+rm -rf "$INSTALL_ROOT"
+rm -f "$INSTALL_STDOUT" "$INSTALL_DOCTOR" "$INSTALL_HELP" "$INSTALL_CONTEXT" "$INSTALL_STORE" "$INSTALL_REVIEW"
+./scripts/install-local.sh --root "$INSTALL_ROOT" --debug > "$INSTALL_STDOUT"
+grep -q 'mneme-install: ok' "$INSTALL_STDOUT"
+INSTALL_BIN="${INSTALL_ROOT}/bin/mneme"
+"$INSTALL_BIN" doctor > "$INSTALL_DOCTOR"
+grep -q 'Mneme local CLI' "$INSTALL_DOCTOR"
+"$INSTALL_BIN" help > "$INSTALL_HELP"
+grep -q 'mneme help begin' "$INSTALL_HELP"
+"$INSTALL_BIN" remember "user prefers installed CLI workflows" --store "$INSTALL_STORE"
+"$INSTALL_BIN" context "installed CLI" --store "$INSTALL_STORE" --json > "$INSTALL_CONTEXT"
+grep -q 'installed CLI workflows' "$INSTALL_CONTEXT"
+"$INSTALL_BIN" review "$INSTALL_REVIEW" --store "$INSTALL_STORE"
+grep -q '# Mneme Memory Review' "$INSTALL_REVIEW"
+
 MNEME_HELP="${TMP_ROOT}/mneme-quality-gate-help.txt"
 MNEME_EVAL_HELP="${TMP_ROOT}/mneme-quality-gate-eval-help.txt"
 rm -f "$MNEME_HELP" "$MNEME_EVAL_HELP"
