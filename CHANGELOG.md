@@ -4,6 +4,17 @@ This project follows the spirit of Keep a Changelog.
 
 ## Unreleased
 
+## [0.19.0] - 2026-05-24
+
+### Added
+
+- Added exclusive `.lock` files around `JsonFileStore` save and repair writes.
+- Added `StoreErrorKind` with `store_lock` classification for lock conflicts.
+- Added hook error output for recoverable `store_lock` failures.
+- Added core and CLI tests plus quality-gate smoke coverage for locked-store
+  conflict handling.
+- Added store lock documentation and a Phase 13 feature spec.
+
 ## [0.18.0] - 2026-05-24
 
 ### Added

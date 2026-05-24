@@ -59,13 +59,14 @@ stderr for hook failures that were already reported in the JSON envelope.
 - `invalid_cli`: the command shape or argument values are invalid.
 - `io`: filesystem or stdout I/O failed.
 - `store`: loading, saving, validating, or repairing the store failed.
+- `store_lock`: another writer holds the local store lock.
 - `json`: JSON parsing or serialization failed.
 - `extractor`: extraction failed.
 - `session`: session lifecycle operation failed.
 
-`recoverable` is `true` for store, I/O, and extractor failures where an agent
-may continue without memory or retry later. It is `false` for invalid CLI,
-JSON, and session failures.
+`recoverable` is `true` for store, `store_lock`, I/O, and extractor failures
+where an agent may continue without memory or retry later. It is `false` for
+invalid CLI, JSON, and session failures.
 
 ## Usage
 

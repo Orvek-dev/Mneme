@@ -7,7 +7,7 @@
 
 use std::collections::BTreeSet;
 use std::fmt;
-use std::fs::{self, File};
+use std::fs::{self, File, OpenOptions};
 use std::io::{self, Write};
 use std::path::{Path, PathBuf};
 use std::process::{Command, Stdio};
@@ -986,6 +986,12 @@ impl JsonFileStore {
         backup_path_for(&self.path)
     }
 
+    /// Returns the lock path used to guard local write operations.
+    #[must_use]
+    pub fn lock_path(&self) -> PathBuf {
+        lock_path_for(&self.path)
+    }
+
     /// Inspects current and backup store files without mutating either file.
     #[must_use]
     pub fn inspect(&self) -> StoreInspection {
@@ -1005,6 +1011,7 @@ impl JsonFileStore {
 
     /// Restores the current store from the backup when the current file is not valid.
     pub fn repair_from_backup(&self) -> Result<StoreRepairReport, StoreError> {
+        let _lock = acquire_store_lock(&self.path)?;
         let before = self.inspect();
         if before.current.status == StoreFileStatus::Valid {
             return Ok(StoreRepairReport {
@@ -1041,6 +1048,7 @@ impl MnemeStore for JsonFileStore {
     }
 
     fn save(&mut self, state: &MnemeState) -> Result<(), StoreError> {
+        let _lock = acquire_store_lock(&self.path)?;
         let prepared = state.prepared_for_save();
         if self.path.exists() {
             let backup_path = self.backup_path();
@@ -1090,12 +1098,71 @@ fn write_state_atomic(path: &Path, state: &MnemeState) -> Result<(), StoreError>
         .map_err(|source| StoreError::new(format!("failed to replace state: {source}")))
 }
 
+#[derive(Debug)]
+struct StoreLockGuard {
+    path: PathBuf,
+}
+
+impl Drop for StoreLockGuard {
+    fn drop(&mut self) {
+        let _ = fs::remove_file(&self.path);
+    }
+}
+
+fn acquire_store_lock(path: &Path) -> Result<StoreLockGuard, StoreError> {
+    if let Some(parent) = path.parent().filter(|path| !path.as_os_str().is_empty()) {
+        fs::create_dir_all(parent)
+            .map_err(|source| StoreError::new(format!("failed to create store dir: {source}")))?;
+    }
+    let lock_path = lock_path_for(path);
+    let mut file = OpenOptions::new()
+        .write(true)
+        .create_new(true)
+        .open(&lock_path)
+        .map_err(|source| {
+            if source.kind() == io::ErrorKind::AlreadyExists {
+                StoreError::lock_conflict(format!(
+                    "store lock already exists: {}",
+                    lock_path.display()
+                ))
+            } else {
+                StoreError::new(format!("failed to create store lock: {source}"))
+            }
+        })?;
+    let lock_body = format!(
+        "pid={}\ncreated_at_unix_seconds={}\n",
+        std::process::id(),
+        unix_timestamp()
+    );
+    if let Err(source) = file.write_all(lock_body.as_bytes()) {
+        let _ = fs::remove_file(&lock_path);
+        return Err(StoreError::new(format!(
+            "failed to write store lock: {source}"
+        )));
+    }
+    if let Err(source) = file.sync_all() {
+        let _ = fs::remove_file(&lock_path);
+        return Err(StoreError::new(format!(
+            "failed to sync store lock: {source}"
+        )));
+    }
+    Ok(StoreLockGuard { path: lock_path })
+}
+
 fn backup_path_for(path: &Path) -> PathBuf {
     let file_name = path
         .file_name()
         .and_then(|value| value.to_str())
         .unwrap_or("mneme-v1.json");
     path.with_file_name(format!("{file_name}.bak"))
+}
+
+fn lock_path_for(path: &Path) -> PathBuf {
+    let file_name = path
+        .file_name()
+        .and_then(|value| value.to_str())
+        .unwrap_or("mneme-v1.json");
+    path.with_file_name(format!("{file_name}.lock"))
 }
 
 fn temp_path_for(path: &Path) -> PathBuf {
@@ -1218,13 +1285,28 @@ pub struct StoreRepairReport {
 #[derive(Debug, Clone, Eq, PartialEq)]
 pub struct StoreError {
     message: String,
+    kind: StoreErrorKind,
 }
 
 impl StoreError {
     fn new(message: impl Into<String>) -> Self {
         Self {
             message: message.into(),
+            kind: StoreErrorKind::Store,
         }
+    }
+
+    fn lock_conflict(message: impl Into<String>) -> Self {
+        Self {
+            message: message.into(),
+            kind: StoreErrorKind::LockConflict,
+        }
+    }
+
+    /// Stable store error category.
+    #[must_use]
+    pub const fn kind(&self) -> StoreErrorKind {
+        self.kind
     }
 }
 
@@ -1235,6 +1317,27 @@ impl fmt::Display for StoreError {
 }
 
 impl std::error::Error for StoreError {}
+
+/// Stable store error categories.
+#[derive(Debug, Clone, Copy, Eq, PartialEq, Serialize, Deserialize)]
+#[serde(rename_all = "snake_case")]
+pub enum StoreErrorKind {
+    /// Generic store read, write, parse, validation, or repair failure.
+    Store,
+    /// The local store lock file already exists and the write was not attempted.
+    LockConflict,
+}
+
+impl StoreErrorKind {
+    /// Stable string identifier for CLI and hook error envelopes.
+    #[must_use]
+    pub const fn as_str(self) -> &'static str {
+        match self {
+            Self::Store => "store",
+            Self::LockConflict => "store_lock",
+        }
+    }
+}
 
 /// Engine configuration for personal-memory v1.
 #[derive(Debug, Clone, Copy, Serialize, Deserialize)]
@@ -2369,6 +2472,7 @@ mod tests {
         let path = temp_store_path("schema-metadata-backup");
         let _ = std::fs::remove_file(&path);
         let _ = std::fs::remove_file(backup_path_for(&path));
+        let _ = std::fs::remove_file(lock_path_for(&path));
 
         let mut engine = MnemeEngine::new(MnemeConfig::default());
         engine.ingest_event(EventInput {
@@ -2402,6 +2506,43 @@ mod tests {
 
         let _ = std::fs::remove_file(&path);
         let _ = std::fs::remove_file(store.backup_path());
+        let _ = std::fs::remove_file(store.lock_path());
+        Ok(())
+    }
+
+    #[test]
+    fn json_file_store_save_requires_exclusive_lock() -> Result<(), Box<dyn std::error::Error>> {
+        let path = temp_store_path("store-lock");
+        let _ = std::fs::remove_file(&path);
+        let _ = std::fs::remove_file(backup_path_for(&path));
+        let _ = std::fs::remove_file(lock_path_for(&path));
+
+        let mut engine = MnemeEngine::new(MnemeConfig::default());
+        engine.ingest_event(EventInput {
+            speaker_id: "user".to_owned(),
+            actor_agent_id: None,
+            text: "remember: user prefers lock safety".to_owned(),
+            scope: "private".to_owned(),
+            trust_level: "trusted_user".to_owned(),
+        })?;
+
+        let mut store = JsonFileStore::new(path.clone());
+        std::fs::write(store.lock_path(), "held by test\n")?;
+
+        let error = engine
+            .persist(&mut store)
+            .expect_err("save should fail while lock exists");
+        assert_eq!(error.kind(), StoreErrorKind::LockConflict);
+        assert!(!path.exists());
+
+        std::fs::remove_file(store.lock_path())?;
+        engine.persist(&mut store)?;
+        assert!(path.exists());
+        assert!(!store.lock_path().exists());
+
+        let _ = std::fs::remove_file(&path);
+        let _ = std::fs::remove_file(store.backup_path());
+        let _ = std::fs::remove_file(store.lock_path());
         Ok(())
     }
 

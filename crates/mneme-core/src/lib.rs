@@ -46,9 +46,9 @@ pub use v1::{
     MnemeExtractor, MnemeState, MnemeStore, OmittedContextItem, RuleBasedExtractor,
     SessionBeginInput, SessionBeginReport, SessionEndInput, SessionEndReport, SessionError,
     SessionRecord, SessionStatus, StateMetadata, StateValidationIssue, StateValidationReport,
-    StoreError, StoreFileInspection, StoreFileStatus, StoreInspection, StoreRepairReport,
-    ValidationSeverity, DEFAULT_CONTEXT_MAX_ITEMS, EXTRACTOR_COMMAND_SCHEMA_VERSION,
-    MNEME_STATE_SCHEMA_VERSION,
+    StoreError, StoreErrorKind, StoreFileInspection, StoreFileStatus, StoreInspection,
+    StoreRepairReport, ValidationSeverity, DEFAULT_CONTEXT_MAX_ITEMS,
+    EXTRACTOR_COMMAND_SCHEMA_VERSION, MNEME_STATE_SCHEMA_VERSION,
 };
 
 /// Public product name.

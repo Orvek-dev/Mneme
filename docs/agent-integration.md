@@ -51,6 +51,8 @@ budget, and audit behavior stay centralized in `mneme-core`.
 Hook failures write a JSON envelope to stdout and exit non-zero. Agents should
 read `ok`, `recoverable`, `error.kind`, `error.message`, and `error.exit_code`
 instead of parsing stderr.
+If `error.kind` is `store_lock`, another local writer is active; agents can
+continue without memory or retry the hook later.
 
 ## Session Records
 
