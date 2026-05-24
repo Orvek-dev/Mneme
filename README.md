@@ -94,6 +94,8 @@ MNEME_OPENAI_DRY_RUN=1 cargo run -p mneme-eval -- baseline --suite model \
   --target mneme-v1-command \
   --extractor-command wrappers/openai_extractor.py \
   --iterations 2 \
+  --provider-label openai \
+  --model-label dry-run \
   --report evals/reports/openai-dry-run-baseline.json
 ```
 
@@ -148,6 +150,7 @@ spec/               feature specs and verification maps
 - [Model Extraction Adapter](docs/model-extraction-adapter.md)
 - [OpenAI Provider Wrapper](docs/openai-provider-wrapper.md)
 - [Live Provider Baseline](docs/live-provider-baseline.md)
+- [Live Provider Baseline Runbook](docs/live-provider-baseline-runbook.md)
 - [Mneme v1 Personal Core](docs/mneme-v1-personal-core.md)
 - [Mneme v1 Stability](docs/v1-stability.md)
 - [Release Checklist](docs/release-checklist.md)

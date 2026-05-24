@@ -23,6 +23,7 @@ pub(crate) struct BaselineReport {
     pub(crate) suite: String,
     pub(crate) target: String,
     pub(crate) target_metadata: EvalTargetMetadata,
+    pub(crate) baseline_metadata: BaselineMetadata,
     pub(crate) ok: bool,
     pub(crate) iterations: usize,
     pub(crate) passed_iterations: usize,
@@ -42,6 +43,7 @@ impl BaselineReport {
         suite: impl Into<String>,
         target: impl Into<String>,
         target_metadata: EvalTargetMetadata,
+        baseline_metadata: BaselineMetadata,
         scenarios: Vec<BaselineScenarioMetadata>,
         runs: Vec<BaselineRunReport>,
     ) -> Self {
@@ -63,6 +65,7 @@ impl BaselineReport {
             suite: suite.into(),
             target: target.into(),
             target_metadata,
+            baseline_metadata,
             ok: failed_iterations == 0 && failed_scenario_runs == 0,
             iterations,
             passed_iterations,
@@ -75,6 +78,33 @@ impl BaselineReport {
             category_pass_rates,
             scenario_pass_rates,
             runs,
+        }
+    }
+}
+
+#[derive(Debug, Clone, Default, Serialize)]
+pub(crate) struct BaselineMetadata {
+    pub(crate) live_provider: bool,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub(crate) provider_label: Option<String>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub(crate) model_label: Option<String>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub(crate) run_label: Option<String>,
+}
+
+impl BaselineMetadata {
+    pub(crate) fn new(
+        live_provider: bool,
+        provider_label: Option<String>,
+        model_label: Option<String>,
+        run_label: Option<String>,
+    ) -> Self {
+        Self {
+            live_provider,
+            provider_label,
+            model_label,
+            run_label,
         }
     }
 }
@@ -549,6 +579,12 @@ mod tests {
             "model",
             "mneme-v1-command",
             EvalTargetMetadata::command(true),
+            BaselineMetadata::new(
+                true,
+                Some("openai".to_owned()),
+                Some("gpt-5.4-mini".to_owned()),
+                Some("local-baseline".to_owned()),
+            ),
             vec![BaselineScenarioMetadata::new(
                 "scenario-a",
                 vec!["category-recall".to_owned()],
@@ -564,6 +600,10 @@ mod tests {
         assert_eq!(json["suite"], "model");
         assert_eq!(json["target"], "mneme-v1-command");
         assert_eq!(json["target_metadata"]["command_configured"], true);
+        assert_eq!(json["baseline_metadata"]["live_provider"], true);
+        assert_eq!(json["baseline_metadata"]["provider_label"], "openai");
+        assert_eq!(json["baseline_metadata"]["model_label"], "gpt-5.4-mini");
+        assert_eq!(json["baseline_metadata"]["run_label"], "local-baseline");
         assert_eq!(json["ok"], false);
         assert_eq!(json["iterations"], 2);
         assert_eq!(json["passed_iterations"], 1);
