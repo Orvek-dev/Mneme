@@ -104,3 +104,7 @@ classification, and hook/quality-gate checks for recoverable lock conflicts.
 Phase 14 shipped the **Memory Review & Policy Controls MVP** in `v0.20.0`,
 adding `mneme claims`, claim-ID based forget/correct controls, and eval plus
 quality-gate checks that duplicate claim text is only updated by selected ID.
+
+Phase 15 shipped the **Agent Runtime Installation MVP** in `v0.21.0`, adding
+`mneme hook doctor`, the `scripts/mneme-agent-hook.sh` runtime wrapper, and
+quality-gate checks for wrapper doctor/begin/end installation smoke.

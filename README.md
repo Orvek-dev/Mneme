@@ -28,7 +28,9 @@ Mneme is pre-1.0. The useful surface today is local development and evaluation:
   backups, repair, import/export, and compaction;
 - agents can open and close task sessions with scoped context and post-task
   memory writes;
-- agent hooks expose a stable JSON envelope for begin/end automation;
+- agent hooks expose a stable JSON envelope for doctor/begin/end automation;
+- `scripts/mneme-agent-hook.sh` provides an environment-configurable local
+  wrapper for agent runtimes;
 - extraction and storage are behind adapter boundaries;
 - model-backed extraction experiments can use a provider-neutral command
   adapter without adding API keys to the repo;
@@ -73,7 +75,9 @@ cargo run -p mneme-cli -- validate --store "$STORE"
 cargo run -p mneme-cli -- compact --store "$STORE"
 cargo run -p mneme-cli -- begin "Draft setup plan" --query "local-first" --agent codex --store "$STORE" --json
 cargo run -p mneme-cli -- end session-001 --summary "Prepared a concise setup plan" --remember "user prefers concise setup plans" --store "$STORE" --json
+cargo run -p mneme-cli -- hook doctor --store "$STORE"
 cargo run -p mneme-cli -- hook begin "Draft setup plan" --query "local-first" --agent codex --store "$STORE"
+scripts/mneme-agent-hook.sh doctor
 ```
 
 Without `--store`, the CLI writes to `.mneme/mneme-v1.json` in the current
