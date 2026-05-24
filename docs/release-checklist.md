@@ -13,6 +13,7 @@ Run the same checks locally before creating a tag:
 For package-specific inspection, run:
 
 ```sh
+./scripts/distribution-policy-check.sh
 ./scripts/package-check.sh
 ```
 
@@ -42,6 +43,8 @@ Before pushing a release tag, confirm:
 - no token, key, or secret file is tracked;
 - package manifests still have `publish = false` unless a public registry
   release is intentionally being prepared;
+- no license metadata is added unless a matching committed license file and
+  updated distribution policy are included in the same PR;
 - `CHANGELOG.md` describes the release-relevant changes;
 - README commands still match the actual CLI and eval behavior.
 - Rustdoc builds cleanly when public API docs or examples changed.

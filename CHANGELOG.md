@@ -4,6 +4,18 @@ This project follows the spirit of Keep a Changelog.
 
 ## Unreleased
 
+## [0.15.0] - 2026-05-24
+
+### Added
+
+- Added a public distribution policy documenting the pending owner license
+  decision and disabled registry publication status.
+- Added `scripts/distribution-policy-check.sh` to enforce `publish = false`
+  while no license file is committed.
+- Added distribution policy checks to package assembly verification.
+- Added release, package-readiness, README, and PR-template guidance for
+  license and registry publication guardrails.
+
 ## [0.14.0] - 2026-05-24
 
 ### Added

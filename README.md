@@ -37,6 +37,8 @@ See [docs/v1-stability.md](docs/v1-stability.md) for the current stability
 contract.
 See [docs/api-contract.md](docs/api-contract.md) for the current Rust API
 surface and documentation gate.
+See [docs/distribution-policy.md](docs/distribution-policy.md) for the current
+license and registry publication policy.
 
 For a step-by-step first run, see [Getting Started](docs/getting-started.md).
 
@@ -169,6 +171,12 @@ Check package assembly directly:
 ./scripts/package-check.sh
 ```
 
+Check distribution guardrails directly:
+
+```sh
+./scripts/distribution-policy-check.sh
+```
+
 Build API docs with warnings denied:
 
 ```sh
@@ -198,6 +206,7 @@ spec/               feature specs and verification maps
 - [Local CLI](docs/local-cli.md)
 - [Getting Started](docs/getting-started.md)
 - [API Contract](docs/api-contract.md)
+- [Distribution Policy](docs/distribution-policy.md)
 - [Personal Runtime](docs/personal-runtime.md)
 - [Agent Integration](docs/agent-integration.md)
 - [Eval Scenario Format](docs/eval-scenario-format.md)
