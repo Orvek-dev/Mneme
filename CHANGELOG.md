@@ -4,6 +4,21 @@ This project follows the spirit of Keep a Changelog.
 
 ## Unreleased
 
+## [0.13.0] - 2026-05-24
+
+### Added
+
+- Added top-level and command-specific help for `mneme`.
+- Added top-level and command-specific help for `mneme-eval`.
+- Added CLI help smoke checks to the local quality gate.
+- Added public CLI help usage guidance to getting-started, local CLI, eval,
+  and stability documentation.
+
+### Changed
+
+- Invalid CLI command errors now point users to `help` and command-specific
+  help topics.
+
 ## [0.12.0] - 2026-05-24
 
 ### Added

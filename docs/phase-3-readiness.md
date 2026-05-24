@@ -72,3 +72,7 @@ analysis.
 Phase 6 shipped the **Public Package & Onboarding MVP** in `v0.12.0`, adding
 package metadata, package assembly checks, and public getting-started guidance
 while keeping crates unpublished with `publish = false`.
+
+Phase 7 shipped the **CLI Help & Developer UX MVP** in `v0.13.0`, adding
+top-level and command-specific help for `mneme` and `mneme-eval`, plus help
+smoke checks in the quality gate.

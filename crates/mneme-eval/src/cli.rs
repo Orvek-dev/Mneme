@@ -28,26 +28,174 @@ pub fn run_cli(args: impl IntoIterator<Item = String>) -> Result<(), EvalError> 
         print_doctor();
         return Ok(());
     };
+    let raw_args = args.collect::<Vec<_>>();
     match command.as_str() {
+        "help" => run_help(raw_args),
+        "--help" | "-h" => {
+            print_help(None)?;
+            Ok(())
+        }
         "doctor" => {
-            print_doctor();
+            if wants_command_help(&raw_args) {
+                print_help(Some("doctor"))?;
+            } else {
+                print_doctor();
+            }
             Ok(())
         }
         "--version" | "version" => {
-            println!("{}", env!("CARGO_PKG_VERSION"));
+            if wants_command_help(&raw_args) {
+                print_help(Some("version"))?;
+            } else {
+                println!("{}", env!("CARGO_PKG_VERSION"));
+            }
             Ok(())
         }
-        "validate" => run_validate(args.collect()),
-        "acceptance" => run_acceptance(args.collect()),
-        "baseline" => run_baseline(args.collect()),
-        "baseline-gate" => run_baseline_gate(args.collect()),
-        "replay" => run_replay(args.collect()),
-        "run" => run_suite(args.collect()),
+        "validate" => run_command_or_help("validate", raw_args, run_validate),
+        "acceptance" => run_command_or_help("acceptance", raw_args, run_acceptance),
+        "baseline" => run_command_or_help("baseline", raw_args, run_baseline),
+        "baseline-gate" => run_command_or_help("baseline-gate", raw_args, run_baseline_gate),
+        "replay" => run_command_or_help("replay", raw_args, run_replay),
+        "run" => run_command_or_help("run", raw_args, run_suite),
         _ => Err(EvalError::invalid_cli(format!(
             "unknown mneme-eval command: {command}\navailable commands: doctor, version, validate, acceptance, baseline, baseline-gate, replay, run"
         ))),
     }
 }
+
+fn run_command_or_help<F>(
+    command: &'static str,
+    raw_args: Vec<String>,
+    run: F,
+) -> Result<(), EvalError>
+where
+    F: FnOnce(Vec<String>) -> Result<(), EvalError>,
+{
+    if wants_command_help(&raw_args) {
+        print_help(Some(command))?;
+        Ok(())
+    } else {
+        run(raw_args)
+    }
+}
+
+fn wants_command_help(raw_args: &[String]) -> bool {
+    raw_args.len() == 1 && matches!(raw_args[0].as_str(), "--help" | "-h")
+}
+
+fn run_help(raw_args: Vec<String>) -> Result<(), EvalError> {
+    match raw_args.as_slice() {
+        [] => print_help(None),
+        [command] => print_help(Some(command)),
+        _ => Err(EvalError::invalid_cli(
+            "usage: mneme-eval help [command]\nexample: mneme-eval help baseline",
+        )),
+    }
+}
+
+fn print_help(command: Option<&str>) -> Result<(), EvalError> {
+    let text = match command {
+        None => MNEME_EVAL_HELP,
+        Some(command) => command_help(command).ok_or_else(|| {
+            EvalError::invalid_cli(format!(
+                "unknown mneme-eval help topic: {command}\navailable help topics: doctor, version, validate, acceptance, baseline, baseline-gate, replay, run"
+            ))
+        })?,
+    };
+    println!("{text}");
+    Ok(())
+}
+
+fn command_help(command: &str) -> Option<&'static str> {
+    match command {
+        "doctor" => Some(MNEME_EVAL_DOCTOR_HELP),
+        "version" | "--version" => Some(MNEME_EVAL_VERSION_HELP),
+        "validate" => Some(MNEME_EVAL_VALIDATE_HELP),
+        "acceptance" => Some(MNEME_EVAL_ACCEPTANCE_HELP),
+        "baseline" => Some(MNEME_EVAL_BASELINE_HELP),
+        "baseline-gate" => Some(MNEME_EVAL_BASELINE_GATE_HELP),
+        "replay" => Some(MNEME_EVAL_REPLAY_HELP),
+        "run" => Some(MNEME_EVAL_RUN_HELP),
+        _ => None,
+    }
+}
+
+const MNEME_EVAL_HELP: &str = r#"Mneme eval harness
+
+Usage:
+  mneme-eval <command> [options]
+  mneme-eval help [command]
+
+Commands:
+  doctor         Show harness stage and available targets.
+  version        Print the eval harness version.
+  validate       Validate one scenario or a scenario suite.
+  run            Replay a scenario suite against a target.
+  replay         Replay one scenario against a target.
+  acceptance     Run acceptance gates for a target and suite.
+  baseline       Repeat a suite and summarize pass rates.
+  baseline-gate  Gate a saved baseline JSON report.
+
+Targets:
+  fake, mneme-v1, mneme-v1-command
+
+Examples:
+  mneme-eval validate --suite core
+  mneme-eval run --suite core --target mneme-v1
+  mneme-eval help baseline"#;
+
+const MNEME_EVAL_DOCTOR_HELP: &str = r#"Usage: mneme-eval doctor
+
+Show harness build stage and available eval targets."#;
+
+const MNEME_EVAL_VERSION_HELP: &str = r#"Usage: mneme-eval version
+
+Print the eval harness version."#;
+
+const MNEME_EVAL_VALIDATE_HELP: &str = r#"Usage:
+  mneme-eval validate <scenario.yaml> [--json] [--report <path>]
+  mneme-eval validate --suite <name> [--json] [--report <path>]
+
+Validate scenario files without running a target.
+
+Example:
+  mneme-eval validate --suite core"#;
+
+const MNEME_EVAL_RUN_HELP: &str = r#"Usage: mneme-eval run [--suite <name>] [--target fake|mneme-v1|mneme-v1-command] [--extractor-command <program>] [--extractor-arg <arg>]... [--seeded-fault <name>] [--json] [--report <path>]
+
+Replay a scenario suite against a target. Defaults are --suite core and
+--target fake.
+
+Example:
+  mneme-eval run --suite core --target mneme-v1"#;
+
+const MNEME_EVAL_REPLAY_HELP: &str = r#"Usage: mneme-eval replay <scenario.yaml> [--target fake|mneme-v1|mneme-v1-command] [--extractor-command <program>] [--extractor-arg <arg>]... [--seeded-fault <name>] [--json] [--report <path>]
+
+Replay one scenario against a target.
+
+Example:
+  mneme-eval replay evals/scenarios/core/same-turn-explicit-remember.yaml --target mneme-v1"#;
+
+const MNEME_EVAL_ACCEPTANCE_HELP: &str = r#"Usage: mneme-eval acceptance [--suite <name>] [--target fake|mneme-v1|mneme-v1-command] [--extractor-command <program>] [--extractor-arg <arg>]... [--json] [--report <path>]
+
+Run acceptance gates for a suite and target.
+
+Example:
+  mneme-eval acceptance --suite core --target mneme-v1"#;
+
+const MNEME_EVAL_BASELINE_HELP: &str = r#"Usage: mneme-eval baseline [--suite <name>] [--target fake|mneme-v1|mneme-v1-command] [--extractor-command <program>] [--extractor-arg <arg>]... [--iterations <n>] [--provider-label <label>] [--model-label <label>] [--run-label <label>] [--live-provider] [--json] [--report <path>]
+
+Repeat a suite and summarize aggregate, category, and per-scenario pass rates.
+
+Example:
+  MNEME_OPENAI_DRY_RUN=1 mneme-eval baseline --suite model --target mneme-v1-command --extractor-command wrappers/openai_extractor.py --iterations 2 --provider-label openai --model-label dry-run"#;
+
+const MNEME_EVAL_BASELINE_GATE_HELP: &str = r#"Usage: mneme-eval baseline-gate <baseline-report.json> [--min-pass-rate <0..1>] [--min-category-pass-rate <0..1>] [--max-failed-iterations <n>] [--max-failed-scenario-runs <n>] [--require-live-provider] [--allow-missing-provider-label] [--allow-missing-model-label] [--require-run-label] [--json] [--report <path>]
+
+Gate a saved baseline report before treating it as usable.
+
+Example:
+  mneme-eval baseline-gate evals/reports/openai-dry-run-baseline.json"#;
 
 fn print_doctor() {
     println!(
@@ -1446,6 +1594,25 @@ fn print_scenario_report(scenario: &ScenarioReport) {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn command_help_includes_usage_examples() {
+        let help = command_help("baseline-gate").expect("baseline-gate help");
+        assert!(help.contains("Usage: mneme-eval baseline-gate"));
+        assert!(help.contains("baseline-report.json"));
+
+        let general = command_help("run").expect("run help");
+        assert!(general.contains("mneme-eval run"));
+        assert!(general.contains("--target"));
+    }
+
+    #[test]
+    fn unknown_command_points_to_help() {
+        let result = run_cli(vec!["mneme-eval".to_owned(), "unknown".to_owned()]);
+        let error = result.expect_err("unknown command should fail");
+        assert_eq!(error.exit_code(), 2);
+        assert!(error.to_string().contains("mneme-eval help"));
+    }
 
     #[test]
     fn parse_replay_requires_path() {
