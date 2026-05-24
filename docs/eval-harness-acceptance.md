@@ -9,6 +9,7 @@ Run it locally with:
 cargo run -p mneme-eval -- acceptance --suite core --target fake
 cargo run -p mneme-eval -- acceptance --suite core --target mneme-v1
 cargo run -p mneme-eval -- acceptance --suite runtime --target mneme-v1
+cargo run -p mneme-eval -- acceptance --suite agent --target mneme-v1
 cargo run -p mneme-eval -- acceptance --suite model --target mneme-v1-command --extractor-command evals/fixtures/command-extractor.sh
 ```
 
@@ -18,6 +19,7 @@ Use JSON output for automation:
 cargo run -p mneme-eval -- acceptance --suite core --target fake --json
 cargo run -p mneme-eval -- acceptance --suite core --target mneme-v1 --json
 cargo run -p mneme-eval -- acceptance --suite runtime --target mneme-v1 --json
+cargo run -p mneme-eval -- acceptance --suite agent --target mneme-v1 --json
 cargo run -p mneme-eval -- acceptance --suite model --target mneme-v1-command --extractor-command evals/fixtures/command-extractor.sh --json
 ```
 
@@ -58,6 +60,14 @@ The `runtime` suite covers:
 - compaction after correction lifecycle changes;
 - backup repair after current-store corruption;
 - persisted secret blocking.
+
+The `agent` suite covers:
+
+- begin-session context retrieval;
+- end-session memory writes;
+- session ledger expectations;
+- session audit evidence;
+- secret blocking from agent-recorded memory.
 
 The current suites do not yet cover:
 

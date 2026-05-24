@@ -16,7 +16,7 @@ use std::time::{SystemTime, UNIX_EPOCH};
 use serde::{Deserialize, Serialize};
 
 /// Current persisted state schema version for v1 local stores.
-pub const MNEME_STATE_SCHEMA_VERSION: u32 = 1;
+pub const MNEME_STATE_SCHEMA_VERSION: u32 = 2;
 
 /// Personal-memory engine for Mneme v1.
 #[derive(Debug, Clone)]
@@ -26,6 +26,7 @@ pub struct MnemeEngine {
     budget: BudgetState,
     events: Vec<EventRecord>,
     claims: Vec<ClaimRecord>,
+    sessions: Vec<SessionRecord>,
     audit: Vec<AuditRecord>,
 }
 
@@ -43,6 +44,7 @@ impl MnemeEngine {
             },
             events: Vec::new(),
             claims: Vec::new(),
+            sessions: Vec::new(),
             audit: Vec::new(),
         }
     }
@@ -56,6 +58,7 @@ impl MnemeEngine {
             budget: state.budget,
             events: state.events,
             claims: state.claims,
+            sessions: state.sessions,
             audit: state.audit,
         }
     }
@@ -236,6 +239,100 @@ impl MnemeEngine {
         ContextPack { items, omitted }
     }
 
+    /// Starts an agent session and returns task-scoped context.
+    pub fn begin_session(&mut self, input: SessionBeginInput) -> SessionBeginReport {
+        let query = input.query.unwrap_or_else(|| input.task.clone());
+        let context_pack = self.build_context_pack(query.clone());
+        let session = SessionRecord {
+            id: next_id("session", self.sessions.len() + 1),
+            task: input.task,
+            actor_agent_id: input.actor_agent_id,
+            status: SessionStatus::Active,
+            started_at_unix_seconds: unix_timestamp(),
+            ended_at_unix_seconds: None,
+            context_query: query,
+            context_claim_ids: context_pack
+                .items
+                .iter()
+                .map(|item| item.claim_id.clone())
+                .collect(),
+            summary: None,
+            memory_event_ids: Vec::new(),
+        };
+        self.audit.push(AuditRecord {
+            kind: AuditKind::SessionBegin,
+            target_id: session.id.clone(),
+        });
+        self.sessions.push(session.clone());
+        SessionBeginReport {
+            session,
+            context_pack,
+        }
+    }
+
+    /// Ends an agent session and optionally records remembered claims.
+    pub fn end_session(
+        &mut self,
+        input: SessionEndInput,
+    ) -> Result<SessionEndReport, SessionError> {
+        let position = self
+            .sessions
+            .iter()
+            .position(|session| session.id == input.session_id)
+            .ok_or_else(|| SessionError::new(format!("unknown session: {}", input.session_id)))?;
+        if self.sessions[position].status != SessionStatus::Active {
+            return Err(SessionError::new(format!(
+                "session {} is already {}",
+                input.session_id,
+                self.sessions[position].status.as_str()
+            )));
+        }
+        let actor_agent_id = input
+            .actor_agent_id
+            .clone()
+            .or_else(|| self.sessions[position].actor_agent_id.clone());
+        let mut remembered_event_ids = Vec::new();
+        let mut remembered_claim_ids = Vec::new();
+
+        for claim in input.remember {
+            let event_number = self.events.len() + 1;
+            self.ingest_event(EventInput {
+                speaker_id: "agent".to_owned(),
+                actor_agent_id: actor_agent_id.clone(),
+                text: format!("remember: {claim}"),
+                scope: "private".to_owned(),
+                trust_level: "agent_summary".to_owned(),
+            })
+            .map_err(|source| SessionError::new(format!("record session memory: {source}")))?;
+            let event_id = next_id("event", event_number);
+            remembered_event_ids.push(event_id.clone());
+            remembered_claim_ids.extend(
+                self.claims
+                    .iter()
+                    .filter(|claim| claim.source_event_ids.contains(&event_id))
+                    .map(|claim| claim.id.clone()),
+            );
+        }
+
+        let session = &mut self.sessions[position];
+        session.status = SessionStatus::Closed;
+        session.ended_at_unix_seconds = Some(unix_timestamp());
+        session.summary = input.summary;
+        session
+            .memory_event_ids
+            .extend(remembered_event_ids.iter().cloned());
+        self.audit.push(AuditRecord {
+            kind: AuditKind::SessionEnd,
+            target_id: session.id.clone(),
+        });
+
+        Ok(SessionEndReport {
+            session: session.clone(),
+            remembered_event_ids,
+            remembered_claim_ids,
+        })
+    }
+
     /// Returns the serializable engine state.
     #[must_use]
     pub fn state(&self) -> MnemeState {
@@ -245,6 +342,7 @@ impl MnemeEngine {
             budget: self.budget.clone(),
             events: self.events.clone(),
             claims: self.claims.clone(),
+            sessions: self.sessions.clone(),
             audit: self.audit.clone(),
         }
     }
@@ -262,6 +360,7 @@ impl MnemeEngine {
             metadata: self.metadata.clone(),
             events: self.events.clone(),
             claims: self.claims.clone(),
+            sessions: self.sessions.clone(),
             budget: self.budget.clone(),
             audit: self.audit.clone(),
         }
@@ -568,6 +667,9 @@ pub struct MnemeState {
     pub events: Vec<EventRecord>,
     /// Claims extracted before persistence.
     pub claims: Vec<ClaimRecord>,
+    /// Agent sessions recorded before persistence.
+    #[serde(default)]
+    pub sessions: Vec<SessionRecord>,
     /// Audit records captured before persistence.
     pub audit: Vec<AuditRecord>,
 }
@@ -661,6 +763,118 @@ pub struct CompactionReport {
     /// Number of claims removed.
     pub removed_claims: usize,
 }
+
+/// Input used to start an agent session.
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct SessionBeginInput {
+    /// Task or user request the agent is starting.
+    pub task: String,
+    /// Agent identifier, when available.
+    pub actor_agent_id: Option<String>,
+    /// Optional retrieval query. Defaults to `task`.
+    pub query: Option<String>,
+}
+
+/// Input used to end an agent session.
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct SessionEndInput {
+    /// Session identifier returned by `begin_session`.
+    pub session_id: String,
+    /// Agent identifier, when different from the begin call.
+    pub actor_agent_id: Option<String>,
+    /// Optional task summary.
+    pub summary: Option<String>,
+    /// Explicit claims to record through the v1 rule extractor.
+    pub remember: Vec<String>,
+}
+
+/// Agent session record persisted in the v1 store.
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct SessionRecord {
+    /// Stable session identifier.
+    pub id: String,
+    /// Task or user request associated with this session.
+    pub task: String,
+    /// Agent identifier, when available.
+    pub actor_agent_id: Option<String>,
+    /// Session lifecycle status.
+    pub status: SessionStatus,
+    /// Unix timestamp when the session began.
+    pub started_at_unix_seconds: u64,
+    /// Unix timestamp when the session ended.
+    pub ended_at_unix_seconds: Option<u64>,
+    /// Query used to retrieve task context at begin time.
+    pub context_query: String,
+    /// Claim IDs returned to the agent at begin time.
+    pub context_claim_ids: Vec<String>,
+    /// Optional agent-provided task summary.
+    pub summary: Option<String>,
+    /// Event IDs written by `end_session`.
+    pub memory_event_ids: Vec<String>,
+}
+
+/// Session lifecycle status.
+#[derive(Debug, Clone, Copy, Eq, PartialEq, Serialize, Deserialize)]
+#[serde(rename_all = "snake_case")]
+pub enum SessionStatus {
+    /// Session has started and can still be ended.
+    Active,
+    /// Session has been closed.
+    Closed,
+}
+
+impl SessionStatus {
+    /// Stable status identifier.
+    #[must_use]
+    pub const fn as_str(self) -> &'static str {
+        match self {
+            Self::Active => "active",
+            Self::Closed => "closed",
+        }
+    }
+}
+
+/// Report returned when an agent session starts.
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct SessionBeginReport {
+    /// Persisted session record.
+    pub session: SessionRecord,
+    /// Context returned for the task.
+    pub context_pack: ContextPack,
+}
+
+/// Report returned when an agent session ends.
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct SessionEndReport {
+    /// Persisted session record.
+    pub session: SessionRecord,
+    /// Event IDs created from remembered claims.
+    pub remembered_event_ids: Vec<String>,
+    /// Claim IDs created from remembered claims.
+    pub remembered_claim_ids: Vec<String>,
+}
+
+/// Error returned by session operations.
+#[derive(Debug, Clone, Eq, PartialEq)]
+pub struct SessionError {
+    message: String,
+}
+
+impl SessionError {
+    fn new(message: impl Into<String>) -> Self {
+        Self {
+            message: message.into(),
+        }
+    }
+}
+
+impl fmt::Display for SessionError {
+    fn fmt(&self, formatter: &mut fmt::Formatter<'_>) -> fmt::Result {
+        formatter.write_str(&self.message)
+    }
+}
+
+impl std::error::Error for SessionError {}
 
 /// Storage port for loading and saving v1 personal-memory state.
 pub trait MnemeStore {
@@ -1143,6 +1357,10 @@ pub enum AuditKind {
     BudgetBlock,
     /// State compaction operation.
     StateCompact,
+    /// Agent session begin operation.
+    SessionBegin,
+    /// Agent session end operation.
+    SessionEnd,
 }
 
 impl AuditKind {
@@ -1156,6 +1374,8 @@ impl AuditKind {
             Self::ContextRead => "context.read",
             Self::BudgetBlock => "budget.block",
             Self::StateCompact => "state.compact",
+            Self::SessionBegin => "session.begin",
+            Self::SessionEnd => "session.end",
         }
     }
 }
@@ -1171,6 +1391,8 @@ pub struct EngineSnapshot {
     pub events: Vec<EventRecord>,
     /// Claims extracted during the isolated run.
     pub claims: Vec<ClaimRecord>,
+    /// Agent sessions recorded during the isolated run.
+    pub sessions: Vec<SessionRecord>,
     /// Budget state at snapshot time.
     pub budget: BudgetState,
     /// Audit records captured during the isolated run.
@@ -1251,6 +1473,14 @@ pub fn validate_state(state: &MnemeState) -> StateValidationReport {
         issues.push(StateValidationIssue::warning(
             "schema.legacy",
             "state has no schema_version and will be normalized on next save",
+        ));
+    } else if state.schema_version < MNEME_STATE_SCHEMA_VERSION {
+        issues.push(StateValidationIssue::warning(
+            "schema.old",
+            format!(
+                "state schema {} will be normalized to {} on next save",
+                state.schema_version, MNEME_STATE_SCHEMA_VERSION
+            ),
         ));
     }
 
@@ -1347,6 +1577,67 @@ pub fn validate_state(state: &MnemeState) -> StateValidationReport {
             issues.push(StateValidationIssue::error(
                 "audit.empty_target",
                 "audit target_id must not be empty",
+            ));
+        }
+    }
+
+    let claim_ids = state
+        .claims
+        .iter()
+        .map(|claim| claim.id.clone())
+        .collect::<BTreeSet<_>>();
+    let mut session_ids = BTreeSet::new();
+    for session in &state.sessions {
+        if session.id.trim().is_empty() {
+            issues.push(StateValidationIssue::error(
+                "session.empty_id",
+                "session id must not be empty",
+            ));
+        }
+        if !session_ids.insert(session.id.clone()) {
+            issues.push(StateValidationIssue::error(
+                "session.duplicate_id",
+                format!("duplicate session id {}", session.id),
+            ));
+        }
+        if session.task.trim().is_empty() {
+            issues.push(StateValidationIssue::error(
+                "session.empty_task",
+                format!("session {} has an empty task", session.id),
+            ));
+        }
+        if session.context_query.trim().is_empty() {
+            issues.push(StateValidationIssue::error(
+                "session.empty_context_query",
+                format!("session {} has an empty context query", session.id),
+            ));
+        }
+        for claim_id in &session.context_claim_ids {
+            if !claim_ids.contains(claim_id) {
+                issues.push(StateValidationIssue::error(
+                    "session.unknown_context_claim",
+                    format!(
+                        "session {} references missing claim {}",
+                        session.id, claim_id
+                    ),
+                ));
+            }
+        }
+        for event_id in &session.memory_event_ids {
+            if !event_ids.contains(event_id) {
+                issues.push(StateValidationIssue::error(
+                    "session.unknown_memory_event",
+                    format!(
+                        "session {} references missing event {}",
+                        session.id, event_id
+                    ),
+                ));
+            }
+        }
+        if session.status == SessionStatus::Closed && session.ended_at_unix_seconds.is_none() {
+            issues.push(StateValidationIssue::error(
+                "session.closed_without_end_time",
+                format!("session {} is closed without ended_at", session.id),
             ));
         }
     }
@@ -1857,6 +2148,7 @@ mod tests {
                 scope: "private".to_owned(),
                 source_event_ids: vec!["event-404".to_owned()],
             }],
+            sessions: Vec::new(),
             audit: Vec::new(),
         };
 
@@ -1929,6 +2221,69 @@ mod tests {
         let _ = std::fs::remove_file(&path);
         let _ = std::fs::remove_file(store.backup_path());
         Ok(())
+    }
+
+    #[test]
+    fn agent_session_begin_returns_context_and_end_records_memory(
+    ) -> Result<(), Box<dyn std::error::Error>> {
+        let mut engine = MnemeEngine::new(MnemeConfig::default());
+        engine.ingest_event(EventInput {
+            speaker_id: "user".to_owned(),
+            actor_agent_id: Some("codex".to_owned()),
+            text: "remember: user prefers local-first tools".to_owned(),
+            scope: "private".to_owned(),
+            trust_level: "trusted_user".to_owned(),
+        })?;
+
+        let begin = engine.begin_session(SessionBeginInput {
+            task: "Draft a setup plan".to_owned(),
+            actor_agent_id: Some("codex".to_owned()),
+            query: Some("local-first".to_owned()),
+        });
+        assert_eq!(begin.session.id, "session-001");
+        assert_eq!(begin.session.status, SessionStatus::Active);
+        assert_eq!(begin.context_pack.items.len(), 1);
+        assert_eq!(begin.session.context_claim_ids, vec!["claim-001"]);
+
+        let end = engine.end_session(SessionEndInput {
+            session_id: begin.session.id,
+            actor_agent_id: Some("codex".to_owned()),
+            summary: Some("Prepared a concise setup plan".to_owned()),
+            remember: vec!["user prefers concise setup plans".to_owned()],
+        })?;
+        let context = engine.build_context_pack("concise setup");
+        let snapshot = engine.snapshot();
+
+        assert_eq!(end.session.status, SessionStatus::Closed);
+        assert_eq!(end.remembered_event_ids, vec!["event-002"]);
+        assert_eq!(end.remembered_claim_ids, vec!["claim-002"]);
+        assert_eq!(context.items.len(), 1);
+        assert_eq!(
+            context.items[0].claim_text,
+            "user prefers concise setup plans"
+        );
+        assert!(snapshot
+            .audit
+            .iter()
+            .any(|event| event.kind == AuditKind::SessionBegin));
+        assert!(snapshot
+            .audit
+            .iter()
+            .any(|event| event.kind == AuditKind::SessionEnd));
+        Ok(())
+    }
+
+    #[test]
+    fn ending_unknown_session_fails() {
+        let mut engine = MnemeEngine::new(MnemeConfig::default());
+        let result = engine.end_session(SessionEndInput {
+            session_id: "session-404".to_owned(),
+            actor_agent_id: None,
+            summary: Some("nothing happened".to_owned()),
+            remember: Vec::new(),
+        });
+
+        assert!(result.is_err());
     }
 
     #[cfg(unix)]

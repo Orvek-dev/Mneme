@@ -8,7 +8,8 @@ use std::path::{Path, PathBuf};
 use mneme_core::{
     validate_state, BuildStage, ClaimRecord, CommandExtractor, CompactionReport, ContextPack,
     EngineSnapshot, EventInput, ExtractorError, JsonFileStore, MnemeConfig, MnemeEngine,
-    MnemeExtractor, MnemeState, MnemeStore, RuleBasedExtractor, StateValidationReport,
+    MnemeExtractor, MnemeState, MnemeStore, RuleBasedExtractor, SessionBeginInput,
+    SessionBeginReport, SessionEndInput, SessionEndReport, SessionError, StateValidationReport,
     StoreFileStatus, StoreInspection, StoreRepairReport, PRODUCT_NAME,
 };
 use serde::Serialize;
@@ -63,6 +64,13 @@ impl CliError {
         }
     }
 
+    fn session(source: SessionError) -> Self {
+        Self {
+            message: format!("agent session: {source}"),
+            exit_code: 1,
+        }
+    }
+
     #[must_use]
     /// Process exit code that matches the error category.
     pub fn exit_code(&self) -> i32 {
@@ -106,13 +114,15 @@ fn run_cli_with_writer(
         "forget" => run_forget(args.collect(), writer),
         "context" => run_context(args.collect(), writer),
         "snapshot" => run_snapshot(args.collect(), writer),
+        "begin" => run_begin(args.collect(), writer),
+        "end" => run_end(args.collect(), writer),
         "validate" => run_validate_store(args.collect(), writer),
         "export" => run_export(args.collect(), writer),
         "import" => run_import(args.collect(), writer),
         "compact" => run_compact(args.collect(), writer),
         "repair" => run_repair(args.collect(), writer),
         _ => Err(CliError::invalid_cli(format!(
-            "unknown mneme command: {command}\navailable commands: doctor, version, ingest, remember, correct, forget, context, snapshot, validate, export, import, compact, repair"
+            "unknown mneme command: {command}\navailable commands: doctor, version, ingest, remember, correct, forget, context, snapshot, begin, end, validate, export, import, compact, repair"
         ))),
     }
 }
@@ -155,6 +165,21 @@ impl Default for EventOptions {
             extractor: ExtractorOptions::Rule,
         }
     }
+}
+
+#[derive(Debug, Clone, Default)]
+struct BeginOptions {
+    common: CommonOptions,
+    actor_agent_id: Option<String>,
+    query: Option<String>,
+}
+
+#[derive(Debug, Clone, Default)]
+struct EndOptions {
+    common: CommonOptions,
+    actor_agent_id: Option<String>,
+    summary: Option<String>,
+    remember: Vec<String>,
 }
 
 #[derive(Debug, Clone)]
@@ -222,6 +247,18 @@ struct ContextReport {
 struct SnapshotReport {
     store: String,
     snapshot: EngineSnapshot,
+}
+
+#[derive(Debug, Serialize)]
+struct BeginCliReport {
+    store: String,
+    report: SessionBeginReport,
+}
+
+#[derive(Debug, Serialize)]
+struct EndCliReport {
+    store: String,
+    report: SessionEndReport,
 }
 
 #[derive(Debug, Serialize)]
@@ -354,6 +391,43 @@ fn run_snapshot(raw_args: Vec<String>, writer: &mut impl Write) -> Result<(), Cl
         snapshot: engine.snapshot(),
     };
     emit_snapshot_report(&report, options.json, writer)
+}
+
+fn run_begin(raw_args: Vec<String>, writer: &mut impl Write) -> Result<(), CliError> {
+    let (task, options) = parse_begin_args(raw_args)?;
+    let store_path = resolve_store_path(&options.common)?;
+    let mut engine = load_engine(&store_path)?;
+    let report = engine.begin_session(SessionBeginInput {
+        task,
+        actor_agent_id: options.actor_agent_id,
+        query: options.query,
+    });
+    persist_engine(&store_path, &engine)?;
+    let cli_report = BeginCliReport {
+        store: store_path.display().to_string(),
+        report,
+    };
+    emit_begin_report(&cli_report, options.common.json, writer)
+}
+
+fn run_end(raw_args: Vec<String>, writer: &mut impl Write) -> Result<(), CliError> {
+    let (session_id, options) = parse_end_args(raw_args)?;
+    let store_path = resolve_store_path(&options.common)?;
+    let mut engine = load_engine(&store_path)?;
+    let report = engine
+        .end_session(SessionEndInput {
+            session_id,
+            actor_agent_id: options.actor_agent_id,
+            summary: options.summary,
+            remember: options.remember,
+        })
+        .map_err(CliError::session)?;
+    persist_engine(&store_path, &engine)?;
+    let cli_report = EndCliReport {
+        store: store_path.display().to_string(),
+        report,
+    };
+    emit_end_report(&cli_report, options.common.json, writer)
 }
 
 fn run_validate_store(raw_args: Vec<String>, writer: &mut impl Write) -> Result<(), CliError> {
@@ -721,6 +795,90 @@ fn parse_snapshot_args(raw_args: Vec<String>) -> Result<CommonOptions, CliError>
     Ok(options)
 }
 
+fn parse_begin_args(raw_args: Vec<String>) -> Result<(String, BeginOptions), CliError> {
+    let mut options = BeginOptions::default();
+    let mut positionals = Vec::new();
+    let mut idx = 0;
+    while idx < raw_args.len() {
+        if parse_common_option(&raw_args, &mut idx, &mut options.common)? {
+            idx += 1;
+            continue;
+        }
+        match raw_args[idx].as_str() {
+            "--agent" => {
+                idx += 1;
+                options.actor_agent_id = Some(required_arg(&raw_args, idx, "--agent")?);
+            }
+            "--query" => {
+                idx += 1;
+                options.query = Some(required_arg(&raw_args, idx, "--query")?);
+            }
+            value if value.starts_with('-') => {
+                return Err(CliError::invalid_cli(format!(
+                    "unknown begin option: {value}"
+                )));
+            }
+            value => positionals.push(value.to_owned()),
+        }
+        idx += 1;
+    }
+    if positionals.len() != 1 {
+        return Err(CliError::invalid_cli(
+            "usage: mneme begin <task> [--query <query>] [--agent <id>] [--store <path>] [--json]",
+        ));
+    }
+    Ok((require_nonempty(positionals.remove(0), "task")?, options))
+}
+
+fn parse_end_args(raw_args: Vec<String>) -> Result<(String, EndOptions), CliError> {
+    let mut options = EndOptions::default();
+    let mut positionals = Vec::new();
+    let mut idx = 0;
+    while idx < raw_args.len() {
+        if parse_common_option(&raw_args, &mut idx, &mut options.common)? {
+            idx += 1;
+            continue;
+        }
+        match raw_args[idx].as_str() {
+            "--agent" => {
+                idx += 1;
+                options.actor_agent_id = Some(required_arg(&raw_args, idx, "--agent")?);
+            }
+            "--summary" => {
+                idx += 1;
+                options.summary = Some(required_arg(&raw_args, idx, "--summary")?);
+            }
+            "--remember" => {
+                idx += 1;
+                options
+                    .remember
+                    .push(required_arg(&raw_args, idx, "--remember")?);
+            }
+            value if value.starts_with('-') => {
+                return Err(CliError::invalid_cli(format!(
+                    "unknown end option: {value}"
+                )));
+            }
+            value => positionals.push(value.to_owned()),
+        }
+        idx += 1;
+    }
+    if positionals.len() != 1 {
+        return Err(CliError::invalid_cli(
+            "usage: mneme end <session-id> [--summary <text>] [--remember <claim>]... [--agent <id>] [--store <path>] [--json]",
+        ));
+    }
+    if options.summary.is_none() && options.remember.is_empty() {
+        return Err(CliError::invalid_cli(
+            "mneme end requires --summary <text> or at least one --remember <claim>",
+        ));
+    }
+    Ok((
+        require_nonempty(positionals.remove(0), "session id")?,
+        options,
+    ))
+}
+
 fn parse_no_position_args(
     raw_args: Vec<String>,
     command: &'static str,
@@ -918,6 +1076,53 @@ fn emit_snapshot_report(
         report.snapshot.events.len(),
         report.snapshot.claims.len(),
         report.snapshot.audit.len()
+    )
+    .map_err(|source| CliError::io("write", Path::new("<stdout>"), source))
+}
+
+fn emit_begin_report(
+    report: &BeginCliReport,
+    json: bool,
+    writer: &mut impl Write,
+) -> Result<(), CliError> {
+    if json {
+        return write_json(writer, report);
+    }
+    writeln!(
+        writer,
+        "mneme: began session {} from {} (context_items={})",
+        report.report.session.id,
+        report.store,
+        report.report.context_pack.items.len()
+    )
+    .map_err(|source| CliError::io("write", Path::new("<stdout>"), source))?;
+    for item in &report.report.context_pack.items {
+        writeln!(
+            writer,
+            "- {} [{}]",
+            item.claim_text,
+            item.source_event_ids.join(",")
+        )
+        .map_err(|source| CliError::io("write", Path::new("<stdout>"), source))?;
+    }
+    Ok(())
+}
+
+fn emit_end_report(
+    report: &EndCliReport,
+    json: bool,
+    writer: &mut impl Write,
+) -> Result<(), CliError> {
+    if json {
+        return write_json(writer, report);
+    }
+    writeln!(
+        writer,
+        "mneme: ended session {} from {} (remembered_events={}, remembered_claims={})",
+        report.report.session.id,
+        report.store,
+        report.report.remembered_event_ids.len(),
+        report.report.remembered_claim_ids.len()
     )
     .map_err(|source| CliError::io("write", Path::new("<stdout>"), source))
 }
@@ -1338,6 +1543,84 @@ mod tests {
 
         let _ = std::fs::remove_file(&path);
         let _ = std::fs::remove_file(&backup);
+        Ok(())
+    }
+
+    #[test]
+    fn begin_and_end_agent_session_records_memory() -> Result<(), Box<dyn std::error::Error>> {
+        let path = temp_store_path("begin-end-session");
+        let _ = std::fs::remove_file(&path);
+        let _ = std::fs::remove_file(format!("{}.bak", path.display()));
+
+        run_cli_with_writer(
+            vec![
+                "mneme".to_owned(),
+                "remember".to_owned(),
+                "user prefers local-first tools".to_owned(),
+                "--store".to_owned(),
+                path.display().to_string(),
+            ],
+            &mut Vec::new(),
+        )?;
+
+        let mut begin_output = Vec::new();
+        run_cli_with_writer(
+            vec![
+                "mneme".to_owned(),
+                "begin".to_owned(),
+                "Draft setup plan".to_owned(),
+                "--query".to_owned(),
+                "local-first".to_owned(),
+                "--agent".to_owned(),
+                "codex".to_owned(),
+                "--store".to_owned(),
+                path.display().to_string(),
+                "--json".to_owned(),
+            ],
+            &mut begin_output,
+        )?;
+        let begin_text = String::from_utf8(begin_output)?;
+        assert!(begin_text.contains("\"id\": \"session-001\""));
+        assert!(begin_text.contains("local-first tools"));
+
+        let mut end_output = Vec::new();
+        run_cli_with_writer(
+            vec![
+                "mneme".to_owned(),
+                "end".to_owned(),
+                "session-001".to_owned(),
+                "--summary".to_owned(),
+                "Prepared a concise setup plan".to_owned(),
+                "--remember".to_owned(),
+                "user prefers concise setup plans".to_owned(),
+                "--store".to_owned(),
+                path.display().to_string(),
+                "--json".to_owned(),
+            ],
+            &mut end_output,
+        )?;
+        let end_text = String::from_utf8(end_output)?;
+        assert!(end_text.contains("\"status\": \"closed\""));
+        assert!(end_text.contains("event-002"));
+        assert!(end_text.contains("claim-002"));
+
+        let mut context_output = Vec::new();
+        run_cli_with_writer(
+            vec![
+                "mneme".to_owned(),
+                "context".to_owned(),
+                "concise".to_owned(),
+                "--store".to_owned(),
+                path.display().to_string(),
+                "--json".to_owned(),
+            ],
+            &mut context_output,
+        )?;
+        let context_text = String::from_utf8(context_output)?;
+        assert!(context_text.contains("concise setup plans"));
+
+        let _ = std::fs::remove_file(&path);
+        let _ = std::fs::remove_file(format!("{}.bak", path.display()));
         Ok(())
     }
 

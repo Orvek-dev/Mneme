@@ -23,6 +23,8 @@ Mneme is pre-1.0. The useful surface today is local development and evaluation:
 - corrections and forgets are auditable lifecycle transitions;
 - local JSON stores include schema metadata, atomic writes, backups, repair,
   import/export, and compaction;
+- agents can open and close task sessions with scoped context and post-task
+  memory writes;
 - extraction and storage are behind adapter boundaries;
 - model-backed extraction experiments can use a provider-neutral command
   adapter without adding API keys to the repo.
@@ -52,6 +54,8 @@ cargo run -p mneme-cli -- forget "user prefers desktop IDE" --store "$STORE"
 cargo run -p mneme-cli -- snapshot --store "$STORE" --json
 cargo run -p mneme-cli -- validate --store "$STORE"
 cargo run -p mneme-cli -- compact --store "$STORE"
+cargo run -p mneme-cli -- begin "Draft setup plan" --query "local-first" --agent codex --store "$STORE" --json
+cargo run -p mneme-cli -- end session-001 --summary "Prepared a concise setup plan" --remember "user prefers concise setup plans" --store "$STORE" --json
 ```
 
 Without `--store`, the CLI writes to `.mneme/mneme-v1.json` in the current
@@ -81,6 +85,13 @@ Run the runtime maintenance suite:
 ```sh
 cargo run -p mneme-eval -- validate --suite runtime
 cargo run -p mneme-eval -- run --suite runtime --target mneme-v1
+```
+
+Run the agent integration suite:
+
+```sh
+cargo run -p mneme-eval -- validate --suite agent
+cargo run -p mneme-eval -- run --suite agent --target mneme-v1
 ```
 
 Run the opt-in command extraction suite:
@@ -120,6 +131,7 @@ Run the acceptance gate:
 cargo run -p mneme-eval -- acceptance --suite core --target fake
 cargo run -p mneme-eval -- acceptance --suite core --target mneme-v1
 cargo run -p mneme-eval -- acceptance --suite runtime --target mneme-v1
+cargo run -p mneme-eval -- acceptance --suite agent --target mneme-v1
 ```
 
 Use `--json` for machine-readable reports.
@@ -154,6 +166,7 @@ spec/               feature specs and verification maps
 
 - [Local CLI](docs/local-cli.md)
 - [Personal Runtime](docs/personal-runtime.md)
+- [Agent Integration](docs/agent-integration.md)
 - [Eval Scenario Format](docs/eval-scenario-format.md)
 - [Eval Acceptance Gate](docs/eval-harness-acceptance.md)
 - [Eval Target Adapter Contract](docs/eval-target-adapter-contract.md)

@@ -1,7 +1,8 @@
 use crate::error::EvalError;
 use crate::report::{CheckReport, ScenarioReport};
 use crate::scenario::{
-    AuditExpected, ClaimExpected, ContextPackExpected, Expected, Scenario, StoreExpected,
+    AuditExpected, ClaimExpected, ContextPackExpected, Expected, Scenario, SessionExpected,
+    StoreExpected,
 };
 use crate::target::{ActualState, ContextPack, EvalTarget, TargetRunOptions};
 
@@ -63,6 +64,9 @@ fn check_expected(scenario: &Scenario, actual: &ActualState) -> Vec<CheckReport>
     }
     if let Some(expected) = &scenario.expected.store {
         checks.extend(check_store(expected, actual));
+    }
+    if let Some(expected) = &scenario.expected.session {
+        checks.extend(check_session(expected, actual));
     }
     checks
 }
@@ -185,6 +189,9 @@ fn check_audit(expected: &AuditExpected, actual: &ActualState) -> Vec<CheckRepor
     if expected.claim_update_required {
         checks.push(check_claim_update_audit(actual));
     }
+    if expected.session_events_required {
+        checks.push(check_session_audit(actual));
+    }
     checks
 }
 
@@ -248,6 +255,138 @@ fn check_claim_update_audit(actual: &ActualState) -> CheckReport {
             "actual.audit",
         )
     }
+}
+
+fn check_session_audit(actual: &ActualState) -> CheckReport {
+    let has_begin = actual
+        .audit
+        .iter()
+        .any(|event| event.kind == "session.begin");
+    let has_end = actual.audit.iter().any(|event| event.kind == "session.end");
+    if has_begin && has_end {
+        CheckReport::pass("audit.session_events_required", "begin/end", "begin/end")
+    } else {
+        CheckReport::fail(
+            "audit.session_events_required",
+            "begin/end",
+            format!("begin={has_begin} end={has_end}"),
+            "actual.audit",
+        )
+    }
+}
+
+fn check_session(expected: &SessionExpected, actual: &ActualState) -> Vec<CheckReport> {
+    let Some(session) = actual.sessions.first() else {
+        return vec![CheckReport::fail(
+            "session.present",
+            "present",
+            "missing",
+            "actual.sessions",
+        )];
+    };
+    let mut checks = Vec::new();
+    if let Some(status) = &expected.status {
+        if &session.status == status {
+            checks.push(CheckReport::pass("session.status", status, &session.status));
+        } else {
+            checks.push(CheckReport::fail(
+                "session.status",
+                status,
+                &session.status,
+                "actual.sessions",
+            ));
+        }
+    }
+    if let Some(task) = &expected.task {
+        if &session.task == task {
+            checks.push(CheckReport::pass("session.task", task, &session.task));
+        } else {
+            checks.push(CheckReport::fail(
+                "session.task",
+                task,
+                &session.task,
+                "actual.sessions",
+            ));
+        }
+    }
+    if let Some(actor_agent_id) = &expected.actor_agent_id {
+        if session.actor_agent_id.as_ref() == Some(actor_agent_id) {
+            checks.push(CheckReport::pass(
+                "session.actor_agent_id",
+                actor_agent_id,
+                actor_agent_id,
+            ));
+        } else {
+            checks.push(CheckReport::fail(
+                "session.actor_agent_id",
+                actor_agent_id,
+                format!("{:?}", session.actor_agent_id),
+                "actual.sessions.actor_agent_id",
+            ));
+        }
+    }
+    for expected_text in &expected.context_must_include {
+        let expected_lower = expected_text.to_ascii_lowercase();
+        let context_text = actual
+            .claims
+            .iter()
+            .filter(|claim| session.context_claim_ids.contains(&claim.id))
+            .map(|claim| claim.text())
+            .collect::<Vec<_>>()
+            .join("\n")
+            .to_ascii_lowercase();
+        if context_text.contains(&expected_lower) {
+            checks.push(CheckReport::pass(
+                format!("session.context_must_include.{expected_text}"),
+                "included",
+                "included",
+            ));
+        } else {
+            checks.push(CheckReport::fail(
+                format!("session.context_must_include.{expected_text}"),
+                "included",
+                "missing",
+                "actual.sessions.context_claim_ids",
+            ));
+        }
+    }
+    if let Some(count) = expected.memory_event_count {
+        if session.memory_event_ids.len() == count {
+            checks.push(CheckReport::pass(
+                "session.memory_event_count",
+                count.to_string(),
+                session.memory_event_ids.len().to_string(),
+            ));
+        } else {
+            checks.push(CheckReport::fail(
+                "session.memory_event_count",
+                count.to_string(),
+                session.memory_event_ids.len().to_string(),
+                "actual.sessions.memory_event_ids",
+            ));
+        }
+    }
+    if let Some(summary) = &expected.summary_contains {
+        let actual_summary = session.summary.clone().unwrap_or_default();
+        if actual_summary
+            .to_ascii_lowercase()
+            .contains(&summary.to_ascii_lowercase())
+        {
+            checks.push(CheckReport::pass(
+                "session.summary_contains",
+                summary,
+                summary,
+            ));
+        } else {
+            checks.push(CheckReport::fail(
+                "session.summary_contains",
+                summary,
+                actual_summary,
+                "actual.sessions.summary",
+            ));
+        }
+    }
+    checks
 }
 
 fn check_store(expected: &StoreExpected, actual: &ActualState) -> Vec<CheckReport> {
@@ -372,6 +511,7 @@ mod tests {
             },
             persistence: None,
             maintenance: Maintenance::default(),
+            agent_flow: None,
             events: vec![InputEvent {
                 speaker_id: "user".to_owned(),
                 actor_agent_id: Some("codex".to_owned()),
@@ -401,8 +541,10 @@ mod tests {
                 audit: Some(AuditExpected {
                     read_write_events_required: true,
                     claim_update_required: false,
+                    session_events_required: false,
                 }),
                 store: None,
+                session: None,
             },
         };
         let target = FakeEvalTarget;
@@ -424,6 +566,7 @@ mod tests {
             },
             persistence: None,
             maintenance: Maintenance::default(),
+            agent_flow: None,
             events: vec![InputEvent {
                 speaker_id: "user".to_owned(),
                 actor_agent_id: None,
@@ -445,6 +588,7 @@ mod tests {
                 budget: None,
                 audit: None,
                 store: None,
+                session: None,
             },
         };
         let target = FakeEvalTarget;

@@ -39,6 +39,7 @@ Run a suite:
 cargo run -p mneme-eval -- run --suite core --target fake
 cargo run -p mneme-eval -- run --suite core --target mneme-v1
 cargo run -p mneme-eval -- run --suite runtime --target mneme-v1
+cargo run -p mneme-eval -- run --suite agent --target mneme-v1
 cargo run -p mneme-eval -- run --suite model --target mneme-v1-command --extractor-command evals/fixtures/command-extractor.sh
 ```
 
@@ -48,6 +49,7 @@ Run the full harness acceptance gate:
 cargo run -p mneme-eval -- acceptance --suite core --target fake
 cargo run -p mneme-eval -- acceptance --suite core --target mneme-v1
 cargo run -p mneme-eval -- acceptance --suite runtime --target mneme-v1
+cargo run -p mneme-eval -- acceptance --suite agent --target mneme-v1
 cargo run -p mneme-eval -- acceptance --suite model --target mneme-v1-command --extractor-command evals/fixtures/command-extractor.sh
 ```
 
@@ -76,6 +78,15 @@ maintenance:
   export_import_roundtrip: false
   compact_after_events: false
   repair_from_backup: false
+agent_flow:
+  begin:
+    task: "Draft setup plan"
+    actor_agent_id: codex
+    query: "local-first"
+  end:
+    summary: "Prepared a concise setup plan"
+    remember:
+      - "user prefers concise setup plans"
 events:
   - speaker_id: user
     actor_agent_id: codex
@@ -102,13 +113,22 @@ expected:
   audit:
     read_write_events_required: true
     claim_update_required: false
+    session_events_required: false
   store:
-    schema_version: 1
+    schema_version: 2
     valid: true
     backup_required: false
     repair_performed: false
     compacted: false
     imported: false
+  session:
+    status: closed
+    task: "Draft setup plan"
+    actor_agent_id: codex
+    context_must_include:
+      - local-first tools
+    memory_event_count: 1
+    summary_contains: concise setup
 ```
 
 ## Required Fields
@@ -152,6 +172,10 @@ Each expected claim requires:
   inactive claims before context and store checks.
 - `maintenance.repair_from_backup`: asks compatible targets to corrupt the
   current store after backup creation, repair from backup, and reload.
+- `agent_flow.begin`: asks compatible targets to start an agent session with
+  `task`, optional `actor_agent_id`, and optional context `query`.
+- `agent_flow.end`: asks compatible targets to close that session with an
+  optional `summary` and zero or more explicit `remember` claims.
 - `events[].actor_agent_id`: agent acting on behalf of the speaker.
 - `events[].scope`: memory scope. Defaults to `private`.
 - `events[].trust_level`: input trust level. Defaults to `trusted_user`.
@@ -168,12 +192,22 @@ Each expected claim requires:
 - `audit.read_write_events_required`: requires read/write audit evidence.
 - `audit.claim_update_required`: requires `claim.update` audit evidence for
   correction or forget scenarios.
+- `audit.session_events_required`: requires `session.begin` and `session.end`
+  audit evidence.
 - `store.schema_version`: expected persisted state schema version.
 - `store.valid`: requires the inspected current store to be valid.
 - `store.backup_required`: requires a backup file to exist.
 - `store.repair_performed`: requires repair from backup to have run.
 - `store.compacted`: requires compaction to have run.
 - `store.imported`: requires an export/import round trip to have run.
+- `session.status`: expected session status.
+- `session.task`: expected session task.
+- `session.actor_agent_id`: expected acting agent.
+- `session.context_must_include`: strings that must appear in begin-session
+  context claims.
+- `session.memory_event_count`: expected remembered event count written by the
+  session end.
+- `session.summary_contains`: string that must appear in the session summary.
 
 Unknown fields are rejected. This keeps public fixtures strict enough for long
 term compatibility.

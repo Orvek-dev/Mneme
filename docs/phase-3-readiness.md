@@ -61,3 +61,6 @@ already made the model/eval side strong enough to guard provider experiments.
 Phase 3 shipped the **Personal Memory Runtime MVP** in `v0.9.0`. The next large
 phase should build on the new runtime maintenance surface instead of adding more
 storage scaffolding.
+
+Phase 4 shipped the **Agent Integration MVP** in `v0.10.0`, adding begin/end
+sessions, session audit, and an agent eval suite.

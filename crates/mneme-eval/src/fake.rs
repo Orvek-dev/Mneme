@@ -1,8 +1,8 @@
 use crate::error::EvalError;
-use crate::scenario::{ContextPackExpected, Scenario};
+use crate::scenario::{AgentFlow, ContextPackExpected, Scenario};
 use crate::target::{
     ActualState, AuditEvent, Claim, ContextItem, ContextPack, EvalTarget, EvalTargetMetadata,
-    FaultMode, OmittedItem, RecordedEvent, StoreActual, TargetRunOptions,
+    FaultMode, OmittedItem, RecordedEvent, SessionActual, StoreActual, TargetRunOptions,
 };
 
 pub(crate) struct FakeEvalTarget;
@@ -87,6 +87,10 @@ fn run_fake_runtime(scenario: &Scenario, options: TargetRunOptions) -> ActualSta
         compacted = true;
     }
 
+    if let Some(agent_flow) = &scenario.agent_flow {
+        apply_agent_flow(&mut actual, agent_flow, options.clone());
+    }
+
     if let Some(context_expected) = &scenario.expected.context_pack {
         actual.context_pack = Some(build_context_pack(
             &actual.claims,
@@ -118,6 +122,82 @@ fn run_fake_runtime(scenario: &Scenario, options: TargetRunOptions) -> ActualSta
     }
 
     actual
+}
+
+fn apply_agent_flow(actual: &mut ActualState, agent_flow: &AgentFlow, options: TargetRunOptions) {
+    let query = agent_flow
+        .begin
+        .query
+        .clone()
+        .unwrap_or_else(|| agent_flow.begin.task.clone());
+    let context = build_context_pack_for_query(&actual.claims, &query, options.clone());
+    let mut session = SessionActual {
+        id: format!("session-{:03}", actual.sessions.len() + 1),
+        task: agent_flow.begin.task.clone(),
+        actor_agent_id: agent_flow.begin.actor_agent_id.clone(),
+        status: "active".to_owned(),
+        context_claim_ids: context
+            .items
+            .iter()
+            .map(|item| item.claim_id.clone())
+            .collect(),
+        summary: None,
+        memory_event_ids: Vec::new(),
+    };
+    actual.audit.push(AuditEvent {
+        kind: "context.read".to_owned(),
+        target_id: query,
+    });
+    actual.audit.push(AuditEvent {
+        kind: "session.begin".to_owned(),
+        target_id: session.id.clone(),
+    });
+
+    if let Some(end) = &agent_flow.end {
+        for remembered in &end.remember {
+            let event = RecordedEvent {
+                id: format!("event-{:03}", actual.events.len() + 1),
+                speaker_id: "agent".to_owned(),
+                actor_agent_id: agent_flow.begin.actor_agent_id.clone(),
+                text: format!("remember: {remembered}"),
+                scope: "private".to_owned(),
+                trust_level: "agent_summary".to_owned(),
+            };
+            actual.audit.push(AuditEvent {
+                kind: "event.append".to_owned(),
+                target_id: format!(
+                    "{}:{}:{}",
+                    event.id,
+                    event.actor_agent_id.as_deref().unwrap_or("no-agent"),
+                    event.trust_level
+                ),
+            });
+            if options.fault_mode != FaultMode::SkipClaims {
+                if let Some(mut claim) = extract_claim(&event, actual.claims.len() + 1) {
+                    if options.fault_mode == FaultMode::LeakSecrets
+                        && claim.status == "blocked_secret"
+                    {
+                        claim.status = "active".to_owned();
+                    }
+                    actual.audit.push(AuditEvent {
+                        kind: "claim.write".to_owned(),
+                        target_id: claim.id.clone(),
+                    });
+                    actual.claims.push(claim);
+                }
+            }
+            session.memory_event_ids.push(event.id.clone());
+            actual.events.push(event);
+        }
+        session.status = "closed".to_owned();
+        session.summary = end.summary.clone();
+        actual.audit.push(AuditEvent {
+            kind: "session.end".to_owned(),
+            target_id: session.id.clone(),
+        });
+    }
+
+    actual.sessions.push(session);
 }
 
 fn compact_actual(actual: &mut ActualState) {
@@ -288,6 +368,8 @@ fn looks_like_secret(text: &str) -> bool {
     lower.contains("api_key=")
         || lower.contains("api key")
         || lower.contains("secret=")
+        || lower.contains("token=")
+        || lower.contains("access_token=")
         || lower.contains("password=")
 }
 
@@ -343,4 +425,21 @@ fn build_context_pack(
     }
 
     ContextPack { items, omitted }
+}
+
+fn build_context_pack_for_query(
+    claims: &[Claim],
+    query: &str,
+    options: TargetRunOptions,
+) -> ContextPack {
+    build_context_pack(
+        claims,
+        &ContextPackExpected {
+            query: query.to_owned(),
+            must_include: Vec::new(),
+            must_not_include: Vec::new(),
+            citation_required: false,
+        },
+        options,
+    )
 }
