@@ -116,5 +116,7 @@ jobs:
             --iterations 2 \
             --json | tee "${RUNNER_TEMP}/mneme-openai-wrapper-baseline.json"
           grep -q '"iterations": 2' "${RUNNER_TEMP}/mneme-openai-wrapper-baseline.json"
+          grep -q '"scenario_count": 8' "${RUNNER_TEMP}/mneme-openai-wrapper-baseline.json"
+          grep -q '"category": "no-claim"' "${RUNNER_TEMP}/mneme-openai-wrapper-baseline.json"
           grep -q '"passed_iterations": 2' "${RUNNER_TEMP}/mneme-openai-wrapper-baseline.json"
           grep -q '"failed_scenario_runs": 0' "${RUNNER_TEMP}/mneme-openai-wrapper-baseline.json"

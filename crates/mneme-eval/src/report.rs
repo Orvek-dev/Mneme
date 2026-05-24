@@ -1,4 +1,5 @@
 use serde::Serialize;
+use std::collections::BTreeMap;
 
 use crate::target::EvalTargetMetadata;
 
@@ -31,6 +32,7 @@ pub(crate) struct BaselineReport {
     pub(crate) passed_scenario_runs: usize,
     pub(crate) failed_scenario_runs: usize,
     pub(crate) pass_rate: f64,
+    pub(crate) category_pass_rates: Vec<BaselineCategorySummary>,
     pub(crate) scenario_pass_rates: Vec<BaselineScenarioSummary>,
     pub(crate) runs: Vec<BaselineRunReport>,
 }
@@ -40,20 +42,21 @@ impl BaselineReport {
         suite: impl Into<String>,
         target: impl Into<String>,
         target_metadata: EvalTargetMetadata,
-        scenario_ids: Vec<String>,
+        scenarios: Vec<BaselineScenarioMetadata>,
         runs: Vec<BaselineRunReport>,
     ) -> Self {
         let iterations = runs.len();
-        let scenario_count = scenario_ids.len();
+        let scenario_count = scenarios.len();
         let passed_iterations = runs.iter().filter(|run| run.ok).count();
         let failed_iterations = iterations.saturating_sub(passed_iterations);
         let total_scenario_runs = iterations.saturating_mul(scenario_count);
         let passed_scenario_runs = runs.iter().map(|run| run.passed).sum();
         let failed_scenario_runs = total_scenario_runs.saturating_sub(passed_scenario_runs);
         let pass_rate = rate(passed_scenario_runs, total_scenario_runs);
-        let scenario_pass_rates = scenario_ids
+        let category_pass_rates = category_pass_rates(&scenarios, &runs);
+        let scenario_pass_rates = scenarios
             .iter()
-            .map(|scenario_id| BaselineScenarioSummary::from_runs(scenario_id, &runs))
+            .map(|scenario| BaselineScenarioSummary::from_runs(&scenario.id, &runs))
             .collect();
         Self {
             report_schema_version: REPORT_SCHEMA_VERSION,
@@ -69,10 +72,36 @@ impl BaselineReport {
             passed_scenario_runs,
             failed_scenario_runs,
             pass_rate,
+            category_pass_rates,
             scenario_pass_rates,
             runs,
         }
     }
+}
+
+#[derive(Debug, Clone)]
+pub(crate) struct BaselineScenarioMetadata {
+    pub(crate) id: String,
+    pub(crate) tags: Vec<String>,
+}
+
+impl BaselineScenarioMetadata {
+    pub(crate) fn new(id: impl Into<String>, tags: Vec<String>) -> Self {
+        Self {
+            id: id.into(),
+            tags,
+        }
+    }
+}
+
+#[derive(Debug, Clone, Serialize)]
+pub(crate) struct BaselineCategorySummary {
+    pub(crate) category: String,
+    pub(crate) scenario_count: usize,
+    pub(crate) attempts: usize,
+    pub(crate) passed: usize,
+    pub(crate) failed: usize,
+    pub(crate) pass_rate: f64,
 }
 
 #[derive(Debug, Clone, Serialize)]
@@ -195,6 +224,53 @@ fn rate(passed: usize, total: usize) -> f64 {
     } else {
         passed as f64 / total as f64
     }
+}
+
+fn category_pass_rates(
+    scenarios: &[BaselineScenarioMetadata],
+    runs: &[BaselineRunReport],
+) -> Vec<BaselineCategorySummary> {
+    let mut categories: BTreeMap<String, Vec<&str>> = BTreeMap::new();
+    for scenario in scenarios {
+        for tag in scenario
+            .tags
+            .iter()
+            .filter_map(|tag| tag.strip_prefix("category-"))
+        {
+            categories
+                .entry(tag.to_owned())
+                .or_default()
+                .push(scenario.id.as_str());
+        }
+    }
+    categories
+        .into_iter()
+        .map(|(category, scenario_ids)| {
+            let scenario_count = scenario_ids.len();
+            let attempts = scenario_count.saturating_mul(runs.len());
+            let passed = scenario_ids
+                .iter()
+                .map(|scenario_id| {
+                    runs.iter()
+                        .filter(|run| {
+                            run.results
+                                .iter()
+                                .any(|result| result.scenario_id == *scenario_id && result.ok)
+                        })
+                        .count()
+                })
+                .sum();
+            let failed = attempts.saturating_sub(passed);
+            BaselineCategorySummary {
+                category,
+                scenario_count,
+                attempts,
+                passed,
+                failed,
+                pass_rate: rate(passed, attempts),
+            }
+        })
+        .collect()
 }
 
 impl EvalReport {
@@ -473,7 +549,10 @@ mod tests {
             "model",
             "mneme-v1-command",
             EvalTargetMetadata::command(true),
-            vec!["scenario-a".to_owned()],
+            vec![BaselineScenarioMetadata::new(
+                "scenario-a",
+                vec!["category-recall".to_owned()],
+            )],
             vec![
                 BaselineRunReport::from_eval_report(1, passed),
                 BaselineRunReport::from_eval_report(2, failed),
@@ -494,6 +573,8 @@ mod tests {
         assert_eq!(json["passed_scenario_runs"], 1);
         assert_eq!(json["failed_scenario_runs"], 1);
         assert_eq!(json["pass_rate"], 0.5);
+        assert_eq!(json["category_pass_rates"][0]["category"], "recall");
+        assert_eq!(json["category_pass_rates"][0]["pass_rate"], 0.5);
         assert_eq!(json["scenario_pass_rates"][0]["scenario_id"], "scenario-a");
         assert_eq!(json["runs"][1]["results"][0]["failed_checks"][0], "check");
         Ok(())

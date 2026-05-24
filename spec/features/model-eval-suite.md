@@ -17,10 +17,12 @@ credentials.
 - [REQ-MODEL-EVAL-004][Testability] A tracked deterministic command fixture
   shall cover the command protocol without provider credentials.
 - [REQ-MODEL-EVAL-005][Testability] The `model` suite shall cover implicit
-  preference extraction, no-claim events, secret blocking, and lifecycle
-  correction.
+  preference extraction, no-claim events, third-party attribution,
+  over-extraction avoidance, secret blocking, and lifecycle correction.
 - [REQ-MODEL-EVAL-006][Release] CI and release verification shall run the model
   suite through the deterministic command fixture.
+- [REQ-MODEL-EVAL-007][Observability] Model scenarios shall include
+  `category-*` tags that baseline reports can aggregate.
 
 ## Verification Map
 
@@ -32,3 +34,4 @@ credentials.
 | REQ-MODEL-EVAL-004 | `evals/fixtures/command-extractor.sh` | verified |
 | REQ-MODEL-EVAL-005 | `evals/scenarios/model/*.yaml` | verified |
 | REQ-MODEL-EVAL-006 | CI and release workflow model-suite steps | verified |
+| REQ-MODEL-EVAL-007 | model scenario `category-*` tags and baseline category summaries | verified |

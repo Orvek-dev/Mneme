@@ -125,6 +125,8 @@ Each expected claim requires:
 ## Optional Fields
 
 - `tags`: labels used for filtering, reporting, and later suite curation.
+  Tags prefixed with `category-` are aggregated by `mneme-eval baseline`; for
+  example, `category-secret` or `category-no-claim`.
 - `budget.daily_cloud_tokens`: deterministic fake token cap. Defaults to
   `100000` and must be greater than zero.
 - `persistence.restart_after_event`: asks compatible targets to persist state

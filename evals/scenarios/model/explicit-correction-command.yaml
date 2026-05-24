@@ -3,6 +3,7 @@ tags:
   - model
   - command-extractor
   - lifecycle
+  - category-lifecycle
 budget:
   daily_cloud_tokens: 100
 events:
