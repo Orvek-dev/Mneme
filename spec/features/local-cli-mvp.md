@@ -28,6 +28,8 @@ introducing a server, UI, or model dependency. It is a thin adapter over
   store.
 - [REQ-CLI-007][Ubiquitous] The CLI shall expose claim review and claim-ID
   lifecycle controls for precise user edits.
+- [REQ-CLI-008][Ubiquitous] The CLI shall export memory review artifacts for
+  human or scripted inspection.
 
 ## Verification Map
 
@@ -40,3 +42,4 @@ introducing a server, UI, or model dependency. It is a thin adapter over
 | REQ-CLI-005 | JSON output unit tests | verified |
 | REQ-CLI-006 | `.github/workflows/ci.yml` CLI smoke step | verified |
 | REQ-CLI-007 | `claims_review_and_id_lifecycle_controls` and quality gate | verified |
+| REQ-CLI-008 | `review_exports_markdown_and_json_artifacts` and quality gate | verified |
