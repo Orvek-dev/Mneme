@@ -123,3 +123,7 @@ The wrapper uses `MNEME_BIN` when set, otherwise runs
 `target/debug/mneme` only when cargo is unavailable. `MNEME_STORE`,
 `MNEME_AGENT_ID`, `MNEME_SCOPE`, and `MNEME_MAX_ITEMS` are appended when the same
 CLI options are not already present.
+
+Profiles can be loaded with `MNEME_AGENT_HOOK_CONFIG`, `MNEME_CONFIG`, or the
+default ignored `.mneme/mneme-agent-hook.env` path. The file format is
+documented in [Agent Runtime Config](agent-runtime-config.md).

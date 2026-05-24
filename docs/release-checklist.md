@@ -32,6 +32,7 @@ cargo run -p mneme-cli -- remember "user prefers local-first tools" --store "$ST
 cargo run -p mneme-cli -- context "local-first" --store "$STORE" --json
 cargo run -p mneme-cli -- hook doctor --store "$STORE"
 scripts/mneme-agent-hook.sh doctor
+MNEME_AGENT_HOOK_CONFIG=examples/mneme-agent-hook.env.example scripts/mneme-agent-hook.sh doctor
 rm -f "$STORE"
 ```
 
