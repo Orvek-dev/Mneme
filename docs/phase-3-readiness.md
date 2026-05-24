@@ -154,3 +154,8 @@ Phase 25 shipped the **Curation Recovery & Audit Trail MVP** in `v0.31.0`,
 adding `mneme restore`, backup rollback readiness reports, curation rollback
 commands, restore eval checks, and quality-gate checks for rollback and
 swap-back recovery.
+
+Phase 26 shipped the **Provider Extraction Quality MVP** in `v0.32.0`, expanding
+the model suite to cover communication, format, project-scoped, quoted-sample,
+and answer-local instruction cases, and strengthening the OpenAI wrapper
+dry-run and post-processing guardrails.

@@ -1,0 +1,36 @@
+id: model-implicit-project-format-preference
+tags:
+  - model
+  - command-extractor
+  - recall
+  - category-recall
+  - category-preference
+  - category-project
+budget:
+  daily_cloud_tokens: 100
+events:
+  - speaker_id: user
+    actor_agent_id: codex
+    scope: project-atlas
+    trust_level: trusted_user
+    text: "For Project Atlas, I want risk notes grouped by owner."
+expected:
+  event_append:
+    count: 1
+  claims:
+    - subject: user
+      predicate: prefers
+      object: Project Atlas risk notes grouped by owner
+      status: active
+      scope: project-atlas
+  context_pack:
+    query: "Project Atlas risk notes"
+    allowed_scopes:
+      - project-atlas
+    must_include:
+      - grouped by owner
+    citation_required: true
+  budget:
+    hard_cap_violations: 0
+  audit:
+    read_write_events_required: true

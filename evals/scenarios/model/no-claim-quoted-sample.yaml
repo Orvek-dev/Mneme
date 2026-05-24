@@ -1,0 +1,26 @@
+id: model-no-claim-quoted-sample
+tags:
+  - model
+  - command-extractor
+  - no-claim
+  - over-extraction
+  - category-no-claim
+  - category-over-extraction
+budget:
+  daily_cloud_tokens: 100
+events:
+  - speaker_id: user
+    actor_agent_id: codex
+    scope: private
+    trust_level: trusted_user
+    text: "The test fixture says 'user prefers tabs', but that is only sample data."
+expected:
+  event_append:
+    count: 1
+  claims:
+    - subject: user
+      predicate: prefers
+      object: tabs
+      must_not_exist: true
+  budget:
+    hard_cap_violations: 0

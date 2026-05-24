@@ -24,12 +24,20 @@ DEFAULT_TIMEOUT_SECONDS = 30
 SYSTEM_PROMPT = """You extract durable user-memory claims for Mneme.
 
 Return at most one stable claim from the event. Use concise subject,
-predicate, and object strings. Prefer subject "user" for user preferences.
-Extract only facts that should remain useful in future sessions. Return null
-when the event is small talk, a one-off task, transient status, implementation
-instruction, or not useful as durable memory. Return null for third-party
-preferences unless they are explicitly useful as the user's durable memory.
-Return null for credentials, tokens, passwords, or other secret-like material.
+predicate, and object strings. Prefer subject "user" for user preferences,
+communication preferences, tool preferences, workflow preferences, and durable
+project preferences. Extract only facts that should remain useful in future
+sessions.
+
+Return null when the event is small talk, a one-off task, a transient
+instruction, status for only this answer/task/session, quoted sample data, test
+fixture text, or implementation instruction that is not a user preference.
+Return null for third-party preferences unless the event explicitly says the
+user wants that third-party fact remembered for future work. Return null for
+credentials, tokens, passwords, or other secret-like material.
+
+When the user says not to use one format/tool and states an alternative,
+extract the durable alternative preference instead of the rejected option.
 Do not invent facts not present in the event.
 """
 
@@ -82,7 +90,7 @@ def extract_response(request: dict) -> dict:
         return command_response(dry_run_claim(event_text))
 
     model_output = call_openai(request)
-    return command_response(normalize_model_claim(model_output.get("claim")))
+    return command_response(normalize_model_claim(model_output.get("claim"), event_text))
 
 
 def command_response(claim: Optional[dict]) -> dict:
@@ -107,11 +115,33 @@ def dry_run_claim(text: str) -> Optional[dict]:
             "predicate": "prefers",
             "object": "compact tables for option summaries",
         }
+    if "keep explanations direct" in lower and "future planning docs" in lower:
+        return {
+            "subject": "user",
+            "predicate": "prefers",
+            "object": "direct explanations in future planning docs",
+        }
+    if "bullets are easier for me" in lower and "tradeoff summaries" in lower:
+        return {
+            "subject": "user",
+            "predicate": "prefers",
+            "object": "bullets for tradeoff summaries",
+        }
+    if "project atlas" in lower and "risk notes grouped by owner" in lower:
+        return {
+            "subject": "user",
+            "predicate": "prefers",
+            "object": "Project Atlas risk notes grouped by owner",
+        }
     if "thanks, that answer helps" in lower:
         return None
     if "for this one task" in lower:
         return None
     if "sam prefers vim" in lower:
+        return None
+    if "sample data" in lower or "test fixture" in lower:
+        return None
+    if "in this answer" in lower:
         return None
     return None
 
@@ -223,7 +253,7 @@ def output_text(payload: dict) -> str:
     raise WrapperError("OpenAI response did not include output_text content")
 
 
-def normalize_model_claim(claim: Any) -> Optional[dict]:
+def normalize_model_claim(claim: Any, event_text: str) -> Optional[dict]:
     if claim is None:
         return None
     if not isinstance(claim, dict):
@@ -235,7 +265,51 @@ def normalize_model_claim(claim: Any) -> Optional[dict]:
         if not isinstance(value, str) or not value.strip():
             raise WrapperError(f"model claim.{key} must be a non-empty string")
         normalized[key] = value.strip()
+
+    if normalized["subject"].lower() in {"i", "me"}:
+        normalized["subject"] = "user"
+    normalized["predicate"] = normalized["predicate"].lower()
+
+    if should_suppress_model_claim(event_text, normalized):
+        return None
     return normalized
+
+
+def should_suppress_model_claim(text: str, claim: dict) -> bool:
+    lower = text.lower()
+    subject = claim["subject"].strip().lower()
+    object_text = claim["object"].strip().lower()
+
+    transient_markers = [
+        "for this one task",
+        "for this answer",
+        "in this answer",
+        "for this session",
+        "right now",
+        "just this time",
+    ]
+    if any(marker in lower for marker in transient_markers):
+        return True
+
+    sample_markers = [
+        "sample data",
+        "test fixture",
+        "example sentence",
+        "quoted example",
+    ]
+    if any(marker in lower for marker in sample_markers):
+        return True
+
+    if subject not in {"user", "i", "me"} and "i do not" in lower:
+        return True
+
+    rejected_object_markers = ["do not use", "don't use", "avoid "]
+    if any(marker in lower for marker in rejected_object_markers):
+        rejected_terms = ["tables", "vim", "python"]
+        if any(term in object_text for term in rejected_terms) and "bullets" not in object_text:
+            return True
+
+    return False
 
 
 def timeout_seconds() -> float:

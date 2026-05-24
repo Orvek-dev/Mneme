@@ -13,6 +13,7 @@ cargo fmt --all --check
 cargo clippy --workspace --all-targets -- -D warnings
 cargo test --workspace --all-targets
 RUSTDOCFLAGS="-D warnings" cargo doc --workspace --no-deps
+python3 -m py_compile wrappers/openai_extractor.py
 
 cargo run -p mneme-cli -- doctor
 cargo run -p mneme-eval -- doctor
@@ -486,7 +487,10 @@ MNEME_OPENAI_DRY_RUN=1 cargo run -p mneme-eval -- baseline --suite model \
   --json | tee "$BASELINE_REPORT"
 grep -q '"provider_label": "openai"' "$BASELINE_REPORT"
 grep -q '"model_label": "dry-run"' "$BASELINE_REPORT"
-grep -q '"scenario_count": 8' "$BASELINE_REPORT"
+grep -q '"scenario_count": 13' "$BASELINE_REPORT"
+grep -q '"category": "communication"' "$BASELINE_REPORT"
+grep -q '"category": "format"' "$BASELINE_REPORT"
+grep -q '"category": "project"' "$BASELINE_REPORT"
 grep -q '"category": "no-claim"' "$BASELINE_REPORT"
 grep -q '"passed_iterations": 2' "$BASELINE_REPORT"
 grep -q '"failed_scenario_runs": 0' "$BASELINE_REPORT"
