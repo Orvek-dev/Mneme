@@ -46,6 +46,7 @@ jobs:
           cargo run -p mneme-eval -- acceptance --suite core --target mneme-v1
           cargo run -p mneme-eval -- acceptance --suite model --target mneme-v1-command --extractor-command evals/fixtures/command-extractor.sh
           MNEME_OPENAI_DRY_RUN=1 cargo run -p mneme-eval -- acceptance --suite model --target mneme-v1-command --extractor-command wrappers/openai_extractor.py
+          MNEME_OPENAI_DRY_RUN=1 cargo run -p mneme-eval -- baseline --suite model --target mneme-v1-command --extractor-command wrappers/openai_extractor.py --iterations 2 --json | grep -q '"failed_scenario_runs": 0'
       - name: Create GitHub release
         env:
           GH_TOKEN: ${{ github.token }}

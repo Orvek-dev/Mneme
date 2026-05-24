@@ -106,3 +106,15 @@ jobs:
           cargo run -p mneme-eval -- acceptance --suite model \
             --target mneme-v1-command \
             --extractor-command wrappers/openai_extractor.py
+      - name: OpenAI wrapper dry-run baseline
+        env:
+          MNEME_OPENAI_DRY_RUN: "1"
+        run: |
+          cargo run -p mneme-eval -- baseline --suite model \
+            --target mneme-v1-command \
+            --extractor-command wrappers/openai_extractor.py \
+            --iterations 2 \
+            --json | tee "${RUNNER_TEMP}/mneme-openai-wrapper-baseline.json"
+          grep -q '"iterations": 2' "${RUNNER_TEMP}/mneme-openai-wrapper-baseline.json"
+          grep -q '"passed_iterations": 2' "${RUNNER_TEMP}/mneme-openai-wrapper-baseline.json"
+          grep -q '"failed_scenario_runs": 0' "${RUNNER_TEMP}/mneme-openai-wrapper-baseline.json"

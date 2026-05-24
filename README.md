@@ -87,6 +87,16 @@ MNEME_OPENAI_DRY_RUN=1 cargo run -p mneme-eval -- run --suite model \
   --extractor-command wrappers/openai_extractor.py
 ```
 
+Build a repeated baseline report for provider-wrapper quality tracking:
+
+```sh
+MNEME_OPENAI_DRY_RUN=1 cargo run -p mneme-eval -- baseline --suite model \
+  --target mneme-v1-command \
+  --extractor-command wrappers/openai_extractor.py \
+  --iterations 2 \
+  --report evals/reports/openai-dry-run-baseline.json
+```
+
 Run the acceptance gate:
 
 ```sh
@@ -109,6 +119,7 @@ cargo run -p mneme-eval -- acceptance --suite core --target fake
 cargo run -p mneme-eval -- acceptance --suite core --target mneme-v1
 cargo run -p mneme-eval -- acceptance --suite model --target mneme-v1-command --extractor-command evals/fixtures/command-extractor.sh
 MNEME_OPENAI_DRY_RUN=1 cargo run -p mneme-eval -- acceptance --suite model --target mneme-v1-command --extractor-command wrappers/openai_extractor.py
+MNEME_OPENAI_DRY_RUN=1 cargo run -p mneme-eval -- baseline --suite model --target mneme-v1-command --extractor-command wrappers/openai_extractor.py --iterations 2 --json
 ```
 
 Generated eval reports and local stores are ignored. Public scenarios under
@@ -134,6 +145,7 @@ spec/               feature specs and verification maps
 - [Extraction Adapter Contract](docs/extraction-adapter-contract.md)
 - [Model Extraction Adapter](docs/model-extraction-adapter.md)
 - [OpenAI Provider Wrapper](docs/openai-provider-wrapper.md)
+- [Live Provider Baseline](docs/live-provider-baseline.md)
 - [Mneme v1 Personal Core](docs/mneme-v1-personal-core.md)
 - [Mneme v1 Stability](docs/v1-stability.md)
 - [Release Checklist](docs/release-checklist.md)
