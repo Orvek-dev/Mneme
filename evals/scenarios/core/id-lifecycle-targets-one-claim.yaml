@@ -1,0 +1,60 @@
+id: id-lifecycle-targets-one-claim
+tags:
+  - lifecycle
+  - claim-id
+  - context-pack
+budget:
+  daily_cloud_tokens: 100
+events:
+  - speaker_id: user
+    actor_agent_id: codex
+    scope: private
+    trust_level: trusted_user
+    text: "remember: user prefers local-first tools"
+  - speaker_id: user
+    actor_agent_id: codex
+    scope: private
+    trust_level: trusted_user
+    text: "remember: user prefers local-first tools"
+  - speaker_id: user
+    actor_agent_id: codex
+    scope: private
+    trust_level: trusted_user
+    text: "forget-id: claim-001"
+  - speaker_id: user
+    actor_agent_id: codex
+    scope: private
+    trust_level: trusted_user
+    text: "correct-id: claim-002 -> user prefers terminal workflows"
+expected:
+  event_append:
+    count: 4
+  claims:
+    - subject: user
+      predicate: prefers
+      object: local-first tools
+      status: forgotten
+      scope: private
+    - subject: user
+      predicate: prefers
+      object: local-first tools
+      status: superseded
+      scope: private
+    - subject: user
+      predicate: prefers
+      object: terminal workflows
+      status: active
+      scope: private
+  context_pack:
+    query: "terminal workflows"
+    item_count: 1
+    must_include:
+      - terminal workflows
+    must_not_include:
+      - local-first tools
+    citation_required: true
+  budget:
+    hard_cap_violations: 0
+  audit:
+    read_write_events_required: true
+    claim_update_required: true

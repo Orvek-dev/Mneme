@@ -26,6 +26,8 @@ introducing a server, UI, or model dependency. It is a thin adapter over
   checks.
 - [REQ-CLI-006][Ubiquitous] CI shall run a CLI smoke check against a temporary
   store.
+- [REQ-CLI-007][Ubiquitous] The CLI shall expose claim review and claim-ID
+  lifecycle controls for precise user edits.
 
 ## Verification Map
 
@@ -37,3 +39,4 @@ introducing a server, UI, or model dependency. It is a thin adapter over
 | REQ-CLI-004 | `--store` unit tests and docs | verified |
 | REQ-CLI-005 | JSON output unit tests | verified |
 | REQ-CLI-006 | `.github/workflows/ci.yml` CLI smoke step | verified |
+| REQ-CLI-007 | `claims_review_and_id_lifecycle_controls` and quality gate | verified |

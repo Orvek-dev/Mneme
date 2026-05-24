@@ -12,6 +12,8 @@ eval update land in the same PR.
 - Secret-like claims are marked `blocked_secret` and omitted from context.
 - Corrections mark active claims as `superseded` and write replacement claims.
 - Forgets mark active claims as `forgotten`.
+- Claim-ID lifecycle markers target one active claim and avoid broad text-match
+  updates when duplicate claim text exists.
 - Context packs include active claims only when their scope is allowed by the
   retrieval query.
 - Context items are deterministically ranked, carry score and match metadata,
@@ -44,9 +46,9 @@ eval update land in the same PR.
   per-scenario results.
 - The `core`, `runtime`, and `agent` suites must pass for `fake` and
   `mneme-v1`.
-- `mneme-cli` supports `doctor`, `remember`, `correct`, `forget`, `context`,
-  `snapshot`, `begin`, `end`, `validate`, `export`, `import`, `compact`,
-  `repair`, `version`, and command-specific help.
+- `mneme-cli` supports `doctor`, `remember`, `correct`, `forget`, `claims`,
+  `context`, `snapshot`, `begin`, `end`, `validate`, `export`, `import`,
+  `compact`, `repair`, `version`, and command-specific help.
 - `mneme hook begin/end` emit the `mneme.agent_hook.v1` JSON envelope for
   success and failure, with non-zero process exits on failure.
 - `mneme-cli --store <path>` isolates local state.

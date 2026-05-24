@@ -4,6 +4,20 @@ This project follows the spirit of Keep a Changelog.
 
 ## Unreleased
 
+## [0.20.0] - 2026-05-24
+
+### Added
+
+- Added `mneme claims` for reviewing stored claims by ID, status, scope, and
+  source event IDs.
+- Added `mneme forget --claim-id <id>` and
+  `mneme correct --claim-id <id> <new-claim>` for precise lifecycle updates.
+- Added `forget-id:` and `correct-id:` lifecycle markers in the v1 core and eval
+  fake target.
+- Added core, CLI, eval, and quality-gate coverage for ID-based lifecycle
+  controls over duplicate claim text.
+- Added the Phase 14 memory review and policy-controls feature spec.
+
 ## [0.19.0] - 2026-05-24
 
 ### Added

@@ -39,6 +39,7 @@ cargo run -p mneme-eval -- run --help
 STORE=/tmp/mneme-getting-started.json
 rm -f "$STORE"
 cargo run -p mneme-cli -- remember "user prefers local-first tools" --store "$STORE"
+cargo run -p mneme-cli -- claims --status active --store "$STORE" --json
 cargo run -p mneme-cli -- context "local-first" --store "$STORE" --json
 cargo run -p mneme-cli -- remember "user prefers project launch reviews" --scope project-alpha --store "$STORE"
 cargo run -p mneme-cli -- context "project launch" --scope project-alpha --max-items 3 --store "$STORE" --json
