@@ -1,0 +1,58 @@
+id: model-agent-end-command-extraction
+tags:
+  - model
+  - command-extractor
+  - agent
+  - session
+  - category-agent
+  - category-communication
+budget:
+  daily_cloud_tokens: 100
+events:
+  - speaker_id: user
+    actor_agent_id: codex
+    scope: private
+    trust_level: trusted_user
+    text: "I work best with local-first tools; please remember that."
+agent_flow:
+  begin:
+    task: "Draft a planning doc"
+    actor_agent_id: codex
+    query: "local-first"
+  end:
+    summary: "Prepared a direct planning doc"
+    extractor: command
+    remember:
+      - "For future planning docs, keep explanations direct and skip motivational language."
+expected:
+  event_append:
+    count: 2
+  claims:
+    - subject: user
+      predicate: prefers
+      object: local-first tools
+      status: active
+      scope: private
+    - subject: user
+      predicate: prefers
+      object: direct explanations in future planning docs
+      status: active
+      scope: private
+  session:
+    status: closed
+    task: "Draft a planning doc"
+    actor_agent_id: codex
+    context_must_include:
+      - local-first tools
+    memory_event_count: 1
+    summary_contains: planning doc
+  context_pack:
+    query: "planning docs"
+    must_include:
+      - direct explanations
+    citation_required: true
+  budget:
+    hard_cap_violations: 0
+  audit:
+    read_write_events_required: true
+    session_events_required: true

@@ -85,6 +85,15 @@ pub(crate) struct AgentBegin {
 pub(crate) struct AgentEnd {
     pub(crate) summary: Option<String>,
     pub(crate) remember: Vec<String>,
+    pub(crate) extractor: AgentEndExtractor,
+}
+
+#[derive(Debug, Clone, Copy, Default, Eq, PartialEq, Deserialize)]
+#[serde(rename_all = "kebab-case")]
+pub(crate) enum AgentEndExtractor {
+    #[default]
+    Rule,
+    Command,
 }
 
 #[derive(Debug, Clone, Deserialize)]

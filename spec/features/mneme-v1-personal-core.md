@@ -51,6 +51,9 @@ boundary for restart verification.
   safety, provenance, and audit rules.
 - [REQ-V1-016][Event-driven] Claim-ID lifecycle events shall target exactly one
   active claim.
+- [REQ-V1-017][Ports-and-adapters] Agent session-end memory writes shall support
+  opt-in extractor-backed raw memory notes while preserving the default explicit
+  claim behavior.
 
 ## Verification Map
 
@@ -72,3 +75,4 @@ boundary for restart verification.
 | REQ-V1-014 | custom extractor unit test and `RuleBasedExtractor` default path | verified |
 | REQ-V1-015 | extractor secret-blocking unit test | verified |
 | REQ-V1-016 | `id-lifecycle-targets-one-claim` core scenario | verified |
+| REQ-V1-017 | session-end custom extractor unit test and model agent-end scenario | verified |

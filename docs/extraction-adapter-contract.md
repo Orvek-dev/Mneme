@@ -65,6 +65,12 @@ Adapter experiments can call:
 engine.ingest_event_with_extractor(input, &extractor)?;
 ```
 
+Agent integrations can also close a session with a custom extractor:
+
+```rust
+engine.end_session_with_extractor(input, &extractor, SessionMemoryInputMode::RawEvent)?;
+```
+
 The resulting claim still passes through the same engine-owned ID, provenance,
 secret-blocking, audit, and persistence paths.
 

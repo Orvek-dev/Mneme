@@ -159,3 +159,8 @@ Phase 26 shipped the **Provider Extraction Quality MVP** in `v0.32.0`, expanding
 the model suite to cover communication, format, project-scoped, quoted-sample,
 and answer-local instruction cases, and strengthening the OpenAI wrapper
 dry-run and post-processing guardrails.
+
+Phase 27 shipped the **Agent Memory Extraction Integration MVP** in `v0.33.0`,
+connecting `mneme end` and `mneme hook end` to the opt-in command extractor so
+session-end `--remember` notes can be evaluated and released through the same
+provider-neutral boundary as event ingestion.

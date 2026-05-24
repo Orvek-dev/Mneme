@@ -4,6 +4,19 @@ This project follows the spirit of Keep a Changelog.
 
 ## Unreleased
 
+## [0.33.0] - 2026-05-24
+
+### Added
+
+- Added opt-in command extraction for `mneme end` and `mneme hook end`, allowing
+  session-end `--remember` notes to flow through the same provider-neutral
+  extractor contract as `ingest`.
+- Added command-extractor metadata to end and hook-end reports.
+- Added agent hook profile and wrapper support for `MNEME_EXTRACTOR_COMMAND`.
+- Added a model-suite scenario covering agent session-end command extraction.
+- Added release quality-gate coverage for command-extracted hook-end memories.
+- Added the Phase 27 agent memory extraction feature spec.
+
 ## [0.32.0] - 2026-05-24
 
 ### Added

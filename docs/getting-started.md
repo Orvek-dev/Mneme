@@ -83,6 +83,12 @@ mneme end session-001 \
   --remember "user prefers concise setup plans" \
   --store "$STORE" \
   --json
+mneme hook end session-002 \
+  --summary "Prepared a direct planning doc" \
+  --remember "For future planning docs, keep explanations direct and skip motivational language." \
+  --extractor command \
+  --extractor-command evals/fixtures/command-extractor.sh \
+  --store "$STORE"
 ```
 
 For repeated local use, initialize the ignored runtime directory and let the
