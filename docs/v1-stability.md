@@ -34,7 +34,7 @@ eval update land in the same PR.
 ## Stable Tooling Contracts
 
 - `mneme-eval` supports `doctor`, `validate`, `run`, `replay`, `acceptance`,
-  and `baseline`.
+  `baseline`, and `baseline-gate`.
 - Eval reports include `report_schema_version`, target metadata, counts, and
   per-scenario results.
 - The `core`, `runtime`, and `agent` suites must pass for `fake` and

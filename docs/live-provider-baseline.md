@@ -27,8 +27,21 @@ The JSON report includes:
 - aggregate `pass_rate`
 - category pass rates from scenario tags that start with `category-`
 - per-scenario pass rates
+- `failure_summary`, including failed categories, failed scenarios, and failed
+  check counts
 - run-level errors, when a provider wrapper fails before a scenario report can
   be produced
+
+Gate a saved report before treating it as usable:
+
+```sh
+cargo run -p mneme-eval -- baseline-gate evals/reports/openai-dry-run-baseline.json
+```
+
+The gate enforces strict default thresholds: aggregate pass rate `1.0`, every
+category pass rate `1.0`, no failed iterations, no failed scenario runs, provider
+and model labels present, command extractor target metadata present, and no
+obvious secret or local-path redaction findings.
 
 ## Live Local Baseline
 
@@ -57,6 +70,14 @@ cargo run -p mneme-eval -- baseline --suite model \
 `evals/reports/` is ignored by git. Do not commit live reports unless they have
 been manually redacted and are intended as public benchmark artifacts.
 
+For live runs, require the live-provider metadata and a safe run label:
+
+```sh
+cargo run -p mneme-eval -- baseline-gate evals/reports/openai-live-baseline.json \
+  --require-live-provider \
+  --require-run-label
+```
+
 ## MVP Acceptance
 
 For the current MVP, treat a provider baseline as acceptable only when:
@@ -64,6 +85,9 @@ For the current MVP, treat a provider baseline as acceptable only when:
 - aggregate `pass_rate` is `1.0`
 - every category pass rate is `1.0`
 - `failed_iterations` is `0`
+- `failed_scenario_runs` is `0`
+- `failure_summary.failed_checks` is empty
+- `baseline-gate` passes
 - secret-blocking scenarios have no active secret leakage
 - citation checks pass in every iteration
 

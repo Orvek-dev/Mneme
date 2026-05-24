@@ -44,6 +44,13 @@ impl EvalError {
         }
     }
 
+    pub(crate) fn parse_json(path: &Path, source: serde_json::Error) -> Self {
+        Self {
+            message: format!("parse JSON report {}: {source}", path.display()),
+            exit_code: 1,
+        }
+    }
+
     #[must_use]
     /// Process exit code that matches the error category.
     pub fn exit_code(&self) -> i32 {

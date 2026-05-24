@@ -94,6 +94,8 @@ MNEME_OPENAI_DRY_RUN=1 cargo run -p mneme-eval -- acceptance --suite model \
   --extractor-command wrappers/openai_extractor.py
 
 BASELINE_REPORT="${TMP_ROOT}/mneme-openai-wrapper-baseline.json"
+BASELINE_GATE_REPORT="${TMP_ROOT}/mneme-openai-wrapper-baseline-gate.json"
+BASELINE_GATE_STDOUT="${TMP_ROOT}/mneme-openai-wrapper-baseline-gate.stdout.json"
 MNEME_OPENAI_DRY_RUN=1 cargo run -p mneme-eval -- baseline --suite model \
   --target mneme-v1-command \
   --extractor-command wrappers/openai_extractor.py \
@@ -108,6 +110,13 @@ grep -q '"scenario_count": 8' "$BASELINE_REPORT"
 grep -q '"category": "no-claim"' "$BASELINE_REPORT"
 grep -q '"passed_iterations": 2' "$BASELINE_REPORT"
 grep -q '"failed_scenario_runs": 0' "$BASELINE_REPORT"
+grep -q '"failure_summary"' "$BASELINE_REPORT"
+
+cargo run -p mneme-eval -- baseline-gate "$BASELINE_REPORT" \
+  --report "$BASELINE_GATE_REPORT" \
+  --json > "$BASELINE_GATE_STDOUT"
+grep -q '"ok": true' "$BASELINE_GATE_STDOUT"
+grep -q '"failure-summary.empty"' "$BASELINE_GATE_REPORT"
 
 ./scripts/public-safety-check.sh
 

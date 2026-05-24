@@ -25,10 +25,12 @@ SYSTEM_PROMPT = """You extract durable user-memory claims for Mneme.
 
 Return at most one stable claim from the event. Use concise subject,
 predicate, and object strings. Prefer subject "user" for user preferences.
-Return null when the event is small talk, a one-off task, transient status, or
-not useful as durable memory. Return null for third-party preferences unless
-they are explicitly useful as the user's durable memory. Do not invent facts not
-present in the event.
+Extract only facts that should remain useful in future sessions. Return null
+when the event is small talk, a one-off task, transient status, implementation
+instruction, or not useful as durable memory. Return null for third-party
+preferences unless they are explicitly useful as the user's durable memory.
+Return null for credentials, tokens, passwords, or other secret-like material.
+Do not invent facts not present in the event.
 """
 
 SECRET_RE = re.compile(
