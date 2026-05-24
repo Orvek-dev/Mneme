@@ -100,6 +100,7 @@ mneme begin "Draft setup plan" --query "local-first" --agent codex --store "$STO
 mneme end session-001 --summary "Prepared a concise setup plan" --remember "user prefers concise setup plans" --store "$STORE" --json
 mneme hook doctor --store "$STORE"
 mneme hook begin "Draft setup plan" --query "local-first" --agent codex --store "$STORE"
+mneme hook end session-002 --summary "Prepared setup plan" --store "$STORE"
 scripts/mneme-agent-hook.sh doctor
 ```
 
@@ -118,6 +119,16 @@ For model-backed extraction experiments, use `ingest` with a local wrapper:
 
 ```sh
 cargo run -p mneme-cli -- ingest "the user prefers local-first tools" \
+  --extractor command \
+  --extractor-command ./mneme-extractor-wrapper \
+  --store "$STORE"
+```
+
+The same command extractor can be used for session-end memory notes:
+
+```sh
+cargo run -p mneme-cli -- hook end session-001 \
+  --remember "For future planning docs, keep explanations direct and skip motivational language." \
   --extractor command \
   --extractor-command ./mneme-extractor-wrapper \
   --store "$STORE"

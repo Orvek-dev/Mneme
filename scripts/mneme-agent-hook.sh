@@ -19,6 +19,8 @@ Environment:
   MNEME_AGENT_ID   Optional agent id appended when --agent is absent.
   MNEME_SCOPE      Optional begin scope appended when --scope is absent.
   MNEME_MAX_ITEMS  Optional begin max item count appended when --max-items is absent.
+  MNEME_EXTRACTOR_COMMAND
+                  Optional command extractor for end --remember notes.
 EOF
 }
 
@@ -55,6 +57,10 @@ apply_config_value() {
       ;;
     MNEME_MAX_ITEMS)
       if [ -z "${MNEME_MAX_ITEMS:-}" ]; then MNEME_MAX_ITEMS="$value"; fi
+      ;;
+    MNEME_EXTRACTOR_COMMAND)
+      if [ -z "${MNEME_EXTRACTOR_COMMAND:-}" ]; then MNEME_EXTRACTOR_COMMAND="$value"; fi
+      export MNEME_EXTRACTOR_COMMAND
       ;;
     *)
       printf '%s\n' "mneme-agent-hook: unknown config key: $key" >&2
@@ -112,6 +118,21 @@ has_option() {
   return 1
 }
 
+option_value_equals() {
+  local expected="$1"
+  local desired="$2"
+  shift 2
+  while [ "$#" -gt 0 ]; do
+    if [ "$1" = "$expected" ]; then
+      shift
+      [ "$#" -gt 0 ] && [ "$1" = "$desired" ]
+      return
+    fi
+    shift
+  done
+  return 1
+}
+
 with_common_runtime_args() {
   runtime_args=("$@")
   if [ -n "${MNEME_STORE:-}" ] && ! has_option "--store" "${runtime_args[@]}"; then
@@ -129,6 +150,21 @@ with_begin_runtime_args() {
   fi
   if [ -n "${MNEME_MAX_ITEMS:-}" ] && ! has_option "--max-items" "${runtime_args[@]}"; then
     runtime_args+=("--max-items" "$MNEME_MAX_ITEMS")
+  fi
+}
+
+with_end_runtime_args() {
+  with_common_runtime_args "$@"
+  if [ -n "${MNEME_EXTRACTOR_COMMAND:-}" ]; then
+    if ! has_option "--extractor" "${runtime_args[@]}"; then
+      runtime_args+=("--extractor" "command")
+      if ! has_option "--extractor-command" "${runtime_args[@]}"; then
+        runtime_args+=("--extractor-command" "$MNEME_EXTRACTOR_COMMAND")
+      fi
+    elif option_value_equals "--extractor" "command" "${runtime_args[@]}" \
+      && ! has_option "--extractor-command" "${runtime_args[@]}"; then
+      runtime_args+=("--extractor-command" "$MNEME_EXTRACTOR_COMMAND")
+    fi
   fi
 }
 
@@ -187,7 +223,7 @@ case "$command" in
     ;;
   end)
     shift
-    with_common_runtime_args "$@"
+    with_end_runtime_args "$@"
     mneme_cmd hook end "${runtime_args[@]}"
     ;;
   help|-h|--help)

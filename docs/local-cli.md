@@ -236,6 +236,18 @@ cargo run -p mneme-cli -- end session-001 \
   --json
 ```
 
+For natural-language session-end notes, `end` and `hook end` can use the
+command extractor:
+
+```sh
+cargo run -p mneme-cli -- hook end session-001 \
+  --summary "Prepared a direct planning doc" \
+  --remember "For future planning docs, keep explanations direct and skip motivational language." \
+  --extractor command \
+  --extractor-command ./mneme-extractor-wrapper \
+  --store /tmp/mneme.json
+```
+
 ## Event Options
 
 `ingest`, `remember`, `correct`, and `forget` accept:
@@ -260,7 +272,7 @@ The CLI intentionally keeps the v1 deterministic lifecycle markers visible:
 
 ## Command Extractor
 
-`ingest` can delegate extraction to a local command:
+`ingest`, `end`, and `hook end` can delegate extraction to a local command:
 
 ```sh
 cargo run -p mneme-cli -- ingest "the user prefers local-first tools" \

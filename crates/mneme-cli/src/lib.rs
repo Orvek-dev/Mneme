@@ -16,9 +16,9 @@ use mneme_core::{
     ContextPack, ContextQuery, EngineSnapshot, EventInput, ExtractorError, JsonFileStore,
     MnemeConfig, MnemeEngine, MnemeExtractor, MnemeState, MnemeStore, RuleBasedExtractor,
     SessionBeginInput, SessionBeginReport, SessionEndInput, SessionEndReport, SessionError,
-    SessionRecord, StateValidationReport, StoreError, StoreErrorKind, StoreFileInspection,
-    StoreFileStatus, StoreInspection, StoreRepairReport, StoreRestoreReport, ValidationSeverity,
-    DEFAULT_CONTEXT_MAX_ITEMS, PRODUCT_NAME,
+    SessionMemoryInputMode, SessionRecord, StateValidationReport, StoreError, StoreErrorKind,
+    StoreFileInspection, StoreFileStatus, StoreInspection, StoreRepairReport, StoreRestoreReport,
+    ValidationSeverity, DEFAULT_CONTEXT_MAX_ITEMS, PRODUCT_NAME,
 };
 use serde::Serialize;
 
@@ -482,17 +482,20 @@ to 8 ranked items by default.
 Example:
   mneme begin "Draft setup plan" --query "local-first" --scope private --max-items 3 --agent codex --store /tmp/mneme.json --json"#;
 
-const MNEME_END_HELP: &str = r#"Usage: mneme end <session-id> [--summary <text>] [--remember <claim>]... [--agent <id>] [--store <path>] [--json]
+const MNEME_END_HELP: &str = r#"Usage: mneme end <session-id> [--summary <text>] [--remember <claim>]... [--agent <id>] [--extractor rule|command] [--extractor-command <program>] [--extractor-arg <arg>]... [--store <path>] [--json]
 
-Close an agent task session and optionally write explicit memory claims.
+Close an agent task session and optionally write memory claims. The default
+rule extractor treats --remember values as explicit claims; the command
+extractor receives --remember values as raw memory notes.
 
 Example:
-  mneme end session-001 --summary "Prepared a concise setup plan" --remember "user prefers concise setup plans" --store /tmp/mneme.json --json"#;
+  mneme end session-001 --summary "Prepared a concise setup plan" --remember "user prefers concise setup plans" --store /tmp/mneme.json --json
+  mneme end session-001 --remember "For future plans, keep summaries direct." --extractor command --extractor-command ./mneme-extractor-wrapper --store /tmp/mneme.json"#;
 
 const MNEME_HOOK_HELP: &str = r#"Usage:
   mneme hook doctor [--store <path>]
   mneme hook begin <task> [--query <query>] [--scope <scope>]... [--max-items <n>] [--agent <id>] [--store <path>]
-  mneme hook end <session-id> [--summary <text>] [--remember <claim>]... [--agent <id>] [--store <path>]
+  mneme hook end <session-id> [--summary <text>] [--remember <claim>]... [--agent <id>] [--extractor rule|command] [--extractor-command <program>] [--extractor-arg <arg>]... [--store <path>]
 
 Run agent doctor/begin/end hooks with the stable mneme.agent_hook.v1 JSON envelope.
 Success and failure both write JSON to stdout. Failures exit non-zero.
@@ -707,10 +710,12 @@ struct EndOptions {
     actor_agent_id: Option<String>,
     summary: Option<String>,
     remember: Vec<String>,
+    extractor: ExtractorOptions,
 }
 
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, Default)]
 enum ExtractorOptions {
+    #[default]
     Rule,
     Command {
         program: Option<String>,
@@ -774,6 +779,7 @@ struct AgentHookProfileValues {
     mneme_agent_id: Option<String>,
     mneme_scope: Option<String>,
     mneme_max_items: Option<String>,
+    mneme_extractor_command: Option<String>,
 }
 
 #[derive(Debug, Serialize)]
@@ -1025,6 +1031,7 @@ struct BeginCliReport {
 #[derive(Debug, Serialize)]
 struct EndCliReport {
     store: String,
+    extractor: String,
     report: SessionEndReport,
 }
 
@@ -1049,6 +1056,7 @@ struct AgentHookEndReport {
     operation: &'static str,
     recoverable: bool,
     store: String,
+    extractor: String,
     session_id: String,
     remembered_event_count: usize,
     remembered_claim_count: usize,
@@ -1566,21 +1574,47 @@ fn run_begin(raw_args: Vec<String>, writer: &mut impl Write) -> Result<(), CliEr
 fn run_end(raw_args: Vec<String>, writer: &mut impl Write) -> Result<(), CliError> {
     let (session_id, options) = parse_end_args(raw_args)?;
     let store_path = resolve_store_path(&options.common)?;
+    let extractor_name = options.extractor.name().to_owned();
     let mut engine = load_engine(&store_path)?;
-    let report = engine
-        .end_session(SessionEndInput {
+    let report = end_session_for_cli(
+        &mut engine,
+        SessionEndInput {
             session_id,
             actor_agent_id: options.actor_agent_id,
             summary: options.summary,
             remember: options.remember,
-        })
-        .map_err(CliError::session)?;
+        },
+        &options.extractor,
+    )?;
     persist_engine(&store_path, &engine)?;
     let cli_report = EndCliReport {
         store: store_path.display().to_string(),
+        extractor: extractor_name,
         report,
     };
     emit_end_report(&cli_report, options.common.json, writer)
+}
+
+fn end_session_for_cli(
+    engine: &mut MnemeEngine,
+    input: SessionEndInput,
+    options: &ExtractorOptions,
+) -> Result<SessionEndReport, CliError> {
+    if input.remember.is_empty() {
+        return engine.end_session(input).map_err(CliError::session);
+    }
+    let memory_input_mode = memory_input_mode_for_extractor(options);
+    let extractor = build_extractor(options)?;
+    engine
+        .end_session_with_extractor(input, extractor.as_ref(), memory_input_mode)
+        .map_err(CliError::session)
+}
+
+fn memory_input_mode_for_extractor(options: &ExtractorOptions) -> SessionMemoryInputMode {
+    match options {
+        ExtractorOptions::Rule => SessionMemoryInputMode::ExplicitClaim,
+        ExtractorOptions::Command { .. } => SessionMemoryInputMode::RawEvent,
+    }
 }
 
 fn run_agent_hook(raw_args: Vec<String>, writer: &mut impl Write) -> Result<(), CliError> {
@@ -1670,15 +1704,18 @@ fn run_agent_hook_begin(raw_args: Vec<String>, writer: &mut impl Write) -> Resul
 fn run_agent_hook_end(raw_args: Vec<String>, writer: &mut impl Write) -> Result<(), CliError> {
     let (session_id, options) = parse_end_args(raw_args)?;
     let store_path = resolve_store_path(&options.common)?;
+    let extractor_name = options.extractor.name().to_owned();
     let mut engine = load_engine(&store_path)?;
-    let report = engine
-        .end_session(SessionEndInput {
+    let report = end_session_for_cli(
+        &mut engine,
+        SessionEndInput {
             session_id,
             actor_agent_id: options.actor_agent_id,
             summary: options.summary,
             remember: options.remember,
-        })
-        .map_err(CliError::session)?;
+        },
+        &options.extractor,
+    )?;
     persist_engine(&store_path, &engine)?;
     let hook_report = AgentHookEndReport {
         schema_version: AGENT_HOOK_SCHEMA_VERSION,
@@ -1686,6 +1723,7 @@ fn run_agent_hook_end(raw_args: Vec<String>, writer: &mut impl Write) -> Result<
         operation: "end",
         recoverable: false,
         store: store_path.display().to_string(),
+        extractor: extractor_name,
         session_id: report.session.id.clone(),
         remembered_event_count: report.remembered_event_ids.len(),
         remembered_claim_count: report.remembered_claim_ids.len(),
@@ -2612,6 +2650,25 @@ fn parse_end_args(raw_args: Vec<String>) -> Result<(String, EndOptions), CliErro
                     .remember
                     .push(required_arg(&raw_args, idx, "--remember")?);
             }
+            "--extractor" => {
+                idx += 1;
+                options.extractor =
+                    parse_extractor_kind(required_arg(&raw_args, idx, "--extractor")?)?;
+            }
+            "--extractor-command" => {
+                idx += 1;
+                set_command_program(
+                    &mut options.extractor,
+                    required_arg(&raw_args, idx, "--extractor-command")?,
+                );
+            }
+            "--extractor-arg" => {
+                idx += 1;
+                push_command_arg(
+                    &mut options.extractor,
+                    required_arg(&raw_args, idx, "--extractor-arg")?,
+                );
+            }
             value if value.starts_with('-') => {
                 return Err(CliError::invalid_cli(format!(
                     "unknown end option: {value}"
@@ -2623,7 +2680,7 @@ fn parse_end_args(raw_args: Vec<String>) -> Result<(String, EndOptions), CliErro
     }
     if positionals.len() != 1 {
         return Err(CliError::invalid_cli(
-            "usage: mneme end <session-id> [--summary <text>] [--remember <claim>]... [--agent <id>] [--store <path>] [--json]",
+            "usage: mneme end <session-id> [--summary <text>] [--remember <claim>]... [--agent <id>] [--extractor rule|command] [--extractor-command <program>] [--extractor-arg <arg>]... [--store <path>] [--json]",
         ));
     }
     if options.summary.is_none() && options.remember.is_empty() {
@@ -2855,6 +2912,12 @@ fn inspect_agent_hook_profile(
                 key,
                 &mut inspection.issues,
             ),
+            "MNEME_EXTRACTOR_COMMAND" => assign_profile_value(
+                &mut inspection.values.mneme_extractor_command,
+                value,
+                key,
+                &mut inspection.issues,
+            ),
             unknown => inspection
                 .issues
                 .push(format!("unknown profile key: {unknown}")),
@@ -2943,6 +3006,17 @@ fn validate_profile_values(
             ));
         }
     }
+    if let Some(command) = &values.mneme_extractor_command {
+        if looks_like_profile_path(command) {
+            let command_path = profile_value_path(command, workspace);
+            if !command_path.is_file() {
+                inspection.issues.push(format!(
+                    "MNEME_EXTRACTOR_COMMAND is not an executable file: {}",
+                    command_path.display()
+                ));
+            }
+        }
+    }
 }
 
 fn profile_value_path(value: &str, workspace: &Path) -> PathBuf {
@@ -2952,6 +3026,10 @@ fn profile_value_path(value: &str, workspace: &Path) -> PathBuf {
     } else {
         workspace.join(path)
     }
+}
+
+fn looks_like_profile_path(value: &str) -> bool {
+    value.contains('/') || value.contains('\\')
 }
 
 fn paths_equivalent_or_equal(left: &Path, right: &Path) -> bool {
@@ -3203,6 +3281,8 @@ fn render_agent_hook_profile(
     profile.push_str(&format!("MNEME_AGENT_ID={agent_value}\n"));
     profile.push_str(&format!("MNEME_SCOPE={scope_value}\n"));
     profile.push_str(&format!("MNEME_MAX_ITEMS={max_items}\n"));
+    profile.push_str("# Optional session-end command extractor.\n");
+    profile.push_str("# MNEME_EXTRACTOR_COMMAND=./mneme-extractor-wrapper\n");
     Ok(profile)
 }
 
@@ -4369,9 +4449,10 @@ fn emit_end_report(
     }
     writeln!(
         writer,
-        "mneme: ended session {} from {} (remembered_events={}, remembered_claims={})",
+        "mneme: ended session {} from {} (extractor={}, remembered_events={}, remembered_claims={})",
         report.report.session.id,
         report.store,
+        report.extractor,
         report.report.remembered_event_ids.len(),
         report.report.remembered_claim_ids.len()
     )
@@ -6018,6 +6099,122 @@ mod tests {
         Ok(())
     }
 
+    #[cfg(unix)]
+    #[test]
+    fn end_command_extractor_records_raw_memory_note() -> Result<(), Box<dyn std::error::Error>> {
+        let path = temp_store_path("end-command-extractor");
+        let _ = std::fs::remove_file(&path);
+        let _ = std::fs::remove_file(format!("{}.bak", path.display()));
+
+        run_cli_with_writer(
+            vec![
+                "mneme".to_owned(),
+                "begin".to_owned(),
+                "Draft planning docs".to_owned(),
+                "--agent".to_owned(),
+                "codex".to_owned(),
+                "--store".to_owned(),
+                path.display().to_string(),
+            ],
+            &mut Vec::new(),
+        )?;
+
+        let response = r#"{"schema_version":"mneme.extractor.command.v1","claim":{"subject":"user","predicate":"prefers","object":"direct planning docs"}}"#;
+        let no_claim = r#"{"schema_version":"mneme.extractor.command.v1","claim":null}"#;
+        let script = format!(
+            "request=$(cat); case \"$request\" in *remember:*) printf '%s\\n' '{no_claim}' ;; *\"keep explanations direct\"*) printf '%s\\n' '{response}' ;; *) printf '%s\\n' '{no_claim}' ;; esac"
+        );
+        let mut end_output = Vec::new();
+        run_cli_with_writer(
+            vec![
+                "mneme".to_owned(),
+                "end".to_owned(),
+                "session-001".to_owned(),
+                "--remember".to_owned(),
+                "For future planning docs, keep explanations direct.".to_owned(),
+                "--extractor".to_owned(),
+                "command".to_owned(),
+                "--extractor-command".to_owned(),
+                "/bin/sh".to_owned(),
+                "--extractor-arg".to_owned(),
+                "-c".to_owned(),
+                "--extractor-arg".to_owned(),
+                script,
+                "--store".to_owned(),
+                path.display().to_string(),
+                "--json".to_owned(),
+            ],
+            &mut end_output,
+        )?;
+        let end_text = String::from_utf8(end_output)?;
+        assert!(end_text.contains("\"extractor\": \"command\""));
+        assert!(end_text.contains("\"remembered_claim_ids\": ["));
+        assert!(end_text.contains("claim-001"));
+
+        let mut context_output = Vec::new();
+        run_cli_with_writer(
+            vec![
+                "mneme".to_owned(),
+                "context".to_owned(),
+                "planning docs".to_owned(),
+                "--store".to_owned(),
+                path.display().to_string(),
+                "--json".to_owned(),
+            ],
+            &mut context_output,
+        )?;
+        let context_text = String::from_utf8(context_output)?;
+        assert!(context_text.contains("direct planning docs"));
+
+        let _ = std::fs::remove_file(&path);
+        let _ = std::fs::remove_file(format!("{}.bak", path.display()));
+        Ok(())
+    }
+
+    #[test]
+    fn end_summary_only_does_not_require_command_extractor(
+    ) -> Result<(), Box<dyn std::error::Error>> {
+        let path = temp_store_path("end-summary-only-command");
+        let _ = std::fs::remove_file(&path);
+        let _ = std::fs::remove_file(format!("{}.bak", path.display()));
+
+        run_cli_with_writer(
+            vec![
+                "mneme".to_owned(),
+                "begin".to_owned(),
+                "Summarize task".to_owned(),
+                "--store".to_owned(),
+                path.display().to_string(),
+            ],
+            &mut Vec::new(),
+        )?;
+
+        let mut end_output = Vec::new();
+        run_cli_with_writer(
+            vec![
+                "mneme".to_owned(),
+                "end".to_owned(),
+                "session-001".to_owned(),
+                "--summary".to_owned(),
+                "Only summarized the task".to_owned(),
+                "--extractor".to_owned(),
+                "command".to_owned(),
+                "--store".to_owned(),
+                path.display().to_string(),
+                "--json".to_owned(),
+            ],
+            &mut end_output,
+        )?;
+        let end_text = String::from_utf8(end_output)?;
+        assert!(end_text.contains("\"extractor\": \"command\""));
+        assert!(end_text.contains("\"remembered_event_ids\": []"));
+        assert!(end_text.contains("\"remembered_claim_ids\": []"));
+
+        let _ = std::fs::remove_file(&path);
+        let _ = std::fs::remove_file(format!("{}.bak", path.display()));
+        Ok(())
+    }
+
     #[test]
     fn hook_begin_end_emit_stable_json_envelope() -> Result<(), Box<dyn std::error::Error>> {
         let path = temp_store_path("hook-begin-end");
@@ -6078,6 +6275,61 @@ mod tests {
         assert!(end_text.contains("\"schema_version\": \"mneme.agent_hook.v1\""));
         assert!(end_text.contains("\"operation\": \"end\""));
         assert!(end_text.contains("\"remembered_event_count\": 1"));
+        assert!(end_text.contains("\"remembered_claim_count\": 1"));
+
+        let _ = std::fs::remove_file(&path);
+        let _ = std::fs::remove_file(format!("{}.bak", path.display()));
+        Ok(())
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn hook_end_accepts_command_extractor() -> Result<(), Box<dyn std::error::Error>> {
+        let path = temp_store_path("hook-end-command-extractor");
+        let _ = std::fs::remove_file(&path);
+        let _ = std::fs::remove_file(format!("{}.bak", path.display()));
+
+        run_cli_with_writer(
+            vec![
+                "mneme".to_owned(),
+                "hook".to_owned(),
+                "begin".to_owned(),
+                "Draft planning docs".to_owned(),
+                "--agent".to_owned(),
+                "codex".to_owned(),
+                "--store".to_owned(),
+                path.display().to_string(),
+            ],
+            &mut Vec::new(),
+        )?;
+
+        let response = r#"{"schema_version":"mneme.extractor.command.v1","claim":{"subject":"user","predicate":"prefers","object":"direct planning docs"}}"#;
+        let script = format!("cat >/dev/null; printf '%s\\n' '{response}'");
+        let mut end_output = Vec::new();
+        run_cli_with_writer(
+            vec![
+                "mneme".to_owned(),
+                "hook".to_owned(),
+                "end".to_owned(),
+                "session-001".to_owned(),
+                "--summary".to_owned(),
+                "Prepared planning docs".to_owned(),
+                "--remember".to_owned(),
+                "For future planning docs, keep explanations direct.".to_owned(),
+                "--extractor-command".to_owned(),
+                "/bin/sh".to_owned(),
+                "--extractor-arg".to_owned(),
+                "-c".to_owned(),
+                "--extractor-arg".to_owned(),
+                script,
+                "--store".to_owned(),
+                path.display().to_string(),
+            ],
+            &mut end_output,
+        )?;
+        let end_text = String::from_utf8(end_output)?;
+        assert!(end_text.contains("\"operation\": \"end\""));
+        assert!(end_text.contains("\"extractor\": \"command\""));
         assert!(end_text.contains("\"remembered_claim_count\": 1"));
 
         let _ = std::fs::remove_file(&path);

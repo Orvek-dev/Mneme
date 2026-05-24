@@ -38,7 +38,7 @@ eval update land in the same PR.
 - Compaction removes inactive claims while preserving active claim recall and
   citations.
 - Agent sessions can begin with scoped context and end with explicit remembered
-  claims.
+  claims by default, or with command-extracted raw memory notes when opted in.
 - Review artifacts summarize store metadata, claim status counts, scope counts,
   memory quality findings, source event IDs, and session summaries without
   mutating store state.
@@ -77,11 +77,15 @@ eval update land in the same PR.
   mutating files; `mneme restore` swaps current and backup store roles.
 - `mneme hook doctor/begin/end` emit the `mneme.agent_hook.v1` JSON envelope for
   success and failure, with non-zero process exits on failure.
+- `mneme end` and `mneme hook end` support opt-in command extraction for
+  remembered notes using the same command protocol as `ingest`.
 - `scripts/mneme-agent-hook.sh` provides the repository-local wrapper for agent
   runtime installation smoke checks and env-based hook defaults.
 - The hook wrapper reads runtime profiles from `MNEME_AGENT_HOOK_CONFIG`,
   `MNEME_CONFIG`, or `.mneme/mneme-agent-hook.env`; CLI flags override env,
   and env overrides profile values.
+- Hook runtime profiles may include `MNEME_EXTRACTOR_COMMAND` for session-end
+  command extraction.
 - `mneme-cli --store <path>` isolates local state.
 - `scripts/install-local.sh` installs the local `mneme` CLI with
   `cargo install --path crates/mneme-cli --locked` and smokes doctor/help/review

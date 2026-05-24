@@ -36,6 +36,11 @@ Supported keys:
 - `MNEME_AGENT_ID`
 - `MNEME_SCOPE`
 - `MNEME_MAX_ITEMS`
+- `MNEME_EXTRACTOR_COMMAND`
+
+`MNEME_EXTRACTOR_COMMAND` is optional. When set, wrapper `end` calls use
+`--extractor command` for `--remember` notes unless an explicit `--extractor`
+flag is already present.
 
 ## Precedence
 

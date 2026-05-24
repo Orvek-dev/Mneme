@@ -31,6 +31,8 @@ Primary runtime flow:
 5. Persist and reload state through a `MnemeStore` implementation.
 6. Use `begin_session` and `end_session` when an agent needs task-scoped
    context and explicit post-task memory writes.
+7. Use `end_session_with_extractor` when an agent needs command-extracted
+   post-task memory notes.
 
 Supported extension points:
 
