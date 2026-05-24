@@ -1,4 +1,9 @@
 //! Local developer CLI for the Mneme v1 personal-memory core.
+//!
+//! This crate exposes the `mneme` binary and a small library entry point for
+//! embedding the same CLI parser in tests or local tooling. Product integrations
+//! should prefer `mneme-core` APIs when they need direct engine access; use
+//! [`run_cli`] when the command-line contract is the desired boundary.
 
 use std::env;
 use std::fmt::{Display, Formatter};

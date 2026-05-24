@@ -76,3 +76,7 @@ while keeping crates unpublished with `publish = false`.
 Phase 7 shipped the **CLI Help & Developer UX MVP** in `v0.13.0`, adding
 top-level and command-specific help for `mneme` and `mneme-eval`, plus help
 smoke checks in the quality gate.
+
+Phase 8 shipped the **API/Rustdoc Contract MVP** in `v0.14.0`, documenting the
+current Rust API surface, adding a compile-checked `mneme-core` example, and
+building Rustdoc with warnings denied in the quality gate.
