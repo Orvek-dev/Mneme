@@ -15,7 +15,7 @@ use mneme_core::{
     ContextQuery, EngineSnapshot, EventInput, ExtractorError, JsonFileStore, MnemeConfig,
     MnemeEngine, MnemeExtractor, MnemeState, MnemeStore, RuleBasedExtractor, SessionBeginInput,
     SessionBeginReport, SessionEndInput, SessionEndReport, SessionError, StateValidationReport,
-    StoreFileStatus, StoreInspection, StoreRepairReport, PRODUCT_NAME,
+    StoreFileStatus, StoreInspection, StoreRepairReport, DEFAULT_CONTEXT_MAX_ITEMS, PRODUCT_NAME,
 };
 use serde::Serialize;
 
@@ -287,13 +287,14 @@ Mark matching active claims as forgotten.
 Example:
   mneme forget "user prefers desktop IDE" --store /tmp/mneme.json"#;
 
-const MNEME_CONTEXT_HELP: &str = r#"Usage: mneme context <query> [--scope <scope>]... [--store <path>] [--json]
+const MNEME_CONTEXT_HELP: &str = r#"Usage: mneme context <query> [--scope <scope>]... [--max-items <n>] [--store <path>] [--json]
 
 Build a cited context pack for a query. Defaults to the private scope unless
-one or more --scope values are provided.
+one or more --scope values are provided. Results are deterministically ranked
+and capped to 8 items by default.
 
 Example:
-  mneme context "local-first" --scope private --store /tmp/mneme.json --json"#;
+  mneme context "local-first" --scope private --max-items 3 --store /tmp/mneme.json --json"#;
 
 const MNEME_SNAPSHOT_HELP: &str = r#"Usage: mneme snapshot [--store <path>] [--json]
 
@@ -302,13 +303,14 @@ Print the current store snapshot.
 Example:
   mneme snapshot --store /tmp/mneme.json --json"#;
 
-const MNEME_BEGIN_HELP: &str = r#"Usage: mneme begin <task> [--query <query>] [--scope <scope>]... [--agent <id>] [--store <path>] [--json]
+const MNEME_BEGIN_HELP: &str = r#"Usage: mneme begin <task> [--query <query>] [--scope <scope>]... [--max-items <n>] [--agent <id>] [--store <path>] [--json]
 
 Start an agent task session and retrieve task-scoped context. Defaults to the
-private scope unless one or more --scope values are provided.
+private scope unless one or more --scope values are provided. Results are capped
+to 8 ranked items by default.
 
 Example:
-  mneme begin "Draft setup plan" --query "local-first" --scope private --agent codex --store /tmp/mneme.json --json"#;
+  mneme begin "Draft setup plan" --query "local-first" --scope private --max-items 3 --agent codex --store /tmp/mneme.json --json"#;
 
 const MNEME_END_HELP: &str = r#"Usage: mneme end <session-id> [--summary <text>] [--remember <claim>]... [--agent <id>] [--store <path>] [--json]
 
@@ -398,12 +400,14 @@ struct BeginOptions {
     actor_agent_id: Option<String>,
     query: Option<String>,
     allowed_scopes: Vec<String>,
+    max_items: Option<usize>,
 }
 
 #[derive(Debug, Clone, Default)]
 struct RetrievalOptions {
     common: CommonOptions,
     allowed_scopes: Vec<String>,
+    max_items: Option<usize>,
 }
 
 #[derive(Debug, Clone, Default)]
@@ -603,10 +607,10 @@ fn run_context(raw_args: Vec<String>, writer: &mut impl Write) -> Result<(), Cli
     let (query, options) = parse_query_args(raw_args)?;
     let store_path = resolve_store_path(&options.common)?;
     let mut engine = load_engine(&store_path)?;
-    let context_pack = engine.build_context_pack_with(ContextQuery::with_allowed_scopes(
-        query,
-        effective_allowed_scopes(options.allowed_scopes),
-    ));
+    let context_pack = engine.build_context_pack_with(
+        ContextQuery::with_allowed_scopes(query, effective_allowed_scopes(options.allowed_scopes))
+            .with_max_items(effective_max_items(options.max_items)),
+    );
     persist_engine(&store_path, &engine)?;
     let report = ContextReport {
         store: store_path.display().to_string(),
@@ -637,6 +641,7 @@ fn run_begin(raw_args: Vec<String>, writer: &mut impl Write) -> Result<(), CliEr
         actor_agent_id: options.actor_agent_id,
         query: options.query,
         allowed_scopes: effective_allowed_scopes(options.allowed_scopes),
+        max_items: effective_max_items(options.max_items),
     });
     persist_engine(&store_path, &engine)?;
     let cli_report = BeginCliReport {
@@ -1003,6 +1008,14 @@ fn parse_query_args(raw_args: Vec<String>) -> Result<(String, RetrievalOptions),
                     .allowed_scopes
                     .push(required_arg(&raw_args, idx, "--scope")?);
             }
+            "--max-items" => {
+                idx += 1;
+                options.max_items = Some(parse_max_items(required_arg(
+                    &raw_args,
+                    idx,
+                    "--max-items",
+                )?)?);
+            }
             value if value.starts_with('-') => {
                 return Err(CliError::invalid_cli(format!(
                     "unknown context option: {value}"
@@ -1014,7 +1027,7 @@ fn parse_query_args(raw_args: Vec<String>) -> Result<(String, RetrievalOptions),
     }
     if positionals.len() != 1 {
         return Err(CliError::invalid_cli(
-            "usage: mneme context <query> [--scope <scope>]... [--store <path>] [--json]",
+            "usage: mneme context <query> [--scope <scope>]... [--max-items <n>] [--store <path>] [--json]",
         ));
     }
     let query = require_nonempty(positionals.remove(0), "query")?;
@@ -1061,6 +1074,14 @@ fn parse_begin_args(raw_args: Vec<String>) -> Result<(String, BeginOptions), Cli
                     .allowed_scopes
                     .push(required_arg(&raw_args, idx, "--scope")?);
             }
+            "--max-items" => {
+                idx += 1;
+                options.max_items = Some(parse_max_items(required_arg(
+                    &raw_args,
+                    idx,
+                    "--max-items",
+                )?)?);
+            }
             value if value.starts_with('-') => {
                 return Err(CliError::invalid_cli(format!(
                     "unknown begin option: {value}"
@@ -1072,7 +1093,7 @@ fn parse_begin_args(raw_args: Vec<String>) -> Result<(String, BeginOptions), Cli
     }
     if positionals.len() != 1 {
         return Err(CliError::invalid_cli(
-            "usage: mneme begin <task> [--query <query>] [--scope <scope>]... [--agent <id>] [--store <path>] [--json]",
+            "usage: mneme begin <task> [--query <query>] [--scope <scope>]... [--max-items <n>] [--agent <id>] [--store <path>] [--json]",
         ));
     }
     Ok((require_nonempty(positionals.remove(0), "task")?, options))
@@ -1084,6 +1105,16 @@ fn effective_allowed_scopes(scopes: Vec<String>) -> Vec<String> {
     } else {
         scopes
     }
+}
+
+fn effective_max_items(max_items: Option<usize>) -> usize {
+    max_items.unwrap_or(DEFAULT_CONTEXT_MAX_ITEMS)
+}
+
+fn parse_max_items(value: String) -> Result<usize, CliError> {
+    value.parse::<usize>().map_err(|source| {
+        CliError::invalid_cli(format!("invalid --max-items value {value}: {source}"))
+    })
 }
 
 fn parse_end_args(raw_args: Vec<String>) -> Result<(String, EndOptions), CliError> {
@@ -1308,8 +1339,10 @@ fn emit_context_report(
     for item in &report.context_pack.items {
         writeln!(
             writer,
-            "- {} [{}]",
+            "- {} (score={}, reason={}) [{}]",
             item.claim_text,
+            item.score,
+            item.match_reason,
             item.source_event_ids.join(",")
         )
         .map_err(|source| CliError::io("write", Path::new("<stdout>"), source))?;
@@ -1496,6 +1529,7 @@ mod tests {
         let command_text = String::from_utf8(command_output)?;
         assert!(command_text.contains("Usage: mneme begin <task>"));
         assert!(command_text.contains("--query <query>"));
+        assert!(command_text.contains("--max-items <n>"));
         Ok(())
     }
 
@@ -1597,6 +1631,52 @@ mod tests {
         let allowed_text = String::from_utf8(allowed_output)?;
         assert!(allowed_text.contains("\"item_count\": 1"));
         assert!(allowed_text.contains("project launch reviews"));
+
+        let _ = std::fs::remove_file(&path);
+        Ok(())
+    }
+
+    #[test]
+    fn context_ranking_respects_max_items() -> Result<(), Box<dyn std::error::Error>> {
+        let path = temp_store_path("context-ranking");
+        let _ = std::fs::remove_file(&path);
+
+        for claim in [
+            "user prefers launch templates",
+            "user prefers review summaries",
+            "user prefers launch review checklists",
+        ] {
+            run_cli_with_writer(
+                vec![
+                    "mneme".to_owned(),
+                    "remember".to_owned(),
+                    claim.to_owned(),
+                    "--store".to_owned(),
+                    path.display().to_string(),
+                ],
+                &mut Vec::new(),
+            )?;
+        }
+
+        let mut output = Vec::new();
+        run_cli_with_writer(
+            vec![
+                "mneme".to_owned(),
+                "context".to_owned(),
+                "launch review".to_owned(),
+                "--max-items".to_owned(),
+                "1".to_owned(),
+                "--store".to_owned(),
+                path.display().to_string(),
+                "--json".to_owned(),
+            ],
+            &mut output,
+        )?;
+        let text = String::from_utf8(output)?;
+        assert!(text.contains("\"item_count\": 1"));
+        assert!(text.contains("launch review checklists"));
+        assert!(text.contains("\"score\": 25"));
+        assert!(text.contains("context_budget_exceeded:max_items=1"));
 
         let _ = std::fs::remove_file(&path);
         Ok(())

@@ -47,7 +47,8 @@ pub use v1::{
     SessionBeginInput, SessionBeginReport, SessionEndInput, SessionEndReport, SessionError,
     SessionRecord, SessionStatus, StateMetadata, StateValidationIssue, StateValidationReport,
     StoreError, StoreFileInspection, StoreFileStatus, StoreInspection, StoreRepairReport,
-    ValidationSeverity, EXTRACTOR_COMMAND_SCHEMA_VERSION, MNEME_STATE_SCHEMA_VERSION,
+    ValidationSeverity, DEFAULT_CONTEXT_MAX_ITEMS, EXTRACTOR_COMMAND_SCHEMA_VERSION,
+    MNEME_STATE_SCHEMA_VERSION,
 };
 
 /// Public product name.

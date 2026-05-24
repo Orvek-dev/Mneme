@@ -61,7 +61,8 @@ storage engine:
 
 - `events`: appended event records.
 - `claims`: extracted or blocked memory claims.
-- `context_pack`: retrieved context items and omitted items.
+- `context_pack`: retrieved context items with ranking metadata and omitted
+  items.
 - `budget`: deterministic budget counters.
 - `audit`: read/write evidence.
 

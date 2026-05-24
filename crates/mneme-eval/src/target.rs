@@ -177,6 +177,9 @@ pub(crate) struct ContextItem {
     pub(crate) claim_id: String,
     pub(crate) claim_text: String,
     pub(crate) source_event_ids: Vec<String>,
+    pub(crate) score: u32,
+    pub(crate) matched_terms: Vec<String>,
+    pub(crate) match_reason: String,
 }
 
 #[derive(Debug, Clone)]

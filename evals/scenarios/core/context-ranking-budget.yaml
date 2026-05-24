@@ -1,0 +1,73 @@
+id: context-ranking-budget
+tags:
+  - context-pack
+  - ranking
+  - budget
+budget:
+  daily_cloud_tokens: 100
+events:
+  - speaker_id: user
+    actor_agent_id: codex
+    scope: private
+    trust_level: trusted_user
+    text: "remember: user prefers launch templates"
+  - speaker_id: user
+    actor_agent_id: codex
+    scope: private
+    trust_level: trusted_user
+    text: "remember: user prefers review summaries"
+  - speaker_id: user
+    actor_agent_id: codex
+    scope: private
+    trust_level: trusted_user
+    text: "remember: user prefers launch review checklists"
+  - speaker_id: user
+    actor_agent_id: codex
+    scope: private
+    trust_level: trusted_user
+    text: "remember: user prefers color palettes"
+expected:
+  event_append:
+    count: 4
+  claims:
+    - subject: user
+      predicate: prefers
+      object: launch templates
+      status: active
+      scope: private
+    - subject: user
+      predicate: prefers
+      object: review summaries
+      status: active
+      scope: private
+    - subject: user
+      predicate: prefers
+      object: launch review checklists
+      status: active
+      scope: private
+    - subject: user
+      predicate: prefers
+      object: color palettes
+      status: active
+      scope: private
+  context_pack:
+    query: "launch review"
+    max_items: 2
+    item_count: 2
+    must_include:
+      - launch review checklists
+      - launch templates
+    must_not_include:
+      - review summaries
+      - color palettes
+    expected_order:
+      - launch review checklists
+      - launch templates
+    omitted_reason_contains:
+      - context_budget_exceeded:max_items=2
+      - low_relevance
+    citation_required: true
+  budget:
+    hard_cap_violations: 0
+  audit:
+    read_write_events_required: true

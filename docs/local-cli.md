@@ -22,9 +22,9 @@ cargo run -p mneme-cli -- remember "user prefers project launch reviews" --scope
 cargo run -p mneme-cli -- correct "user prefers local-first tools" "user prefers desktop IDE"
 cargo run -p mneme-cli -- forget "user prefers desktop IDE"
 cargo run -p mneme-cli -- context "desktop IDE"
-cargo run -p mneme-cli -- context "project launch" --scope project-alpha
+cargo run -p mneme-cli -- context "project launch" --scope project-alpha --max-items 3
 cargo run -p mneme-cli -- snapshot --json
-cargo run -p mneme-cli -- begin "Draft setup plan" --query "local-first" --scope private --agent codex --json
+cargo run -p mneme-cli -- begin "Draft setup plan" --query "local-first" --scope private --max-items 3 --agent codex --json
 cargo run -p mneme-cli -- end session-001 --summary "Prepared a concise setup plan" --remember "user prefers concise setup plans" --json
 cargo run -p mneme-cli -- validate --json
 cargo run -p mneme-cli -- compact
@@ -41,7 +41,9 @@ cargo run -p mneme-cli -- context "local-first" --store /tmp/mneme.json --json
 ```
 
 `context` defaults to the `private` scope. Pass one or more `--scope <scope>`
-values to retrieve claims from other authorized scopes:
+values to retrieve claims from other authorized scopes. Results are ranked by
+deterministic term/phrase matches and capped to 8 items unless `--max-items
+<n>` is provided:
 
 ```sh
 cargo run -p mneme-cli -- remember "user prefers project launch reviews" \
@@ -49,6 +51,7 @@ cargo run -p mneme-cli -- remember "user prefers project launch reviews" \
   --store /tmp/mneme.json
 cargo run -p mneme-cli -- context "project launch" \
   --scope project-alpha \
+  --max-items 3 \
   --store /tmp/mneme.json \
   --json
 ```
@@ -91,12 +94,14 @@ cargo run -p mneme-cli -- repair --store /tmp/mneme.json --json
 cargo run -p mneme-cli -- begin "Draft setup plan" \
   --query "local-first" \
   --scope private \
+  --max-items 3 \
   --agent codex \
   --store /tmp/mneme.json \
   --json
 ```
 
-`begin` uses the same allowed-scope retrieval guard as `context`.
+`begin` uses the same allowed-scope guard, deterministic ranking, and item cap
+as `context`.
 
 `end` closes the session and can write explicit memory claims:
 

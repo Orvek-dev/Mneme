@@ -137,8 +137,11 @@ pub(crate) struct ClaimExpected {
 pub(crate) struct ContextPackExpected {
     pub(crate) query: String,
     pub(crate) allowed_scopes: Vec<String>,
+    pub(crate) max_items: Option<usize>,
+    pub(crate) item_count: Option<usize>,
     pub(crate) must_include: Vec<String>,
     pub(crate) must_not_include: Vec<String>,
+    pub(crate) expected_order: Vec<String>,
     pub(crate) omitted_reason_contains: Vec<String>,
     pub(crate) citation_required: bool,
 }
@@ -353,6 +356,16 @@ fn validate_scenario(scenario: &Scenario, path: &Path) -> Result<(), EvalError> 
         {
             return Err(EvalError::scenario(format!(
                 "scenario {} context_pack has an empty must_not_include entry",
+                scenario.id
+            )));
+        }
+        if context_pack
+            .expected_order
+            .iter()
+            .any(|needle| needle.trim().is_empty())
+        {
+            return Err(EvalError::scenario(format!(
+                "scenario {} context_pack has an empty expected_order entry",
                 scenario.id
             )));
         }
