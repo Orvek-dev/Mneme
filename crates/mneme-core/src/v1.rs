@@ -188,10 +188,16 @@ impl MnemeEngine {
         self.claims.push(claim);
     }
 
-    /// Builds a context pack over active claims and records a read audit event.
+    /// Builds a context pack over active claims in the default private scope.
     pub fn build_context_pack(&mut self, query: impl Into<String>) -> ContextPack {
-        let query = query.into();
-        let query_terms = query
+        self.build_context_pack_with(ContextQuery::new(query))
+    }
+
+    /// Builds a context pack over active claims allowed by the provided query.
+    pub fn build_context_pack_with(&mut self, query: ContextQuery) -> ContextPack {
+        let query_text = query.text;
+        let allowed_scopes = normalize_allowed_scopes(query.allowed_scopes);
+        let query_terms = query_text
             .split_whitespace()
             .map(|term| term.to_ascii_lowercase())
             .collect::<Vec<_>>();
@@ -203,6 +209,15 @@ impl MnemeEngine {
                 omitted.push(OmittedContextItem {
                     claim_id: claim.id.clone(),
                     reason: claim.status.as_str().to_owned(),
+                });
+                continue;
+            }
+
+            let claim_scope = normalize_scope(&claim.scope);
+            if !allowed_scopes.contains(&claim_scope) {
+                omitted.push(OmittedContextItem {
+                    claim_id: claim.id.clone(),
+                    reason: format!("scope_denied:{claim_scope}"),
                 });
                 continue;
             }
@@ -229,10 +244,10 @@ impl MnemeEngine {
 
         self.audit.push(AuditRecord {
             kind: AuditKind::ContextRead,
-            target_id: if query.is_empty() {
+            target_id: if query_text.is_empty() {
                 "empty-query".to_owned()
             } else {
-                query
+                query_text
             },
         });
 
@@ -242,7 +257,10 @@ impl MnemeEngine {
     /// Starts an agent session and returns task-scoped context.
     pub fn begin_session(&mut self, input: SessionBeginInput) -> SessionBeginReport {
         let query = input.query.unwrap_or_else(|| input.task.clone());
-        let context_pack = self.build_context_pack(query.clone());
+        let context_pack = self.build_context_pack_with(ContextQuery::with_allowed_scopes(
+            query.clone(),
+            input.allowed_scopes,
+        ));
         let session = SessionRecord {
             id: next_id("session", self.sessions.len() + 1),
             task: input.task,
@@ -773,6 +791,9 @@ pub struct SessionBeginInput {
     pub actor_agent_id: Option<String>,
     /// Optional retrieval query. Defaults to `task`.
     pub query: Option<String>,
+    /// Memory scopes that can be retrieved at session begin.
+    #[serde(default = "default_allowed_scopes")]
+    pub allowed_scopes: Vec<String>,
 }
 
 /// Input used to end an agent session.
@@ -1301,6 +1322,38 @@ pub struct ContextPack {
     pub omitted: Vec<OmittedContextItem>,
 }
 
+/// Scoped context-pack retrieval request.
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct ContextQuery {
+    /// Query text used for relevance matching.
+    pub text: String,
+    /// Memory scopes the caller is authorized to retrieve.
+    pub allowed_scopes: Vec<String>,
+}
+
+impl ContextQuery {
+    /// Creates a query that can retrieve from the default private scope.
+    #[must_use]
+    pub fn new(text: impl Into<String>) -> Self {
+        Self {
+            text: text.into(),
+            allowed_scopes: default_allowed_scopes(),
+        }
+    }
+
+    /// Creates a query with explicit allowed retrieval scopes.
+    #[must_use]
+    pub fn with_allowed_scopes(
+        text: impl Into<String>,
+        allowed_scopes: impl IntoIterator<Item = impl Into<String>>,
+    ) -> Self {
+        Self {
+            text: text.into(),
+            allowed_scopes: allowed_scopes.into_iter().map(Into::into).collect(),
+        }
+    }
+}
+
 /// Context item returned to an agent.
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct ContextItem {
@@ -1787,6 +1840,22 @@ fn estimate_tokens(text: &str) -> u32 {
     u32::try_from(count).unwrap_or(u32::MAX).max(1)
 }
 
+fn default_allowed_scopes() -> Vec<String> {
+    vec!["private".to_owned()]
+}
+
+fn normalize_allowed_scopes(scopes: Vec<String>) -> BTreeSet<String> {
+    scopes
+        .into_iter()
+        .map(|scope| normalize_scope(&scope))
+        .filter(|scope| !scope.is_empty())
+        .collect()
+}
+
+fn normalize_scope(scope: &str) -> String {
+    scope.trim().to_owned()
+}
+
 fn next_id(prefix: &str, number: usize) -> String {
     format!("{prefix}-{number:03}")
 }
@@ -1952,6 +2021,46 @@ mod tests {
         assert_eq!(snapshot.claims[0].status, ClaimStatus::BlockedSecret);
         assert!(context.items.is_empty());
         assert_eq!(context.omitted.len(), 1);
+        Ok(())
+    }
+
+    #[test]
+    fn context_query_enforces_allowed_scopes_before_relevance(
+    ) -> Result<(), Box<dyn std::error::Error>> {
+        let mut engine = MnemeEngine::new(MnemeConfig {
+            daily_cloud_tokens: 100,
+        });
+        engine.ingest_event(EventInput {
+            speaker_id: "user".to_owned(),
+            actor_agent_id: None,
+            text: "remember: user prefers local-first tools".to_owned(),
+            scope: "private".to_owned(),
+            trust_level: "trusted_user".to_owned(),
+        })?;
+        engine.ingest_event(EventInput {
+            speaker_id: "user".to_owned(),
+            actor_agent_id: None,
+            text: "remember: user prefers project roadmap reviews".to_owned(),
+            scope: "project-alpha".to_owned(),
+            trust_level: "trusted_user".to_owned(),
+        })?;
+
+        let private_context = engine.build_context_pack("project roadmap");
+        assert!(private_context.items.is_empty());
+        assert!(private_context
+            .omitted
+            .iter()
+            .any(|item| item.reason == "scope_denied:project-alpha"));
+
+        let project_context = engine.build_context_pack_with(ContextQuery::with_allowed_scopes(
+            "project roadmap",
+            ["private", "project-alpha"],
+        ));
+        assert_eq!(project_context.items.len(), 1);
+        assert_eq!(
+            project_context.items[0].claim_text,
+            "user prefers project roadmap reviews"
+        );
         Ok(())
     }
 
@@ -2239,6 +2348,7 @@ mod tests {
             task: "Draft a setup plan".to_owned(),
             actor_agent_id: Some("codex".to_owned()),
             query: Some("local-first".to_owned()),
+            allowed_scopes: vec!["private".to_owned()],
         });
         assert_eq!(begin.session.id, "session-001");
         assert_eq!(begin.session.status, SessionStatus::Active);
@@ -2270,6 +2380,41 @@ mod tests {
             .audit
             .iter()
             .any(|event| event.kind == AuditKind::SessionEnd));
+        Ok(())
+    }
+
+    #[test]
+    fn agent_session_begin_respects_allowed_scopes() -> Result<(), Box<dyn std::error::Error>> {
+        let mut engine = MnemeEngine::new(MnemeConfig::default());
+        engine.ingest_event(EventInput {
+            speaker_id: "user".to_owned(),
+            actor_agent_id: Some("codex".to_owned()),
+            text: "remember: user prefers team release notes".to_owned(),
+            scope: "team".to_owned(),
+            trust_level: "trusted_user".to_owned(),
+        })?;
+
+        let denied = engine.begin_session(SessionBeginInput {
+            task: "Draft release notes".to_owned(),
+            actor_agent_id: Some("codex".to_owned()),
+            query: Some("release notes".to_owned()),
+            allowed_scopes: vec!["private".to_owned()],
+        });
+        assert!(denied.context_pack.items.is_empty());
+        assert!(denied
+            .context_pack
+            .omitted
+            .iter()
+            .any(|item| item.reason == "scope_denied:team"));
+
+        let allowed = engine.begin_session(SessionBeginInput {
+            task: "Draft release notes".to_owned(),
+            actor_agent_id: Some("codex".to_owned()),
+            query: Some("release notes".to_owned()),
+            allowed_scopes: vec!["team".to_owned()],
+        });
+        assert_eq!(allowed.context_pack.items.len(), 1);
+        assert_eq!(allowed.session.context_claim_ids, vec!["claim-001"]);
         Ok(())
     }
 

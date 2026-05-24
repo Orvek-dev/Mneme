@@ -67,6 +67,8 @@ pub(crate) struct AgentBegin {
     pub(crate) actor_agent_id: Option<String>,
     #[serde(default)]
     pub(crate) query: Option<String>,
+    #[serde(default)]
+    pub(crate) allowed_scopes: Vec<String>,
 }
 
 #[derive(Debug, Clone, Default, Deserialize)]
@@ -134,8 +136,10 @@ pub(crate) struct ClaimExpected {
 #[serde(default, deny_unknown_fields)]
 pub(crate) struct ContextPackExpected {
     pub(crate) query: String,
+    pub(crate) allowed_scopes: Vec<String>,
     pub(crate) must_include: Vec<String>,
     pub(crate) must_not_include: Vec<String>,
+    pub(crate) omitted_reason_contains: Vec<String>,
     pub(crate) citation_required: bool,
 }
 
@@ -231,6 +235,17 @@ fn validate_scenario(scenario: &Scenario, path: &Path) -> Result<(), EvalError> 
         {
             return Err(EvalError::scenario(format!(
                 "scenario {} agent_flow begin query must not be empty",
+                scenario.id
+            )));
+        }
+        if agent_flow
+            .begin
+            .allowed_scopes
+            .iter()
+            .any(|scope| scope.trim().is_empty())
+        {
+            return Err(EvalError::scenario(format!(
+                "scenario {} agent_flow begin allowed_scopes entries must not be empty",
                 scenario.id
             )));
         }
@@ -338,6 +353,26 @@ fn validate_scenario(scenario: &Scenario, path: &Path) -> Result<(), EvalError> 
         {
             return Err(EvalError::scenario(format!(
                 "scenario {} context_pack has an empty must_not_include entry",
+                scenario.id
+            )));
+        }
+        if context_pack
+            .allowed_scopes
+            .iter()
+            .any(|scope| scope.trim().is_empty())
+        {
+            return Err(EvalError::scenario(format!(
+                "scenario {} context_pack has an empty allowed_scopes entry",
+                scenario.id
+            )));
+        }
+        if context_pack
+            .omitted_reason_contains
+            .iter()
+            .any(|reason| reason.trim().is_empty())
+        {
+            return Err(EvalError::scenario(format!(
+                "scenario {} context_pack has an empty omitted_reason_contains entry",
                 scenario.id
             )));
         }

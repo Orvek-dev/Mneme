@@ -4,6 +4,18 @@ This project follows the spirit of Keep a Changelog.
 
 ## Unreleased
 
+## [0.16.0] - 2026-05-24
+
+### Added
+
+- Added scoped `ContextQuery` retrieval in `mneme-core`.
+- Added default private-scope context retrieval and explicit allowed-scope
+  filtering for `mneme context` and `mneme begin`.
+- Added a core eval scenario covering scope-denied context and scoped agent
+  begin retrieval.
+- Added CLI scope smoke checks to the local quality gate.
+- Added scope guard documentation and a Phase 10 feature spec.
+
 ## [0.15.0] - 2026-05-24
 
 ### Added

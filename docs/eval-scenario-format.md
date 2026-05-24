@@ -97,6 +97,8 @@ agent_flow:
     task: "Draft setup plan"
     actor_agent_id: codex
     query: "local-first"
+    allowed_scopes:
+      - private
   end:
     summary: "Prepared a concise setup plan"
     remember:
@@ -118,9 +120,12 @@ expected:
       scope: private
   context_pack:
     query: "user preferences"
+    allowed_scopes:
+      - private
     must_include:
       - local-first
     must_not_include: []
+    omitted_reason_contains: []
     citation_required: true
   budget:
     hard_cap_violations: 0
@@ -187,7 +192,8 @@ Each expected claim requires:
 - `maintenance.repair_from_backup`: asks compatible targets to corrupt the
   current store after backup creation, repair from backup, and reload.
 - `agent_flow.begin`: asks compatible targets to start an agent session with
-  `task`, optional `actor_agent_id`, and optional context `query`.
+  `task`, optional `actor_agent_id`, optional context `query`, and optional
+  `allowed_scopes`.
 - `agent_flow.end`: asks compatible targets to close that session with an
   optional `summary` and zero or more explicit `remember` claims.
 - `events[].actor_agent_id`: agent acting on behalf of the speaker.
@@ -198,9 +204,13 @@ Each expected claim requires:
 - `claims[].scope`: expected claim scope.
 - `claims[].must_not_exist`: marks a claim as prohibited.
 - `context_pack.query`: deterministic context retrieval query.
+- `context_pack.allowed_scopes`: scopes allowed for context retrieval. Defaults
+  to `private` when omitted.
 - `context_pack.must_include`: strings that must appear in the context pack.
 - `context_pack.must_not_include`: strings that must not appear in the context
   pack.
+- `context_pack.omitted_reason_contains`: omission reason fragments that must
+  appear, such as `scope_denied:project-alpha`.
 - `context_pack.citation_required`: requires source event citations.
 - `budget.hard_cap_violations`: expected budget hard-cap violation count.
 - `audit.read_write_events_required`: requires read/write audit evidence.

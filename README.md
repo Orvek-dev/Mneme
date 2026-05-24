@@ -18,6 +18,7 @@ Mneme is pre-1.0. The useful surface today is local development and evaluation:
 
 - raw events are the source of truth;
 - claims preserve source event citations;
+- context retrieval is filtered by allowed memory scopes before relevance;
 - budget checks happen before extraction;
 - secret-like data is blocked from active context;
 - corrections and forgets are auditable lifecycle transitions;
@@ -59,6 +60,8 @@ Try the local CLI with an isolated store:
 STORE=/tmp/mneme.json
 cargo run -p mneme-cli -- remember "user prefers local-first tools" --store "$STORE"
 cargo run -p mneme-cli -- context "local-first" --store "$STORE" --json
+cargo run -p mneme-cli -- remember "user prefers project launch reviews" --scope project-alpha --store "$STORE"
+cargo run -p mneme-cli -- context "project launch" --scope project-alpha --store "$STORE" --json
 cargo run -p mneme-cli -- correct "user prefers local-first tools" "user prefers desktop IDE" --store "$STORE"
 cargo run -p mneme-cli -- forget "user prefers desktop IDE" --store "$STORE"
 cargo run -p mneme-cli -- snapshot --store "$STORE" --json
