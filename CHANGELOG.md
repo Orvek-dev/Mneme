@@ -4,6 +4,19 @@ This project follows the spirit of Keep a Changelog.
 
 ## Unreleased
 
+## [0.34.0] - 2026-05-25
+
+### Added
+
+- Added `mneme init --extractor-command <program>` to install an active
+  session-end command extractor in the generated agent hook profile.
+- Added init and doctor output coverage for configured
+  `MNEME_EXTRACTOR_COMMAND` values.
+- Expanded the release quality gate to verify that the repository hook wrapper
+  can run command-extracted `hook end` memories using only the generated
+  runtime profile.
+- Added the Phase 28 agent runtime extractor installation feature spec.
+
 ## [0.33.0] - 2026-05-24
 
 ### Added

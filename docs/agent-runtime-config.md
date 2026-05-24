@@ -23,6 +23,7 @@ Start from the public example:
 
 ```sh
 mneme init
+mneme init --extractor-command ./mneme-extractor-wrapper
 mneme doctor
 ```
 
@@ -41,6 +42,9 @@ Supported keys:
 `MNEME_EXTRACTOR_COMMAND` is optional. When set, wrapper `end` calls use
 `--extractor command` for `--remember` notes unless an explicit `--extractor`
 flag is already present.
+`mneme init --extractor-command <program>` writes this key as an active profile
+line; without that option, the generated profile keeps it as a commented
+example.
 
 ## Precedence
 

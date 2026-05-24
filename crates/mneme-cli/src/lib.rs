@@ -369,7 +369,7 @@ Examples:
   mneme restore --check --store /tmp/mneme.json --json
   mneme help begin"#;
 
-const MNEME_INIT_HELP: &str = r#"Usage: mneme init [--store <path>] [--config <path>] [--agent <id>] [--scope <scope>] [--max-items <n>] [--bin <path>] [--no-bin] [--force] [--json]
+const MNEME_INIT_HELP: &str = r#"Usage: mneme init [--store <path>] [--config <path>] [--agent <id>] [--scope <scope>] [--max-items <n>] [--bin <path>] [--no-bin] [--extractor-command <program>] [--force] [--json]
 
 Initialize a local workspace by creating a valid v1 store and an agent hook
 runtime profile. Defaults to .mneme/mneme-v1.json and
@@ -378,7 +378,8 @@ runtime profile. Defaults to .mneme/mneme-v1.json and
 Examples:
   mneme init
   mneme init --agent codex --scope private --max-items 3
-  mneme init --store /tmp/mneme.json --config /tmp/mneme-agent-hook.env --bin /usr/local/bin/mneme --json"#;
+  mneme init --store /tmp/mneme.json --config /tmp/mneme-agent-hook.env --bin /usr/local/bin/mneme --json
+  mneme init --extractor-command ./mneme-extractor-wrapper"#;
 
 const MNEME_DOCTOR_HELP: &str = r#"Usage: mneme doctor [--store <path>] [--config <path>] [--json]
 
@@ -608,6 +609,7 @@ struct InitOptions {
     max_items: usize,
     bin_path: Option<PathBuf>,
     include_bin: bool,
+    extractor_command: Option<String>,
     force: bool,
 }
 
@@ -621,6 +623,7 @@ impl Default for InitOptions {
             max_items: 3,
             bin_path: None,
             include_bin: true,
+            extractor_command: None,
             force: false,
         }
     }
@@ -796,6 +799,7 @@ struct InitReport {
     scope: String,
     max_items: usize,
     bin: Option<String>,
+    extractor_command: Option<String>,
     next_commands: Vec<String>,
 }
 
@@ -1227,6 +1231,7 @@ fn run_init(raw_args: Vec<String>, writer: &mut impl Write) -> Result<(), CliErr
             &options.scope,
             options.max_items,
             bin_path.as_deref(),
+            options.extractor_command.as_deref(),
         )?;
     }
 
@@ -1243,6 +1248,7 @@ fn run_init(raw_args: Vec<String>, writer: &mut impl Write) -> Result<(), CliErr
         scope: options.scope,
         max_items: options.max_items,
         bin: bin_path.map(|path| path.display().to_string()),
+        extractor_command: options.extractor_command.clone(),
         next_commands: vec![
             "mneme doctor".to_owned(),
             format!("mneme validate --store \"{}\"", store_path.display()),
@@ -2108,6 +2114,13 @@ fn parse_init_args(raw_args: Vec<String>) -> Result<InitOptions, CliError> {
             "--no-bin" => {
                 options.include_bin = false;
                 options.bin_path = None;
+            }
+            "--extractor-command" => {
+                idx += 1;
+                options.extractor_command = Some(require_nonempty(
+                    required_arg(&raw_args, idx, "--extractor-command")?,
+                    "extractor command",
+                )?);
             }
             "--force" => {
                 options.force = true;
@@ -3246,6 +3259,7 @@ fn write_agent_hook_profile(
     scope: &str,
     max_items: usize,
     bin_path: Option<&Path>,
+    extractor_command: Option<&str>,
 ) -> Result<(), CliError> {
     if let Some(parent) = path
         .parent()
@@ -3254,7 +3268,14 @@ fn write_agent_hook_profile(
         std::fs::create_dir_all(parent)
             .map_err(|source| CliError::io("create dir", parent, source))?;
     }
-    let profile = render_agent_hook_profile(store_path, agent_id, scope, max_items, bin_path)?;
+    let profile = render_agent_hook_profile(
+        store_path,
+        agent_id,
+        scope,
+        max_items,
+        bin_path,
+        extractor_command,
+    )?;
     std::fs::write(path, profile).map_err(|source| CliError::io("write", path, source))
 }
 
@@ -3264,6 +3285,7 @@ fn render_agent_hook_profile(
     scope: &str,
     max_items: usize,
     bin_path: Option<&Path>,
+    extractor_command: Option<&str>,
 ) -> Result<String, CliError> {
     let store_value = single_line_value(store_path.display().to_string(), "store path")?;
     let agent_value = single_line_value(agent_id.to_owned(), "agent id")?;
@@ -3281,8 +3303,16 @@ fn render_agent_hook_profile(
     profile.push_str(&format!("MNEME_AGENT_ID={agent_value}\n"));
     profile.push_str(&format!("MNEME_SCOPE={scope_value}\n"));
     profile.push_str(&format!("MNEME_MAX_ITEMS={max_items}\n"));
-    profile.push_str("# Optional session-end command extractor.\n");
-    profile.push_str("# MNEME_EXTRACTOR_COMMAND=./mneme-extractor-wrapper\n");
+    match extractor_command {
+        Some(command) => {
+            let command_value = single_line_value(command.to_owned(), "extractor command")?;
+            profile.push_str(&format!("MNEME_EXTRACTOR_COMMAND={command_value}\n"));
+        }
+        None => {
+            profile.push_str("# Optional session-end command extractor.\n");
+            profile.push_str("# MNEME_EXTRACTOR_COMMAND=./mneme-extractor-wrapper\n");
+        }
+    }
     Ok(profile)
 }
 
@@ -4127,6 +4157,10 @@ fn emit_doctor_report(
         writeln!(writer, "profile bin: {bin}")
             .map_err(|source| CliError::io("write", Path::new("<stdout>"), source))?;
     }
+    if let Some(command) = &report.profile.values.mneme_extractor_command {
+        writeln!(writer, "profile extractor command: {command}")
+            .map_err(|source| CliError::io("write", Path::new("<stdout>"), source))?;
+    }
     for issue in &report.profile.issues {
         writeln!(writer, "profile issue: {issue}")
             .map_err(|source| CliError::io("write", Path::new("<stdout>"), source))?;
@@ -4180,6 +4214,10 @@ fn emit_init_report(
         init_file_action(report.config_written, report.config_overwritten)
     )
     .map_err(|source| CliError::io("write", Path::new("<stdout>"), source))?;
+    if let Some(command) = &report.extractor_command {
+        writeln!(writer, "mneme: extractor command {command}")
+            .map_err(|source| CliError::io("write", Path::new("<stdout>"), source))?;
+    }
     writeln!(
         writer,
         "mneme: verify with MNEME_AGENT_HOOK_CONFIG=\"{}\" scripts/mneme-agent-hook.sh doctor",
@@ -4658,6 +4696,7 @@ mod tests {
         let init_text = String::from_utf8(init_output)?;
         assert!(init_text.contains("Usage: mneme init"));
         assert!(init_text.contains("--config <path>"));
+        assert!(init_text.contains("--extractor-command <program>"));
         assert!(init_text.contains("--force"));
 
         let mut command_output = Vec::new();
@@ -4822,6 +4861,78 @@ mod tests {
         let second_text = String::from_utf8(second_output)?;
         assert!(second_text.contains("\"store_created\": false"));
         assert!(second_text.contains("\"config_written\": false"));
+
+        for path in [&store, &config] {
+            let _ = std::fs::remove_file(path);
+            let _ = std::fs::remove_file(format!("{}.bak", path.display()));
+            let _ = std::fs::remove_file(format!("{}.lock", path.display()));
+        }
+        Ok(())
+    }
+
+    #[test]
+    fn init_can_install_agent_hook_extractor_command() -> Result<(), Box<dyn std::error::Error>> {
+        let store = temp_store_path("init-extractor-store");
+        let config = temp_store_path("init-extractor-profile").with_extension("env");
+        for path in [&store, &config] {
+            let _ = std::fs::remove_file(path);
+            let _ = std::fs::remove_file(format!("{}.bak", path.display()));
+            let _ = std::fs::remove_file(format!("{}.lock", path.display()));
+        }
+
+        let mut output = Vec::new();
+        run_cli_with_writer(
+            vec![
+                "mneme".to_owned(),
+                "init".to_owned(),
+                "--store".to_owned(),
+                store.display().to_string(),
+                "--config".to_owned(),
+                config.display().to_string(),
+                "--no-bin".to_owned(),
+                "--extractor-command".to_owned(),
+                "/bin/sh".to_owned(),
+                "--json".to_owned(),
+            ],
+            &mut output,
+        )?;
+        let text = String::from_utf8(output)?;
+        assert!(text.contains("\"extractor_command\": \"/bin/sh\""));
+
+        let profile = std::fs::read_to_string(&config)?;
+        assert!(profile.contains("MNEME_EXTRACTOR_COMMAND=/bin/sh"));
+
+        let mut doctor_output = Vec::new();
+        run_cli_with_writer(
+            vec![
+                "mneme".to_owned(),
+                "doctor".to_owned(),
+                "--store".to_owned(),
+                store.display().to_string(),
+                "--config".to_owned(),
+                config.display().to_string(),
+                "--json".to_owned(),
+            ],
+            &mut doctor_output,
+        )?;
+        let doctor_text = String::from_utf8(doctor_output)?;
+        assert!(doctor_text.contains("\"ok\": true"));
+        assert!(doctor_text.contains("\"mneme_extractor_command\": \"/bin/sh\""));
+
+        let mut doctor_plain_output = Vec::new();
+        run_cli_with_writer(
+            vec![
+                "mneme".to_owned(),
+                "doctor".to_owned(),
+                "--store".to_owned(),
+                store.display().to_string(),
+                "--config".to_owned(),
+                config.display().to_string(),
+            ],
+            &mut doctor_plain_output,
+        )?;
+        let doctor_plain_text = String::from_utf8(doctor_plain_output)?;
+        assert!(doctor_plain_text.contains("profile extractor command: /bin/sh"));
 
         for path in [&store, &config] {
             let _ = std::fs::remove_file(path);
