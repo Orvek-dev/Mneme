@@ -26,8 +26,13 @@ normalized on the next successful save.
 the current store. When a current store exists, it is copied to
 `<store>.bak` before replacement.
 
-This is intended for a single local user. Concurrent writers are still outside
-the v1 contract.
+Save and repair operations first create `<store>.lock` with exclusive
+`create_new` semantics. If the lock file already exists, the write is not
+attempted and callers receive a `store_lock` conflict. The lock is removed when
+the write attempt finishes.
+
+This is still a local single-user store, but concurrent hook or CLI writers are
+explicitly rejected instead of racing the JSON file.
 
 ## Maintenance Commands
 

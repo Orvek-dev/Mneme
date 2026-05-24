@@ -15,7 +15,8 @@ use mneme_core::{
     ContextQuery, EngineSnapshot, EventInput, ExtractorError, JsonFileStore, MnemeConfig,
     MnemeEngine, MnemeExtractor, MnemeState, MnemeStore, RuleBasedExtractor, SessionBeginInput,
     SessionBeginReport, SessionEndInput, SessionEndReport, SessionError, StateValidationReport,
-    StoreFileStatus, StoreInspection, StoreRepairReport, DEFAULT_CONTEXT_MAX_ITEMS, PRODUCT_NAME,
+    StoreError, StoreErrorKind, StoreFileStatus, StoreInspection, StoreRepairReport,
+    DEFAULT_CONTEXT_MAX_ITEMS, PRODUCT_NAME,
 };
 use serde::Serialize;
 
@@ -57,6 +58,20 @@ impl CliError {
             message: format!("{action} {}: {source}", path.display()),
             exit_code: 1,
             kind: CliErrorKind::Store,
+            recoverable: true,
+            print_message: true,
+        }
+    }
+
+    fn store_error(action: &str, path: &Path, source: StoreError) -> Self {
+        let kind = match source.kind() {
+            StoreErrorKind::Store => CliErrorKind::Store,
+            StoreErrorKind::LockConflict => CliErrorKind::StoreLock,
+        };
+        Self {
+            message: format!("{action} {}: {source}", path.display()),
+            exit_code: 1,
+            kind,
             recoverable: true,
             print_message: true,
         }
@@ -130,6 +145,7 @@ enum CliErrorKind {
     InvalidCli,
     Io,
     Store,
+    StoreLock,
     Json,
     Extractor,
     Session,
@@ -142,6 +158,7 @@ impl CliErrorKind {
             Self::InvalidCli => "invalid_cli",
             Self::Io => "io",
             Self::Store => "store",
+            Self::StoreLock => "store_lock",
             Self::Json => "json",
             Self::Extractor => "extractor",
             Self::Session => "session",
@@ -920,7 +937,7 @@ fn run_export(raw_args: Vec<String>, writer: &mut impl Write) -> Result<(), CliE
     let store = JsonFileStore::new(store_path.clone());
     let state = store
         .load()
-        .map_err(|source| CliError::store("load store", &store_path, source))?
+        .map_err(|source| CliError::store_error("load store", &store_path, source))?
         .ok_or_else(|| CliError::store("load store", &store_path, "store does not exist"))?;
     let validation = validate_state(&state);
     if !validation.ok {
@@ -973,7 +990,7 @@ fn run_import(raw_args: Vec<String>, writer: &mut impl Write) -> Result<(), CliE
     let mut store = JsonFileStore::new(store_path.clone());
     store
         .save(&state)
-        .map_err(|source| CliError::store("save store", &store_path, source))?;
+        .map_err(|source| CliError::store_error("save store", &store_path, source))?;
     let report = ImportReport {
         command: "import".to_owned(),
         store: store_path.display().to_string(),
@@ -1005,7 +1022,7 @@ fn run_repair(raw_args: Vec<String>, writer: &mut impl Write) -> Result<(), CliE
     let store = JsonFileStore::new(store_path.clone());
     let repair = store
         .repair_from_backup()
-        .map_err(|source| CliError::store("repair store", &store_path, source))?;
+        .map_err(|source| CliError::store_error("repair store", &store_path, source))?;
     let report = RepairCliReport {
         store: store_path.display().to_string(),
         repair,
@@ -1503,14 +1520,14 @@ fn default_store_path() -> Result<PathBuf, CliError> {
 fn load_engine(path: &Path) -> Result<MnemeEngine, CliError> {
     let store = JsonFileStore::new(path.to_path_buf());
     MnemeEngine::from_store(MnemeConfig::default(), &store)
-        .map_err(|source| CliError::store("load store", path, source))
+        .map_err(|source| CliError::store_error("load store", path, source))
 }
 
 fn persist_engine(path: &Path, engine: &MnemeEngine) -> Result<(), CliError> {
     let mut store = JsonFileStore::new(path.to_path_buf());
     engine
         .persist(&mut store)
-        .map_err(|source| CliError::store("save store", path, source))
+        .map_err(|source| CliError::store_error("save store", path, source))
 }
 
 fn write_state_json(path: &Path, state: &MnemeState) -> Result<(), CliError> {
@@ -2392,6 +2409,42 @@ mod tests {
         assert!(text.contains("\"recoverable\": false"));
 
         let _ = std::fs::remove_file(&path);
+        Ok(())
+    }
+
+    #[test]
+    fn hook_lock_conflict_is_recoverable_store_lock_error() -> Result<(), Box<dyn std::error::Error>>
+    {
+        let path = temp_store_path("hook-lock");
+        let store = JsonFileStore::new(path.clone());
+        let _ = std::fs::remove_file(&path);
+        let _ = std::fs::remove_file(store.lock_path());
+        std::fs::write(store.lock_path(), "held by test\n")?;
+
+        let mut output = Vec::new();
+        let result = run_cli_with_writer(
+            vec![
+                "mneme".to_owned(),
+                "hook".to_owned(),
+                "begin".to_owned(),
+                "Draft lock plan".to_owned(),
+                "--store".to_owned(),
+                path.display().to_string(),
+            ],
+            &mut output,
+        );
+        let error = result.expect_err("locked store should fail");
+        assert_eq!(error.exit_code(), 1);
+        assert!(!error.should_print());
+
+        let text = String::from_utf8(output)?;
+        assert!(text.contains("\"ok\": false"));
+        assert!(text.contains("\"operation\": \"begin\""));
+        assert!(text.contains("\"kind\": \"store_lock\""));
+        assert!(text.contains("\"recoverable\": true"));
+
+        let _ = std::fs::remove_file(&path);
+        let _ = std::fs::remove_file(store.lock_path());
         Ok(())
     }
 

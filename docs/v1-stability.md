@@ -23,6 +23,8 @@ eval update land in the same PR.
 - JSON store schema version `2` includes agent session records.
 - JSON store saves are atomic and create `<store>.bak` before replacing an
   existing store.
+- JSON store save and repair writes require an exclusive `<store>.lock`; lock
+  conflicts are reported as `store_lock`.
 - Store validation detects unsupported schema versions, duplicate IDs, missing
   required fields, missing claim source events, invalid budgets, and empty
   audit targets.
@@ -66,7 +68,8 @@ eval update land in the same PR.
   normalization.
 - Extraction is deterministic by default; production LLM extraction is not
   implemented.
-- Storage is local JSON only and does not handle concurrent writers.
+- Storage is local JSON only; concurrent writers are rejected by the local lock
+  rather than coordinated.
 - Team/shared memory, UI, external API, vector search, and performance
   benchmarks are not part of v1 yet.
 

@@ -22,7 +22,8 @@ The v1 core supports:
 - serializable state snapshots;
 - an in-memory store and local JSON file store for restart tests;
 - schema metadata, generation tracking, and migration records;
-- atomic local JSON writes with `.bak` backup creation;
+- exclusive local JSON write locks with atomic writes and `.bak` backup
+  creation;
 - store validation, backup repair, import/export, and compaction;
 - agent session begin/end records with task-scoped context and post-task memory
   writes;
@@ -33,7 +34,7 @@ The v1 core supports:
 
 The v1 core does not yet provide:
 
-- multi-user or concurrent-write storage;
+- multi-user storage or coordinated concurrent writes;
 - concurrent sessions;
 - team/shared memory;
 - provider-specific production LLM extraction adapters;
