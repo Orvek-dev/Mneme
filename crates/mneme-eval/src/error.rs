@@ -11,7 +11,7 @@ pub struct EvalError {
 impl EvalError {
     pub(crate) fn invalid_cli(message: impl Into<String>) -> Self {
         Self {
-            message: message.into(),
+            message: format_invalid_cli_message(message.into()),
             exit_code: 2,
         }
     }
@@ -55,6 +55,14 @@ impl EvalError {
     /// Process exit code that matches the error category.
     pub fn exit_code(&self) -> i32 {
         self.exit_code
+    }
+}
+
+fn format_invalid_cli_message(message: String) -> String {
+    if message.contains("Run `mneme-eval help") {
+        message
+    } else {
+        format!("{message}\nRun `mneme-eval help` or `mneme-eval help <command>` for usage.")
     }
 }
 

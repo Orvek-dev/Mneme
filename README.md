@@ -44,7 +44,9 @@ Install Rust, then run:
 
 ```sh
 cargo run -p mneme-cli -- doctor
+cargo run -p mneme-cli -- help
 cargo run -p mneme-eval -- doctor
+cargo run -p mneme-eval -- help
 ```
 
 Try the local CLI with an isolated store:
@@ -144,6 +146,12 @@ cargo run -p mneme-eval -- acceptance --suite agent --target mneme-v1
 ```
 
 Use `--json` for machine-readable reports.
+Use `help` or `<command> --help` to inspect command-specific usage:
+
+```sh
+cargo run -p mneme-cli -- help begin
+cargo run -p mneme-eval -- baseline-gate --help
+```
 
 ## Development Checks
 

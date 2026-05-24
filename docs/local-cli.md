@@ -6,6 +6,14 @@ through the JSON file store.
 
 ## Commands
 
+Inspect available commands:
+
+```sh
+cargo run -p mneme-cli -- help
+cargo run -p mneme-cli -- help begin
+cargo run -p mneme-cli -- begin --help
+```
+
 ```sh
 cargo run -p mneme-cli -- doctor
 cargo run -p mneme-cli -- ingest "remember: user prefers local-first tools"

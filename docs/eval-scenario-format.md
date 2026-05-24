@@ -15,6 +15,14 @@ ignored by default.
 
 ## Commands
 
+Inspect available commands:
+
+```sh
+cargo run -p mneme-eval -- help
+cargo run -p mneme-eval -- run --help
+cargo run -p mneme-eval -- help baseline-gate
+```
+
 Validate a suite without running the fake runtime:
 
 ```sh

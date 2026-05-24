@@ -24,7 +24,7 @@ pub struct CliError {
 impl CliError {
     fn invalid_cli(message: impl Into<String>) -> Self {
         Self {
-            message: message.into(),
+            message: format_invalid_cli_message(message.into()),
             exit_code: 2,
         }
     }
@@ -102,30 +102,248 @@ fn run_cli_with_writer(
         print_doctor(writer)?;
         return Ok(());
     };
+    let raw_args = args.collect::<Vec<_>>();
     match command.as_str() {
-        "doctor" => print_doctor(writer),
-        "--version" | "version" => {
-            writeln!(writer, "{}", env!("CARGO_PKG_VERSION"))
-                .map_err(|source| CliError::io("write", Path::new("<stdout>"), source))
+        "help" => run_help(raw_args, writer),
+        "--help" | "-h" => print_help(None, writer),
+        "doctor" => {
+            if wants_command_help(&raw_args) {
+                print_help(Some("doctor"), writer)
+            } else {
+                print_doctor(writer)
+            }
         }
-        "ingest" => run_ingest(args.collect(), writer),
-        "remember" => run_remember(args.collect(), writer),
-        "correct" => run_correct(args.collect(), writer),
-        "forget" => run_forget(args.collect(), writer),
-        "context" => run_context(args.collect(), writer),
-        "snapshot" => run_snapshot(args.collect(), writer),
-        "begin" => run_begin(args.collect(), writer),
-        "end" => run_end(args.collect(), writer),
-        "validate" => run_validate_store(args.collect(), writer),
-        "export" => run_export(args.collect(), writer),
-        "import" => run_import(args.collect(), writer),
-        "compact" => run_compact(args.collect(), writer),
-        "repair" => run_repair(args.collect(), writer),
+        "--version" | "version" => {
+            if wants_command_help(&raw_args) {
+                print_help(Some("version"), writer)
+            } else {
+                writeln!(writer, "{}", env!("CARGO_PKG_VERSION"))
+                    .map_err(|source| CliError::io("write", Path::new("<stdout>"), source))
+            }
+        }
+        "ingest" => run_command_or_help("ingest", raw_args, writer, run_ingest),
+        "remember" => run_command_or_help("remember", raw_args, writer, run_remember),
+        "correct" => run_command_or_help("correct", raw_args, writer, run_correct),
+        "forget" => run_command_or_help("forget", raw_args, writer, run_forget),
+        "context" => run_command_or_help("context", raw_args, writer, run_context),
+        "snapshot" => run_command_or_help("snapshot", raw_args, writer, run_snapshot),
+        "begin" => run_command_or_help("begin", raw_args, writer, run_begin),
+        "end" => run_command_or_help("end", raw_args, writer, run_end),
+        "validate" => run_command_or_help("validate", raw_args, writer, run_validate_store),
+        "export" => run_command_or_help("export", raw_args, writer, run_export),
+        "import" => run_command_or_help("import", raw_args, writer, run_import),
+        "compact" => run_command_or_help("compact", raw_args, writer, run_compact),
+        "repair" => run_command_or_help("repair", raw_args, writer, run_repair),
         _ => Err(CliError::invalid_cli(format!(
             "unknown mneme command: {command}\navailable commands: doctor, version, ingest, remember, correct, forget, context, snapshot, begin, end, validate, export, import, compact, repair"
         ))),
     }
 }
+
+fn format_invalid_cli_message(message: String) -> String {
+    if message.contains("Run `mneme help") {
+        message
+    } else {
+        format!("{message}\nRun `mneme help` or `mneme help <command>` for usage.")
+    }
+}
+
+fn run_command_or_help<W, F>(
+    command: &'static str,
+    raw_args: Vec<String>,
+    writer: &mut W,
+    run: F,
+) -> Result<(), CliError>
+where
+    W: Write,
+    F: FnOnce(Vec<String>, &mut W) -> Result<(), CliError>,
+{
+    if wants_command_help(&raw_args) {
+        print_help(Some(command), writer)
+    } else {
+        run(raw_args, writer)
+    }
+}
+
+fn wants_command_help(raw_args: &[String]) -> bool {
+    raw_args.len() == 1 && matches!(raw_args[0].as_str(), "--help" | "-h")
+}
+
+fn run_help(raw_args: Vec<String>, writer: &mut impl Write) -> Result<(), CliError> {
+    match raw_args.as_slice() {
+        [] => print_help(None, writer),
+        [command] => print_help(Some(command), writer),
+        _ => Err(CliError::invalid_cli(
+            "usage: mneme help [command]\nexample: mneme help begin",
+        )),
+    }
+}
+
+fn print_help(command: Option<&str>, writer: &mut impl Write) -> Result<(), CliError> {
+    let text = match command {
+        None => MNEME_HELP,
+        Some(command) => command_help(command).ok_or_else(|| {
+            CliError::invalid_cli(format!(
+                "unknown mneme help topic: {command}\navailable help topics: doctor, version, ingest, remember, correct, forget, context, snapshot, begin, end, validate, export, import, compact, repair"
+            ))
+        })?,
+    };
+    writeln!(writer, "{text}")
+        .map_err(|source| CliError::io("write", Path::new("<stdout>"), source))
+}
+
+fn command_help(command: &str) -> Option<&'static str> {
+    match command {
+        "doctor" => Some(MNEME_DOCTOR_HELP),
+        "version" | "--version" => Some(MNEME_VERSION_HELP),
+        "ingest" => Some(MNEME_INGEST_HELP),
+        "remember" => Some(MNEME_REMEMBER_HELP),
+        "correct" => Some(MNEME_CORRECT_HELP),
+        "forget" => Some(MNEME_FORGET_HELP),
+        "context" => Some(MNEME_CONTEXT_HELP),
+        "snapshot" => Some(MNEME_SNAPSHOT_HELP),
+        "begin" => Some(MNEME_BEGIN_HELP),
+        "end" => Some(MNEME_END_HELP),
+        "validate" => Some(MNEME_VALIDATE_HELP),
+        "export" => Some(MNEME_EXPORT_HELP),
+        "import" => Some(MNEME_IMPORT_HELP),
+        "compact" => Some(MNEME_COMPACT_HELP),
+        "repair" => Some(MNEME_REPAIR_HELP),
+        _ => None,
+    }
+}
+
+const MNEME_HELP: &str = r#"Mneme local CLI
+
+Usage:
+  mneme <command> [options]
+  mneme help [command]
+
+Commands:
+  doctor      Show local CLI and default store information.
+  version     Print the CLI version.
+  ingest      Ingest one event, optionally through a command extractor.
+  remember    Save an explicit memory claim.
+  correct     Supersede one claim with another claim.
+  forget      Mark a claim as forgotten.
+  context     Build a cited context pack for a query.
+  snapshot    Print the current store snapshot.
+  begin       Start an agent task session and retrieve context.
+  end         Close an agent task session and optionally remember claims.
+  validate    Inspect the current store and backup.
+  export      Export the current store state to JSON.
+  import      Import a store state from JSON.
+  compact     Remove inactive claims and unreferenced events.
+  repair      Restore the current store from its backup when possible.
+
+Common options:
+  --store <path>  Use an isolated JSON store.
+  --json          Print JSON output.
+
+Examples:
+  mneme remember "user prefers local-first tools" --store /tmp/mneme.json
+  mneme context "local-first" --store /tmp/mneme.json --json
+  mneme help begin"#;
+
+const MNEME_DOCTOR_HELP: &str = r#"Usage: mneme doctor
+
+Show local CLI build stage and the default store path."#;
+
+const MNEME_VERSION_HELP: &str = r#"Usage: mneme version
+
+Print the CLI version."#;
+
+const MNEME_INGEST_HELP: &str = r#"Usage: mneme ingest <text> [--store <path>] [--speaker <id>] [--agent <id>] [--scope <scope>] [--trust <trust>] [--extractor rule|command] [--extractor-command <program>] [--extractor-arg <arg>]... [--json]
+
+Ingest one event. Use the default rule extractor unless --extractor command is
+selected.
+
+Example:
+  mneme ingest "the user prefers local-first tools" --store /tmp/mneme.json"#;
+
+const MNEME_REMEMBER_HELP: &str = r#"Usage: mneme remember <claim> [--store <path>] [--speaker <id>] [--agent <id>] [--scope <scope>] [--trust <trust>] [--json]
+
+Save an explicit durable memory claim.
+
+Example:
+  mneme remember "user prefers local-first tools" --store /tmp/mneme.json"#;
+
+const MNEME_CORRECT_HELP: &str = r#"Usage: mneme correct <old-claim> <new-claim> [--store <path>] [--speaker <id>] [--agent <id>] [--scope <scope>] [--trust <trust>] [--json]
+
+Supersede an existing claim with a replacement claim.
+
+Example:
+  mneme correct "user prefers local-first tools" "user prefers desktop IDE" --store /tmp/mneme.json"#;
+
+const MNEME_FORGET_HELP: &str = r#"Usage: mneme forget <claim> [--store <path>] [--speaker <id>] [--agent <id>] [--scope <scope>] [--trust <trust>] [--json]
+
+Mark matching active claims as forgotten.
+
+Example:
+  mneme forget "user prefers desktop IDE" --store /tmp/mneme.json"#;
+
+const MNEME_CONTEXT_HELP: &str = r#"Usage: mneme context <query> [--store <path>] [--json]
+
+Build a cited context pack for a query.
+
+Example:
+  mneme context "local-first" --store /tmp/mneme.json --json"#;
+
+const MNEME_SNAPSHOT_HELP: &str = r#"Usage: mneme snapshot [--store <path>] [--json]
+
+Print the current store snapshot.
+
+Example:
+  mneme snapshot --store /tmp/mneme.json --json"#;
+
+const MNEME_BEGIN_HELP: &str = r#"Usage: mneme begin <task> [--query <query>] [--agent <id>] [--store <path>] [--json]
+
+Start an agent task session and retrieve task-scoped context.
+
+Example:
+  mneme begin "Draft setup plan" --query "local-first" --agent codex --store /tmp/mneme.json --json"#;
+
+const MNEME_END_HELP: &str = r#"Usage: mneme end <session-id> [--summary <text>] [--remember <claim>]... [--agent <id>] [--store <path>] [--json]
+
+Close an agent task session and optionally write explicit memory claims.
+
+Example:
+  mneme end session-001 --summary "Prepared a concise setup plan" --remember "user prefers concise setup plans" --store /tmp/mneme.json --json"#;
+
+const MNEME_VALIDATE_HELP: &str = r#"Usage: mneme validate [--store <path>] [--json]
+
+Inspect the current store and backup.
+
+Example:
+  mneme validate --store /tmp/mneme.json"#;
+
+const MNEME_EXPORT_HELP: &str = r#"Usage: mneme export <path> [--store <path>] [--json]
+
+Export the current store state to JSON.
+
+Example:
+  mneme export /tmp/mneme-export.json --store /tmp/mneme.json"#;
+
+const MNEME_IMPORT_HELP: &str = r#"Usage: mneme import <path> [--store <path>] [--json]
+
+Import a validated store state from JSON.
+
+Example:
+  mneme import /tmp/mneme-export.json --store /tmp/mneme-imported.json"#;
+
+const MNEME_COMPACT_HELP: &str = r#"Usage: mneme compact [--store <path>] [--json]
+
+Remove inactive claims and unreferenced events.
+
+Example:
+  mneme compact --store /tmp/mneme.json"#;
+
+const MNEME_REPAIR_HELP: &str = r#"Usage: mneme repair [--store <path>] [--json]
+
+Restore the current store from its backup when possible.
+
+Example:
+  mneme repair --store /tmp/mneme.json"#;
 
 fn print_doctor(writer: &mut impl Write) -> Result<(), CliError> {
     writeln!(
@@ -1223,6 +1441,36 @@ fn write_json<T: Serialize>(writer: &mut impl Write, value: &T) -> Result<(), Cl
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn help_lists_commands_and_command_usage() -> Result<(), Box<dyn std::error::Error>> {
+        let mut output = Vec::new();
+        run_cli_with_writer(vec!["mneme".to_owned(), "help".to_owned()], &mut output)?;
+        let text = String::from_utf8(output)?;
+        assert!(text.contains("Usage:"));
+        assert!(text.contains("mneme help begin"));
+
+        let mut command_output = Vec::new();
+        run_cli_with_writer(
+            vec!["mneme".to_owned(), "begin".to_owned(), "--help".to_owned()],
+            &mut command_output,
+        )?;
+        let command_text = String::from_utf8(command_output)?;
+        assert!(command_text.contains("Usage: mneme begin <task>"));
+        assert!(command_text.contains("--query <query>"));
+        Ok(())
+    }
+
+    #[test]
+    fn invalid_command_points_to_help() {
+        let result = run_cli_with_writer(
+            vec!["mneme".to_owned(), "unknown".to_owned()],
+            &mut Vec::new(),
+        );
+        let error = result.expect_err("unknown command should fail");
+        assert_eq!(error.exit_code(), 2);
+        assert!(error.to_string().contains("mneme help"));
+    }
 
     #[test]
     fn remember_and_context_round_trip_with_json_store() -> Result<(), Box<dyn std::error::Error>> {
