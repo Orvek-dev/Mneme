@@ -50,6 +50,7 @@ pub(crate) struct Maintenance {
     pub(crate) compact_after_events: bool,
     pub(crate) repair_from_backup: bool,
     pub(crate) curation: Option<CurationMaintenance>,
+    pub(crate) restore_from_backup: bool,
 }
 
 #[derive(Debug, Clone, Default, Deserialize)]
@@ -179,6 +180,7 @@ pub(crate) struct StoreExpected {
     pub(crate) valid: bool,
     pub(crate) backup_required: bool,
     pub(crate) repair_performed: bool,
+    pub(crate) restored: bool,
     pub(crate) compacted: bool,
     pub(crate) imported: bool,
 }

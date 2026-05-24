@@ -149,3 +149,8 @@ Phase 24 shipped the **Guided Memory Curation MVP** in `v0.30.0`, adding
 `mneme curate`, dry-run cleanup plans, explicit duplicate cleanup and
 compaction, curation before/after eval checks, and quality-gate checks for
 redaction, backup creation, and post-curation quality health.
+
+Phase 25 shipped the **Curation Recovery & Audit Trail MVP** in `v0.31.0`,
+adding `mneme restore`, backup rollback readiness reports, curation rollback
+commands, restore eval checks, and quality-gate checks for rollback and
+swap-back recovery.

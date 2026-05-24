@@ -33,6 +33,8 @@ eval update land in the same PR.
 - Store repair can restore an invalid current store from a valid backup.
 - Store repair can normalize compatible legacy schema metadata while preserving
   the previous file as backup.
+- Store restore can explicitly roll back from a valid backup while preserving
+  the pre-restore current file as the new backup.
 - Compaction removes inactive claims while preserving active claim recall and
   citations.
 - Agent sessions can begin with scoped context and end with explicit remembered
@@ -55,7 +57,7 @@ eval update land in the same PR.
   `mneme-v1`.
 - `mneme-cli` supports `init`, `doctor`, `remember`, `correct`, `forget`,
   `claims`, `quality`, `curate`, `context`, `snapshot`, `begin`, `end`, `validate`,
-  `export`, `review`, `import`, `compact`, `repair`, `version`, and
+  `export`, `review`, `import`, `compact`, `repair`, `restore`, `version`, and
   command-specific help.
 - `mneme init` creates a valid local v1 store and an agent hook runtime profile
   without tracking `.mneme/` in git.
@@ -69,6 +71,8 @@ eval update land in the same PR.
   requires `--apply`, and non-active record removal requires `--compact`.
 - `mneme repair --check` reports repair or normalization readiness without
   mutating files.
+- `mneme restore --check` reports explicit backup rollback readiness without
+  mutating files; `mneme restore` swaps current and backup store roles.
 - `mneme hook doctor/begin/end` emit the `mneme.agent_hook.v1` JSON envelope for
   success and failure, with non-zero process exits on failure.
 - `scripts/mneme-agent-hook.sh` provides the repository-local wrapper for agent

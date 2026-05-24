@@ -89,6 +89,8 @@ IDs so follow-up commands can be run without exposing sensitive values.
 `mneme curate` is dry-run by default. `--apply` only forgets redundant duplicate
 active claims. `--compact` is an additional explicit flag because it removes
 non-active records, including blocked-secret, superseded, and forgotten claims.
+When applied curation changes the store, the report includes `mneme restore
+--check` and `mneme restore` follow-up commands for backup-backed rollback.
 
 ## Redaction
 

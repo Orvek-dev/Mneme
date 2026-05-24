@@ -92,6 +92,7 @@ maintenance:
   export_import_roundtrip: false
   compact_after_events: false
   repair_from_backup: false
+  restore_from_backup: false
   curation:
     apply: false
     compact: false
@@ -145,6 +146,7 @@ expected:
     valid: true
     backup_required: false
     repair_performed: false
+    restored: false
     compacted: false
     imported: false
   session:
@@ -219,6 +221,8 @@ Each expected claim requires:
   inactive claims before context and store checks.
 - `maintenance.repair_from_backup`: asks compatible targets to corrupt the
   current store after backup creation, repair from backup, and reload.
+- `maintenance.restore_from_backup`: asks compatible targets to create a valid
+  backup, run any requested curation, restore from backup, and reload.
 - `maintenance.curation.apply`: asks compatible targets to run guided memory
   curation after events and before final checks.
 - `maintenance.curation.compact`: asks curation to compact non-active records
@@ -260,6 +264,7 @@ Each expected claim requires:
 - `store.valid`: requires the inspected current store to be valid.
 - `store.backup_required`: requires a backup file to exist.
 - `store.repair_performed`: requires repair from backup to have run.
+- `store.restored`: requires explicit restore from backup to have run.
 - `store.compacted`: requires compaction to have run.
 - `store.imported`: requires an export/import round trip to have run.
 - `session.status`: expected session status.
