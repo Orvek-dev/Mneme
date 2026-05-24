@@ -42,6 +42,7 @@ Review stored claims before changing them:
 
 ```sh
 cargo run -p mneme-cli -- claims --status active --store /tmp/mneme.json --json
+cargo run -p mneme-cli -- quality --store /tmp/mneme.json --json
 cargo run -p mneme-cli -- forget --claim-id claim-001 --store /tmp/mneme.json
 ```
 
@@ -52,8 +53,11 @@ cargo run -p mneme-cli -- review /tmp/mneme-review.md --store /tmp/mneme.json
 cargo run -p mneme-cli -- review /tmp/mneme-review.json --format json --store /tmp/mneme.json
 ```
 
-Review artifacts redact sensitive claim text by default. Use
-`--include-sensitive` only for local private inspection.
+`mneme quality` reports duplicate active claims, blocked-secret claims,
+inactive lifecycle history, and suggested follow-up commands without mutating
+the store. Review artifacts include the same quality section and redact
+sensitive claim text by default. Use `--include-sensitive` only for local
+private inspection.
 
 Validate the current store:
 

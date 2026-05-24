@@ -27,6 +27,12 @@ cargo run -p mneme-cli -- review /tmp/mneme-review.md \
   --json
 ```
 
+Inspect the same review queue without writing an artifact:
+
+```sh
+cargo run -p mneme-cli -- quality --store /tmp/mneme.json --json
+```
+
 Export raw sensitive text only for local private inspection:
 
 ```sh
@@ -44,6 +50,9 @@ Artifacts include:
   count;
 - claim lifecycle counts for `active`, `blocked_secret`, `superseded`, and
   `forgotten`;
+- memory quality findings for duplicate active claims, blocked-secret claims,
+  and inactive lifecycle history;
+- review queue items with claim IDs and suggested follow-up commands;
 - scope counts across all stored claims;
 - claim IDs, status, scope, text, and source event IDs;
 - session IDs, status, task, context query, context claim IDs, and memory event
@@ -53,6 +62,21 @@ Artifacts include:
 
 Markdown artifacts are intended for direct reading and release review notes.
 JSON artifacts carry the same fields for automation.
+
+## Quality Findings
+
+`mneme quality` and `mneme review` share the same read-only quality model:
+
+- `duplicate_active`: multiple active claims have the same normalized text and
+  scope. Review the IDs and forget redundant active claims by ID.
+- `blocked_secret`: secret-like claims are retained but excluded from active
+  context. Confirm they should stay blocked, or forget them by ID.
+- `inactive_history`: superseded or forgotten claims remain for audit. Export a
+  review artifact, then run `mneme compact` when that history is no longer
+  needed.
+
+Quality reports redact blocked-secret text by default and include exact claim
+IDs so follow-up commands can be run without exposing sensitive values.
 
 ## Redaction
 

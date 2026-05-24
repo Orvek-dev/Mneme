@@ -4,6 +4,22 @@ This project follows the spirit of Keep a Changelog.
 
 ## Unreleased
 
+## [0.29.0] - 2026-05-24
+
+### Added
+
+- Added `mneme quality` for read-only memory quality reports with duplicate
+  active claim, blocked-secret, inactive-history, review queue, and suggested
+  command output.
+- Added memory quality sections to Markdown and JSON review artifacts.
+- Added safe quality redaction so blocked-secret values are not exposed in
+  default quality reports or review artifacts.
+- Added eval harness `quality` expectations and a core memory-quality review
+  loop scenario.
+- Added release quality-gate checks for `mneme quality` and safe quality review
+  artifacts.
+- Added the Phase 23 memory quality and review loop feature spec.
+
 ## [0.28.0] - 2026-05-24
 
 ### Added

@@ -1,8 +1,9 @@
 use crate::error::EvalError;
 use crate::scenario::{AgentFlow, ContextPackExpected, Scenario};
 use crate::target::{
-    ActualState, AuditEvent, Claim, ContextItem, ContextPack, EvalTarget, EvalTargetMetadata,
-    FaultMode, OmittedItem, RecordedEvent, SessionActual, StoreActual, TargetRunOptions,
+    build_quality_actual, ActualState, AuditEvent, Claim, ContextItem, ContextPack, EvalTarget,
+    EvalTargetMetadata, FaultMode, OmittedItem, RecordedEvent, SessionActual, StoreActual,
+    TargetRunOptions,
 };
 use mneme_core::DEFAULT_CONTEXT_MAX_ITEMS;
 
@@ -120,6 +121,9 @@ fn run_fake_runtime(scenario: &Scenario, options: TargetRunOptions) -> ActualSta
             generation: Some(1),
             error_count: 0,
         });
+    }
+    if scenario.expected.quality.is_some() {
+        actual.quality = Some(build_quality_actual(&actual.claims));
     }
 
     actual

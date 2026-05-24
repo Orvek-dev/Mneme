@@ -45,9 +45,10 @@ CLI-bound integrations can use `mneme claims`, `mneme forget --claim-id`, and
 `mneme correct --claim-id` when they need an inspectable user-control surface
 without linking directly to Rust APIs.
 
-CLI-bound review workflows can use `mneme review <path>` to write a Markdown or
-JSON artifact without mutating the store. Review artifacts redact sensitive
-claim text by default; raw export requires `--include-sensitive`.
+CLI-bound review workflows can use `mneme quality` for read-only review queues
+and `mneme review <path>` to write a Markdown or JSON artifact without mutating
+the store. Quality and review artifacts redact sensitive claim text by default;
+raw review export requires `--include-sensitive`.
 
 CLI-bound first-run workflows can use `mneme init` to create the default local
 store and `.mneme/mneme-agent-hook.env` profile before wiring an agent runtime.

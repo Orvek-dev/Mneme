@@ -27,6 +27,7 @@ mneme remember "user prefers project launch reviews" --scope project-alpha
 mneme correct "user prefers local-first tools" "user prefers desktop IDE"
 mneme forget "user prefers desktop IDE"
 mneme claims --status active --json
+mneme quality --json
 mneme review /tmp/mneme-review.md
 mneme context "desktop IDE"
 mneme context "project launch" --scope project-alpha --max-items 3
@@ -104,8 +105,16 @@ cargo run -p mneme-cli -- review /tmp/mneme-review.md --store /tmp/mneme.json
 cargo run -p mneme-cli -- review /tmp/mneme-review.json --format json --store /tmp/mneme.json --json
 ```
 
-Markdown artifacts are optimized for human review. JSON artifacts carry the
-same counts and summaries for scripts. Use `--include-sensitive` only for
+Use `quality` when the store needs a review queue before edits:
+
+```sh
+cargo run -p mneme-cli -- quality --store /tmp/mneme.json --json
+```
+
+The quality report is read-only. It highlights duplicate active claims,
+blocked-secret claims, inactive lifecycle history, and suggested
+`claims`/`forget --claim-id`/`compact` commands. Markdown and JSON review
+artifacts include the same quality findings. Use `--include-sensitive` only for
 local private inspection when raw blocked-secret claim text is required.
 
 ## Store Maintenance

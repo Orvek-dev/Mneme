@@ -1,8 +1,8 @@
 use crate::error::EvalError;
 use crate::report::{CheckReport, ScenarioReport};
 use crate::scenario::{
-    AuditExpected, ClaimExpected, ContextPackExpected, Expected, Scenario, SessionExpected,
-    StoreExpected,
+    AuditExpected, ClaimExpected, ContextPackExpected, Expected, QualityExpected, Scenario,
+    SessionExpected, StoreExpected,
 };
 use crate::target::{ActualState, ContextPack, EvalTarget, TargetRunOptions};
 
@@ -67,6 +67,9 @@ fn check_expected(scenario: &Scenario, actual: &ActualState) -> Vec<CheckReport>
     }
     if let Some(expected) = &scenario.expected.session {
         checks.extend(check_session(expected, actual));
+    }
+    if let Some(expected) = &scenario.expected.quality {
+        checks.extend(check_quality(expected, actual));
     }
     checks
 }
@@ -578,6 +581,86 @@ fn check_store_bool(name: &str, expected: bool, actual: bool) -> CheckReport {
     }
 }
 
+fn check_quality(expected: &QualityExpected, actual: &ActualState) -> Vec<CheckReport> {
+    let mut checks = Vec::new();
+    let Some(quality) = &actual.quality else {
+        return vec![CheckReport::fail(
+            "quality.present",
+            "present",
+            "missing",
+            "actual.quality",
+        )];
+    };
+    if let Some(count) = expected.duplicate_active_groups {
+        checks.push(check_quality_count(
+            "quality.duplicate_active_groups",
+            count,
+            quality.duplicate_active_groups,
+        ));
+    }
+    if let Some(count) = expected.duplicate_active_claims {
+        checks.push(check_quality_count(
+            "quality.duplicate_active_claims",
+            count,
+            quality.duplicate_active_claims,
+        ));
+    }
+    if let Some(count) = expected.blocked_secret_count {
+        checks.push(check_quality_count(
+            "quality.blocked_secret_count",
+            count,
+            quality.blocked_secret_count,
+        ));
+    }
+    if let Some(count) = expected.inactive_claim_count {
+        checks.push(check_quality_count(
+            "quality.inactive_claim_count",
+            count,
+            quality.inactive_claim_count,
+        ));
+    }
+    if let Some(count) = expected.review_item_count {
+        checks.push(check_quality_count(
+            "quality.review_item_count",
+            count,
+            quality.review_item_count,
+        ));
+    }
+    for kind in &expected.finding_kinds {
+        if quality.finding_kinds.contains(kind) {
+            checks.push(CheckReport::pass(
+                format!("quality.finding_kind.{kind}"),
+                "present",
+                "present",
+            ));
+        } else {
+            checks.push(CheckReport::fail(
+                format!("quality.finding_kind.{kind}"),
+                "present",
+                "missing",
+                format!(
+                    "actual.quality.finding_kinds={}",
+                    quality.finding_kinds.join(",")
+                ),
+            ));
+        }
+    }
+    checks
+}
+
+fn check_quality_count(name: &str, expected: usize, actual: usize) -> CheckReport {
+    if expected == actual {
+        CheckReport::pass(name, expected.to_string(), actual.to_string())
+    } else {
+        CheckReport::fail(
+            name,
+            expected.to_string(),
+            actual.to_string(),
+            "actual.quality",
+        )
+    }
+}
+
 fn option_matches(expected: Option<&String>, actual: &str) -> bool {
     match expected {
         Some(expected) => expected == actual,
@@ -644,6 +727,7 @@ mod tests {
                 }),
                 store: None,
                 session: None,
+                quality: None,
             },
         };
         let target = FakeEvalTarget;
@@ -688,6 +772,7 @@ mod tests {
                 audit: None,
                 store: None,
                 session: None,
+                quality: None,
             },
         };
         let target = FakeEvalTarget;

@@ -25,8 +25,10 @@ Mneme is pre-1.0. The useful surface today is local development and evaluation:
 - secret-like data is blocked from active context;
 - corrections and forgets are auditable lifecycle transitions;
 - stored claims can be reviewed and changed by stable claim ID;
+- stored memory quality can be inspected as duplicate, blocked-secret, and
+  inactive-history review queues;
 - stored memory can be exported as Markdown or JSON review artifacts with
-  sensitive claim text redacted by default;
+  quality findings and sensitive claim text redacted by default;
 - local JSON stores include schema metadata, write locks, atomic writes,
   backups, repair readiness checks, schema normalization, import/export, and
   compaction;
@@ -84,6 +86,7 @@ mneme remember "user prefers project launch reviews" --scope project-alpha --sto
 mneme context "project launch" --scope project-alpha --max-items 3 --store "$STORE" --json
 mneme correct "user prefers local-first tools" "user prefers desktop IDE" --store "$STORE"
 mneme forget "user prefers desktop IDE" --store "$STORE"
+mneme quality --store "$STORE" --json
 mneme review /tmp/mneme-review.md --store "$STORE"
 mneme snapshot --store "$STORE" --json
 mneme validate --store "$STORE"

@@ -152,6 +152,13 @@ expected:
       - local-first tools
     memory_event_count: 1
     summary_contains: concise setup
+  quality:
+    duplicate_active_groups: 0
+    duplicate_active_claims: 0
+    blocked_secret_count: 0
+    inactive_claim_count: 0
+    review_item_count: 0
+    finding_kinds: []
 ```
 
 ## Required Fields
@@ -244,6 +251,16 @@ Each expected claim requires:
 - `session.memory_event_count`: expected remembered event count written by the
   session end.
 - `session.summary_contains`: string that must appear in the session summary.
+- `quality.duplicate_active_groups`: expected number of active duplicate
+  claim groups by text and scope.
+- `quality.duplicate_active_claims`: expected number of active claims that
+  belong to duplicate groups.
+- `quality.blocked_secret_count`: expected blocked-secret claim count.
+- `quality.inactive_claim_count`: expected superseded plus forgotten claim
+  count.
+- `quality.review_item_count`: expected number of memory review queue items.
+- `quality.finding_kinds`: quality finding kinds that must be present, such as
+  `duplicate_active`, `blocked_secret`, or `inactive_history`.
 
 Unknown fields are rejected. This keeps public fixtures strict enough for long
 term compatibility.

@@ -38,7 +38,8 @@ eval update land in the same PR.
 - Agent sessions can begin with scoped context and end with explicit remembered
   claims.
 - Review artifacts summarize store metadata, claim status counts, scope counts,
-  source event IDs, and session summaries without mutating store state.
+  memory quality findings, source event IDs, and session summaries without
+  mutating store state.
 - Review artifacts redact blocked-secret and obvious secret-like claim text by
   default; raw sensitive review export requires `--include-sensitive`.
 - Extraction adapters propose claims; the engine owns IDs, provenance, safety,
@@ -53,14 +54,17 @@ eval update land in the same PR.
 - The `core`, `runtime`, and `agent` suites must pass for `fake` and
   `mneme-v1`.
 - `mneme-cli` supports `init`, `doctor`, `remember`, `correct`, `forget`,
-  `claims`, `context`, `snapshot`, `begin`, `end`, `validate`, `export`,
-  `review`, `import`, `compact`, `repair`, `version`, and command-specific
-  help.
+  `claims`, `quality`, `context`, `snapshot`, `begin`, `end`, `validate`,
+  `export`, `review`, `import`, `compact`, `repair`, `version`, and
+  command-specific help.
 - `mneme init` creates a valid local v1 store and an agent hook runtime profile
   without tracking `.mneme/` in git.
 - `mneme doctor` reports local workspace health for the store, backup, and
   agent hook profile without mutating files; `--json` exposes the same report
   for scripts.
+- `mneme quality` reports duplicate active claims, blocked-secret claims,
+  inactive lifecycle history, review queue items, and suggested next commands
+  without mutating files.
 - `mneme repair --check` reports repair or normalization readiness without
   mutating files.
 - `mneme hook doctor/begin/end` emit the `mneme.agent_hook.v1` JSON envelope for
