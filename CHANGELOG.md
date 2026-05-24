@@ -4,6 +4,17 @@ This project follows the spirit of Keep a Changelog.
 
 ## Unreleased
 
+## [0.23.0] - 2026-05-24
+
+### Added
+
+- Added `mneme review` for exporting Markdown or JSON memory review artifacts.
+- Added review artifacts with claim lifecycle counts, scope counts, source
+  event citations, session summaries, and store metadata.
+- Added CLI tests and quality-gate smoke checks for Markdown and JSON review
+  artifact export.
+- Added public docs and the Phase 17 memory review artifact feature spec.
+
 ## [0.22.0] - 2026-05-24
 
 ### Added

@@ -112,3 +112,7 @@ quality-gate checks for wrapper doctor/begin/end installation smoke.
 Phase 16 shipped the **Runtime Config & Install Profile MVP** in `v0.22.0`,
 adding wrapper runtime profile loading, a public-safe profile example, and
 quality-gate checks for config-driven wrapper doctor/begin/end flows.
+
+Phase 17 shipped the **Memory Review Artifact MVP** in `v0.23.0`, adding
+`mneme review`, Markdown and JSON review artifact export, and quality-gate
+checks for persisted human-review output.

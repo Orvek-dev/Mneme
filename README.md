@@ -24,6 +24,7 @@ Mneme is pre-1.0. The useful surface today is local development and evaluation:
 - secret-like data is blocked from active context;
 - corrections and forgets are auditable lifecycle transitions;
 - stored claims can be reviewed and changed by stable claim ID;
+- stored memory can be exported as Markdown or JSON review artifacts;
 - local JSON stores include schema metadata, write locks, atomic writes,
   backups, repair, import/export, and compaction;
 - agents can open and close task sessions with scoped context and post-task
@@ -72,6 +73,7 @@ cargo run -p mneme-cli -- remember "user prefers project launch reviews" --scope
 cargo run -p mneme-cli -- context "project launch" --scope project-alpha --max-items 3 --store "$STORE" --json
 cargo run -p mneme-cli -- correct "user prefers local-first tools" "user prefers desktop IDE" --store "$STORE"
 cargo run -p mneme-cli -- forget "user prefers desktop IDE" --store "$STORE"
+cargo run -p mneme-cli -- review /tmp/mneme-review.md --store "$STORE"
 cargo run -p mneme-cli -- snapshot --store "$STORE" --json
 cargo run -p mneme-cli -- validate --store "$STORE"
 cargo run -p mneme-cli -- compact --store "$STORE"
@@ -230,6 +232,7 @@ spec/               feature specs and verification maps
 - [API Contract](docs/api-contract.md)
 - [Distribution Policy](docs/distribution-policy.md)
 - [Personal Runtime](docs/personal-runtime.md)
+- [Memory Review Artifacts](docs/memory-review-artifacts.md)
 - [Agent Integration](docs/agent-integration.md)
 - [Agent Hook Contract](docs/agent-hook-contract.md)
 - [Agent Runtime Config](docs/agent-runtime-config.md)
