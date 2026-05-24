@@ -38,6 +38,7 @@ Run a suite:
 ```sh
 cargo run -p mneme-eval -- run --suite core --target fake
 cargo run -p mneme-eval -- run --suite core --target mneme-v1
+cargo run -p mneme-eval -- run --suite runtime --target mneme-v1
 cargo run -p mneme-eval -- run --suite model --target mneme-v1-command --extractor-command evals/fixtures/command-extractor.sh
 ```
 
@@ -46,6 +47,7 @@ Run the full harness acceptance gate:
 ```sh
 cargo run -p mneme-eval -- acceptance --suite core --target fake
 cargo run -p mneme-eval -- acceptance --suite core --target mneme-v1
+cargo run -p mneme-eval -- acceptance --suite runtime --target mneme-v1
 cargo run -p mneme-eval -- acceptance --suite model --target mneme-v1-command --extractor-command evals/fixtures/command-extractor.sh
 ```
 
@@ -70,6 +72,10 @@ budget:
   daily_cloud_tokens: 100
 persistence:
   restart_after_event: 1
+maintenance:
+  export_import_roundtrip: false
+  compact_after_events: false
+  repair_from_backup: false
 events:
   - speaker_id: user
     actor_agent_id: codex
@@ -96,6 +102,13 @@ expected:
   audit:
     read_write_events_required: true
     claim_update_required: false
+  store:
+    schema_version: 1
+    valid: true
+    backup_required: false
+    repair_performed: false
+    compacted: false
+    imported: false
 ```
 
 ## Required Fields
@@ -133,6 +146,12 @@ Each expected claim requires:
   and reload after the 1-based event index. It must be within the event count.
   Targets without real persistence may treat this as an in-process checkpoint,
   but product targets should use their storage adapter.
+- `maintenance.export_import_roundtrip`: asks compatible targets to persist,
+  export, import, and reload state before final checks.
+- `maintenance.compact_after_events`: asks compatible targets to compact
+  inactive claims before context and store checks.
+- `maintenance.repair_from_backup`: asks compatible targets to corrupt the
+  current store after backup creation, repair from backup, and reload.
 - `events[].actor_agent_id`: agent acting on behalf of the speaker.
 - `events[].scope`: memory scope. Defaults to `private`.
 - `events[].trust_level`: input trust level. Defaults to `trusted_user`.
@@ -149,6 +168,12 @@ Each expected claim requires:
 - `audit.read_write_events_required`: requires read/write audit evidence.
 - `audit.claim_update_required`: requires `claim.update` audit evidence for
   correction or forget scenarios.
+- `store.schema_version`: expected persisted state schema version.
+- `store.valid`: requires the inspected current store to be valid.
+- `store.backup_required`: requires a backup file to exist.
+- `store.repair_performed`: requires repair from backup to have run.
+- `store.compacted`: requires compaction to have run.
+- `store.imported`: requires an export/import round trip to have run.
 
 Unknown fields are rejected. This keeps public fixtures strict enough for long
 term compatibility.

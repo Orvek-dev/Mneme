@@ -5,17 +5,24 @@
 //! can drive it through a target adapter, while this crate stays independent of
 //! eval fixture types.
 
+use std::collections::BTreeSet;
 use std::fmt;
-use std::fs;
+use std::fs::{self, File};
 use std::io::{self, Write};
 use std::path::{Path, PathBuf};
 use std::process::{Command, Stdio};
+use std::time::{SystemTime, UNIX_EPOCH};
 
 use serde::{Deserialize, Serialize};
+
+/// Current persisted state schema version for v1 local stores.
+pub const MNEME_STATE_SCHEMA_VERSION: u32 = 1;
 
 /// Personal-memory engine for Mneme v1.
 #[derive(Debug, Clone)]
 pub struct MnemeEngine {
+    schema_version: u32,
+    metadata: StateMetadata,
     budget: BudgetState,
     events: Vec<EventRecord>,
     claims: Vec<ClaimRecord>,
@@ -27,6 +34,8 @@ impl MnemeEngine {
     #[must_use]
     pub fn new(config: MnemeConfig) -> Self {
         Self {
+            schema_version: MNEME_STATE_SCHEMA_VERSION,
+            metadata: StateMetadata::new(),
             budget: BudgetState {
                 daily_cloud_tokens: config.daily_cloud_tokens,
                 spent_tokens: 0,
@@ -42,6 +51,8 @@ impl MnemeEngine {
     #[must_use]
     pub fn from_state(state: MnemeState) -> Self {
         Self {
+            schema_version: state.schema_version,
+            metadata: state.metadata,
             budget: state.budget,
             events: state.events,
             claims: state.claims,
@@ -229,6 +240,8 @@ impl MnemeEngine {
     #[must_use]
     pub fn state(&self) -> MnemeState {
         MnemeState {
+            schema_version: self.schema_version,
+            metadata: self.metadata.clone(),
             budget: self.budget.clone(),
             events: self.events.clone(),
             claims: self.claims.clone(),
@@ -245,11 +258,50 @@ impl MnemeEngine {
     #[must_use]
     pub fn snapshot(&self) -> EngineSnapshot {
         EngineSnapshot {
+            schema_version: self.schema_version,
+            metadata: self.metadata.clone(),
             events: self.events.clone(),
             claims: self.claims.clone(),
             budget: self.budget.clone(),
             audit: self.audit.clone(),
         }
+    }
+
+    /// Removes inactive memory records while preserving active recall.
+    pub fn compact(&mut self) -> CompactionReport {
+        let events_before = self.events.len();
+        let claims_before = self.claims.len();
+
+        self.claims
+            .retain(|claim| claim.status == ClaimStatus::Active);
+
+        let kept_event_ids = self
+            .claims
+            .iter()
+            .flat_map(|claim| claim.source_event_ids.iter().cloned())
+            .collect::<BTreeSet<_>>();
+        self.events
+            .retain(|event| kept_event_ids.contains(event.id.as_str()));
+
+        let report = CompactionReport {
+            events_before,
+            events_after: self.events.len(),
+            claims_before,
+            claims_after: self.claims.len(),
+            removed_events: events_before.saturating_sub(self.events.len()),
+            removed_claims: claims_before.saturating_sub(self.claims.len()),
+        };
+        self.audit.push(AuditRecord {
+            kind: AuditKind::StateCompact,
+            target_id: format!(
+                "events:{}->{} claims:{}->{}",
+                report.events_before,
+                report.events_after,
+                report.claims_before,
+                report.claims_after
+            ),
+        });
+        report
     }
 }
 
@@ -504,6 +556,12 @@ impl MnemeExtractor for RuleBasedExtractor {
 /// Serializable v1 engine state used by persistence adapters.
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct MnemeState {
+    /// Persisted state schema version.
+    #[serde(default)]
+    pub schema_version: u32,
+    /// Store metadata used for migrations and local maintenance.
+    #[serde(default)]
+    pub metadata: StateMetadata,
     /// Budget state at persistence time.
     pub budget: BudgetState,
     /// Events appended before persistence.
@@ -512,6 +570,96 @@ pub struct MnemeState {
     pub claims: Vec<ClaimRecord>,
     /// Audit records captured before persistence.
     pub audit: Vec<AuditRecord>,
+}
+
+impl MnemeState {
+    fn prepared_for_save(&self) -> Self {
+        let mut state = self.clone();
+        let now = unix_timestamp();
+        let previous_schema_version = state.schema_version;
+        if previous_schema_version != MNEME_STATE_SCHEMA_VERSION {
+            state.metadata.migration_history.push(MigrationRecord {
+                from_schema_version: previous_schema_version,
+                to_schema_version: MNEME_STATE_SCHEMA_VERSION,
+                at_unix_seconds: now,
+            });
+        }
+        state.schema_version = MNEME_STATE_SCHEMA_VERSION;
+        state.metadata.prepare_for_save(now);
+        state
+    }
+}
+
+/// Store metadata persisted alongside v1 memory state.
+#[derive(Debug, Clone, Default, Serialize, Deserialize)]
+#[serde(default)]
+pub struct StateMetadata {
+    /// Stable public-safe local store identifier.
+    pub store_id: String,
+    /// Monotonic generation increased on each successful save.
+    pub generation: u64,
+    /// Unix timestamp for first normalized save.
+    pub created_at_unix_seconds: u64,
+    /// Unix timestamp for latest normalized save.
+    pub updated_at_unix_seconds: u64,
+    /// Mneme crate version that last wrote the store.
+    pub engine_version: String,
+    /// Schema migrations applied while normalizing this store.
+    pub migration_history: Vec<MigrationRecord>,
+}
+
+impl StateMetadata {
+    fn new() -> Self {
+        let now = unix_timestamp();
+        Self {
+            store_id: format!("store-{now}"),
+            generation: 0,
+            created_at_unix_seconds: now,
+            updated_at_unix_seconds: now,
+            engine_version: env!("CARGO_PKG_VERSION").to_owned(),
+            migration_history: Vec::new(),
+        }
+    }
+
+    fn prepare_for_save(&mut self, now: u64) {
+        if self.store_id.trim().is_empty() {
+            self.store_id = format!("store-{now}");
+        }
+        if self.created_at_unix_seconds == 0 {
+            self.created_at_unix_seconds = now;
+        }
+        self.updated_at_unix_seconds = now;
+        self.generation = self.generation.saturating_add(1);
+        self.engine_version = env!("CARGO_PKG_VERSION").to_owned();
+    }
+}
+
+/// Migration record for state schema normalization.
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct MigrationRecord {
+    /// Schema version observed before normalization.
+    pub from_schema_version: u32,
+    /// Schema version written after normalization.
+    pub to_schema_version: u32,
+    /// Unix timestamp when the migration record was added.
+    pub at_unix_seconds: u64,
+}
+
+/// Result returned after in-memory compaction.
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct CompactionReport {
+    /// Event count before compaction.
+    pub events_before: usize,
+    /// Event count after compaction.
+    pub events_after: usize,
+    /// Claim count before compaction.
+    pub claims_before: usize,
+    /// Claim count after compaction.
+    pub claims_after: usize,
+    /// Number of events removed.
+    pub removed_events: usize,
+    /// Number of claims removed.
+    pub removed_claims: usize,
 }
 
 /// Storage port for loading and saving v1 personal-memory state.
@@ -572,34 +720,239 @@ impl JsonFileStore {
     pub fn path(&self) -> &Path {
         &self.path
     }
+
+    /// Returns the backup path used before replacing the current store.
+    #[must_use]
+    pub fn backup_path(&self) -> PathBuf {
+        backup_path_for(&self.path)
+    }
+
+    /// Inspects current and backup store files without mutating either file.
+    #[must_use]
+    pub fn inspect(&self) -> StoreInspection {
+        let current = inspect_state_file(&self.path);
+        let backup_path = self.backup_path();
+        let backup = inspect_state_file(&backup_path);
+        let repair_available =
+            current.status != StoreFileStatus::Valid && backup.status == StoreFileStatus::Valid;
+        StoreInspection {
+            path: self.path.display().to_string(),
+            backup_path: backup_path.display().to_string(),
+            current,
+            backup,
+            repair_available,
+        }
+    }
+
+    /// Restores the current store from the backup when the current file is not valid.
+    pub fn repair_from_backup(&self) -> Result<StoreRepairReport, StoreError> {
+        let before = self.inspect();
+        if before.current.status == StoreFileStatus::Valid {
+            return Ok(StoreRepairReport {
+                repaired: false,
+                action: "current_valid".to_owned(),
+                before,
+                after: self.inspect(),
+            });
+        }
+        if before.backup.status != StoreFileStatus::Valid {
+            return Ok(StoreRepairReport {
+                repaired: false,
+                action: "backup_unavailable".to_owned(),
+                before,
+                after: self.inspect(),
+            });
+        }
+
+        let state = read_state_file(&self.backup_path())?
+            .ok_or_else(|| StoreError::new("backup disappeared before repair"))?;
+        write_state_atomic(&self.path, &state.prepared_for_save())?;
+        Ok(StoreRepairReport {
+            repaired: true,
+            action: "restored_from_backup".to_owned(),
+            before,
+            after: self.inspect(),
+        })
+    }
 }
 
 impl MnemeStore for JsonFileStore {
     fn load(&self) -> Result<Option<MnemeState>, StoreError> {
-        match fs::read_to_string(&self.path) {
-            Ok(text) => serde_json::from_str(&text)
-                .map(Some)
-                .map_err(|source| StoreError::new(format!("failed to parse state: {source}"))),
-            Err(source) if source.kind() == io::ErrorKind::NotFound => Ok(None),
-            Err(source) => Err(StoreError::new(format!("failed to read state: {source}"))),
-        }
+        read_state_file(&self.path)
     }
 
     fn save(&mut self, state: &MnemeState) -> Result<(), StoreError> {
-        if let Some(parent) = self
-            .path
-            .parent()
-            .filter(|path| !path.as_os_str().is_empty())
-        {
-            fs::create_dir_all(parent).map_err(|source| {
-                StoreError::new(format!("failed to create store dir: {source}"))
+        let prepared = state.prepared_for_save();
+        if self.path.exists() {
+            let backup_path = self.backup_path();
+            if let Some(parent) = backup_path
+                .parent()
+                .filter(|path| !path.as_os_str().is_empty())
+            {
+                fs::create_dir_all(parent).map_err(|source| {
+                    StoreError::new(format!("failed to create backup dir: {source}"))
+                })?;
+            }
+            fs::copy(&self.path, &backup_path).map_err(|source| {
+                StoreError::new(format!("failed to write backup state: {source}"))
             })?;
         }
-        let text = serde_json::to_string_pretty(state)
-            .map_err(|source| StoreError::new(format!("failed to encode state: {source}")))?;
-        fs::write(&self.path, format!("{text}\n"))
-            .map_err(|source| StoreError::new(format!("failed to write state: {source}")))
+        write_state_atomic(&self.path, &prepared)
     }
+}
+
+fn read_state_file(path: &Path) -> Result<Option<MnemeState>, StoreError> {
+    match fs::read_to_string(path) {
+        Ok(text) => serde_json::from_str(&text)
+            .map(Some)
+            .map_err(|source| StoreError::new(format!("failed to parse state: {source}"))),
+        Err(source) if source.kind() == io::ErrorKind::NotFound => Ok(None),
+        Err(source) => Err(StoreError::new(format!("failed to read state: {source}"))),
+    }
+}
+
+fn write_state_atomic(path: &Path, state: &MnemeState) -> Result<(), StoreError> {
+    if let Some(parent) = path.parent().filter(|path| !path.as_os_str().is_empty()) {
+        fs::create_dir_all(parent)
+            .map_err(|source| StoreError::new(format!("failed to create store dir: {source}")))?;
+    }
+    let text = serde_json::to_string_pretty(state)
+        .map_err(|source| StoreError::new(format!("failed to encode state: {source}")))?;
+    let temp_path = temp_path_for(path);
+    {
+        let mut file = File::create(&temp_path)
+            .map_err(|source| StoreError::new(format!("failed to create temp state: {source}")))?;
+        file.write_all(format!("{text}\n").as_bytes())
+            .map_err(|source| StoreError::new(format!("failed to write temp state: {source}")))?;
+        file.sync_all()
+            .map_err(|source| StoreError::new(format!("failed to sync temp state: {source}")))?;
+    }
+    fs::rename(&temp_path, path)
+        .map_err(|source| StoreError::new(format!("failed to replace state: {source}")))
+}
+
+fn backup_path_for(path: &Path) -> PathBuf {
+    let file_name = path
+        .file_name()
+        .and_then(|value| value.to_str())
+        .unwrap_or("mneme-v1.json");
+    path.with_file_name(format!("{file_name}.bak"))
+}
+
+fn temp_path_for(path: &Path) -> PathBuf {
+    let file_name = path
+        .file_name()
+        .and_then(|value| value.to_str())
+        .unwrap_or("mneme-v1.json");
+    path.with_file_name(format!(
+        ".{file_name}.tmp-{}-{}",
+        std::process::id(),
+        unix_timestamp()
+    ))
+}
+
+fn inspect_state_file(path: &Path) -> StoreFileInspection {
+    match read_state_file(path) {
+        Ok(Some(state)) => {
+            let validation = validate_state(&state);
+            let status = if validation.ok {
+                StoreFileStatus::Valid
+            } else {
+                StoreFileStatus::Invalid
+            };
+            StoreFileInspection {
+                path: path.display().to_string(),
+                status,
+                schema_version: Some(state.schema_version),
+                generation: Some(state.metadata.generation),
+                event_count: Some(state.events.len()),
+                claim_count: Some(state.claims.len()),
+                error: None,
+                validation: Some(validation),
+            }
+        }
+        Ok(None) => StoreFileInspection {
+            path: path.display().to_string(),
+            status: StoreFileStatus::Missing,
+            schema_version: None,
+            generation: None,
+            event_count: None,
+            claim_count: None,
+            error: None,
+            validation: None,
+        },
+        Err(error) => StoreFileInspection {
+            path: path.display().to_string(),
+            status: StoreFileStatus::Invalid,
+            schema_version: None,
+            generation: None,
+            event_count: None,
+            claim_count: None,
+            error: Some(error.to_string()),
+            validation: None,
+        },
+    }
+}
+
+/// Store-level inspection report for current and backup JSON files.
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct StoreInspection {
+    /// Current store path.
+    pub path: String,
+    /// Backup store path.
+    pub backup_path: String,
+    /// Current file inspection.
+    pub current: StoreFileInspection,
+    /// Backup file inspection.
+    pub backup: StoreFileInspection,
+    /// Whether backup repair can restore the current file.
+    pub repair_available: bool,
+}
+
+/// Inspection report for one store file.
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct StoreFileInspection {
+    /// File path inspected.
+    pub path: String,
+    /// File status.
+    pub status: StoreFileStatus,
+    /// Parsed schema version, when available.
+    pub schema_version: Option<u32>,
+    /// Parsed store generation, when available.
+    pub generation: Option<u64>,
+    /// Parsed event count, when available.
+    pub event_count: Option<usize>,
+    /// Parsed claim count, when available.
+    pub claim_count: Option<usize>,
+    /// Read or parse error, when invalid before validation.
+    pub error: Option<String>,
+    /// State validation report, when parsing succeeded.
+    pub validation: Option<StateValidationReport>,
+}
+
+/// Store file status used by inspection and repair reports.
+#[derive(Debug, Clone, Copy, Eq, PartialEq, Serialize, Deserialize)]
+#[serde(rename_all = "snake_case")]
+pub enum StoreFileStatus {
+    /// File does not exist.
+    Missing,
+    /// File parses and passes validation.
+    Valid,
+    /// File is unreadable, unparsable, or fails validation.
+    Invalid,
+}
+
+/// Result of attempting backup repair.
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct StoreRepairReport {
+    /// Whether the current store was restored from backup.
+    pub repaired: bool,
+    /// Stable action identifier.
+    pub action: String,
+    /// Inspection before repair.
+    pub before: StoreInspection,
+    /// Inspection after repair.
+    pub after: StoreInspection,
 }
 
 /// Error returned by v1 persistence adapters.
@@ -788,6 +1141,8 @@ pub enum AuditKind {
     ContextRead,
     /// Budget hard-cap block.
     BudgetBlock,
+    /// State compaction operation.
+    StateCompact,
 }
 
 impl AuditKind {
@@ -800,6 +1155,7 @@ impl AuditKind {
             Self::ClaimUpdate => "claim.update",
             Self::ContextRead => "context.read",
             Self::BudgetBlock => "budget.block",
+            Self::StateCompact => "state.compact",
         }
     }
 }
@@ -807,6 +1163,10 @@ impl AuditKind {
 /// Snapshot returned to adapters after scenario execution.
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct EngineSnapshot {
+    /// Persisted state schema version.
+    pub schema_version: u32,
+    /// Store metadata associated with this engine.
+    pub metadata: StateMetadata,
     /// Events appended during the isolated run.
     pub events: Vec<EventRecord>,
     /// Claims extracted during the isolated run.
@@ -815,6 +1175,199 @@ pub struct EngineSnapshot {
     pub budget: BudgetState,
     /// Audit records captured during the isolated run.
     pub audit: Vec<AuditRecord>,
+}
+
+/// Validation report for one v1 memory state.
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct StateValidationReport {
+    /// Whether the state has no error-level issues.
+    pub ok: bool,
+    /// State schema version inspected.
+    pub schema_version: u32,
+    /// Number of events in the state.
+    pub event_count: usize,
+    /// Number of claims in the state.
+    pub claim_count: usize,
+    /// Number of error-level issues.
+    pub error_count: usize,
+    /// Number of warning-level issues.
+    pub warning_count: usize,
+    /// Validation issues.
+    pub issues: Vec<StateValidationIssue>,
+}
+
+/// One state validation issue.
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct StateValidationIssue {
+    /// Issue severity.
+    pub severity: ValidationSeverity,
+    /// Stable issue code.
+    pub code: String,
+    /// Human-readable detail.
+    pub detail: String,
+}
+
+impl StateValidationIssue {
+    fn error(code: impl Into<String>, detail: impl Into<String>) -> Self {
+        Self {
+            severity: ValidationSeverity::Error,
+            code: code.into(),
+            detail: detail.into(),
+        }
+    }
+
+    fn warning(code: impl Into<String>, detail: impl Into<String>) -> Self {
+        Self {
+            severity: ValidationSeverity::Warning,
+            code: code.into(),
+            detail: detail.into(),
+        }
+    }
+}
+
+/// Severity for state validation issues.
+#[derive(Debug, Clone, Copy, Eq, PartialEq, Serialize, Deserialize)]
+#[serde(rename_all = "snake_case")]
+pub enum ValidationSeverity {
+    /// State cannot be trusted until repaired.
+    Error,
+    /// State is usable but should be normalized.
+    Warning,
+}
+
+/// Validates internal consistency of a v1 memory state.
+#[must_use]
+pub fn validate_state(state: &MnemeState) -> StateValidationReport {
+    let mut issues = Vec::new();
+    if state.schema_version > MNEME_STATE_SCHEMA_VERSION {
+        issues.push(StateValidationIssue::error(
+            "schema.unsupported",
+            format!(
+                "state schema {} is newer than supported {}",
+                state.schema_version, MNEME_STATE_SCHEMA_VERSION
+            ),
+        ));
+    } else if state.schema_version == 0 {
+        issues.push(StateValidationIssue::warning(
+            "schema.legacy",
+            "state has no schema_version and will be normalized on next save",
+        ));
+    }
+
+    if state.metadata.store_id.trim().is_empty() {
+        issues.push(StateValidationIssue::warning(
+            "metadata.store_id_missing",
+            "store_id will be initialized on next save",
+        ));
+    }
+    if state.metadata.generation == 0 {
+        issues.push(StateValidationIssue::warning(
+            "metadata.generation_zero",
+            "generation will be incremented on next save",
+        ));
+    }
+
+    let mut event_ids = BTreeSet::new();
+    for event in &state.events {
+        if event.id.trim().is_empty() {
+            issues.push(StateValidationIssue::error(
+                "event.empty_id",
+                "event id must not be empty",
+            ));
+        }
+        if !event_ids.insert(event.id.clone()) {
+            issues.push(StateValidationIssue::error(
+                "event.duplicate_id",
+                format!("duplicate event id {}", event.id),
+            ));
+        }
+        if event.speaker_id.trim().is_empty() {
+            issues.push(StateValidationIssue::error(
+                "event.empty_speaker",
+                format!("event {} has an empty speaker_id", event.id),
+            ));
+        }
+    }
+
+    let mut claim_ids = BTreeSet::new();
+    for claim in &state.claims {
+        if claim.id.trim().is_empty() {
+            issues.push(StateValidationIssue::error(
+                "claim.empty_id",
+                "claim id must not be empty",
+            ));
+        }
+        if !claim_ids.insert(claim.id.clone()) {
+            issues.push(StateValidationIssue::error(
+                "claim.duplicate_id",
+                format!("duplicate claim id {}", claim.id),
+            ));
+        }
+        for (field, value) in [
+            ("subject", claim.subject.as_str()),
+            ("predicate", claim.predicate.as_str()),
+            ("object", claim.object.as_str()),
+            ("scope", claim.scope.as_str()),
+        ] {
+            if value.trim().is_empty() {
+                issues.push(StateValidationIssue::error(
+                    format!("claim.empty_{field}"),
+                    format!("claim {} has an empty {field}", claim.id),
+                ));
+            }
+        }
+        if claim.source_event_ids.is_empty() {
+            issues.push(StateValidationIssue::error(
+                "claim.missing_source",
+                format!("claim {} has no source events", claim.id),
+            ));
+        }
+        for source_event_id in &claim.source_event_ids {
+            if !event_ids.contains(source_event_id) {
+                issues.push(StateValidationIssue::error(
+                    "claim.unknown_source",
+                    format!(
+                        "claim {} references missing event {}",
+                        claim.id, source_event_id
+                    ),
+                ));
+            }
+        }
+    }
+
+    if state.budget.daily_cloud_tokens == 0 {
+        issues.push(StateValidationIssue::error(
+            "budget.zero_daily_cloud_tokens",
+            "daily_cloud_tokens must be greater than zero",
+        ));
+    }
+
+    for audit in &state.audit {
+        if audit.target_id.trim().is_empty() {
+            issues.push(StateValidationIssue::error(
+                "audit.empty_target",
+                "audit target_id must not be empty",
+            ));
+        }
+    }
+
+    let error_count = issues
+        .iter()
+        .filter(|issue| issue.severity == ValidationSeverity::Error)
+        .count();
+    let warning_count = issues
+        .iter()
+        .filter(|issue| issue.severity == ValidationSeverity::Warning)
+        .count();
+    StateValidationReport {
+        ok: error_count == 0,
+        schema_version: state.schema_version,
+        event_count: state.events.len(),
+        claim_count: state.claims.len(),
+        error_count,
+        warning_count,
+        issues,
+    }
 }
 
 fn claim_from_extracted(
@@ -945,6 +1498,13 @@ fn estimate_tokens(text: &str) -> u32 {
 
 fn next_id(prefix: &str, number: usize) -> String {
     format!("{prefix}-{number:03}")
+}
+
+fn unix_timestamp() -> u64 {
+    SystemTime::now()
+        .duration_since(UNIX_EPOCH)
+        .map(|duration| duration.as_secs())
+        .unwrap_or_default()
 }
 
 #[cfg(test)]
@@ -1235,6 +1795,142 @@ mod tests {
         Ok(())
     }
 
+    #[test]
+    fn json_file_store_writes_schema_metadata_and_backup() -> Result<(), Box<dyn std::error::Error>>
+    {
+        let path = temp_store_path("schema-metadata-backup");
+        let _ = std::fs::remove_file(&path);
+        let _ = std::fs::remove_file(backup_path_for(&path));
+
+        let mut engine = MnemeEngine::new(MnemeConfig::default());
+        engine.ingest_event(EventInput {
+            speaker_id: "user".to_owned(),
+            actor_agent_id: None,
+            text: "remember: user prefers durable memory".to_owned(),
+            scope: "private".to_owned(),
+            trust_level: "trusted_user".to_owned(),
+        })?;
+
+        let mut store = JsonFileStore::new(path.clone());
+        engine.persist(&mut store)?;
+        assert!(!store.backup_path().exists());
+
+        engine.ingest_event(EventInput {
+            speaker_id: "user".to_owned(),
+            actor_agent_id: None,
+            text: "remember: user prefers backups".to_owned(),
+            scope: "private".to_owned(),
+            trust_level: "trusted_user".to_owned(),
+        })?;
+        engine.persist(&mut store)?;
+
+        let loaded = store.load()?.ok_or("state should exist")?;
+        let inspection = store.inspect();
+        assert_eq!(loaded.schema_version, MNEME_STATE_SCHEMA_VERSION);
+        assert!(loaded.metadata.generation >= 1);
+        assert!(store.backup_path().exists());
+        assert_eq!(inspection.current.status, StoreFileStatus::Valid);
+        assert_eq!(inspection.backup.status, StoreFileStatus::Valid);
+
+        let _ = std::fs::remove_file(&path);
+        let _ = std::fs::remove_file(store.backup_path());
+        Ok(())
+    }
+
+    #[test]
+    fn state_validation_detects_missing_claim_sources() {
+        let state = MnemeState {
+            schema_version: MNEME_STATE_SCHEMA_VERSION,
+            metadata: StateMetadata::default(),
+            budget: BudgetState {
+                daily_cloud_tokens: 100,
+                spent_tokens: 0,
+                hard_cap_violations: 0,
+            },
+            events: Vec::new(),
+            claims: vec![ClaimRecord {
+                id: "claim-001".to_owned(),
+                subject: "user".to_owned(),
+                predicate: "prefers".to_owned(),
+                object: "durable memory".to_owned(),
+                status: ClaimStatus::Active,
+                scope: "private".to_owned(),
+                source_event_ids: vec!["event-404".to_owned()],
+            }],
+            audit: Vec::new(),
+        };
+
+        let report = validate_state(&state);
+        assert!(!report.ok);
+        assert!(report
+            .issues
+            .iter()
+            .any(|issue| issue.code == "claim.unknown_source"));
+    }
+
+    #[test]
+    fn compaction_removes_inactive_claims_and_unreferenced_events(
+    ) -> Result<(), Box<dyn std::error::Error>> {
+        let mut engine = MnemeEngine::new(MnemeConfig::default());
+        engine.ingest_event(EventInput {
+            speaker_id: "user".to_owned(),
+            actor_agent_id: None,
+            text: "remember: user prefers local-first tools".to_owned(),
+            scope: "private".to_owned(),
+            trust_level: "trusted_user".to_owned(),
+        })?;
+        engine.ingest_event(EventInput {
+            speaker_id: "user".to_owned(),
+            actor_agent_id: None,
+            text: "correct: user prefers local-first tools -> user prefers desktop IDE".to_owned(),
+            scope: "private".to_owned(),
+            trust_level: "trusted_user".to_owned(),
+        })?;
+        let report = engine.compact();
+        let snapshot = engine.snapshot();
+
+        assert_eq!(report.removed_claims, 1);
+        assert_eq!(snapshot.claims.len(), 1);
+        assert_eq!(snapshot.claims[0].status, ClaimStatus::Active);
+        assert_eq!(snapshot.events.len(), 2);
+        assert!(snapshot
+            .audit
+            .iter()
+            .any(|event| event.kind == AuditKind::StateCompact));
+        Ok(())
+    }
+
+    #[test]
+    fn repair_restores_current_file_from_valid_backup() -> Result<(), Box<dyn std::error::Error>> {
+        let path = temp_store_path("repair-backup");
+        let _ = std::fs::remove_file(&path);
+        let _ = std::fs::remove_file(backup_path_for(&path));
+
+        let mut engine = MnemeEngine::new(MnemeConfig::default());
+        engine.ingest_event(EventInput {
+            speaker_id: "user".to_owned(),
+            actor_agent_id: None,
+            text: "remember: user prefers recoverable memory".to_owned(),
+            scope: "private".to_owned(),
+            trust_level: "trusted_user".to_owned(),
+        })?;
+        let mut store = JsonFileStore::new(path.clone());
+        engine.persist(&mut store)?;
+        engine.persist(&mut store)?;
+        std::fs::write(&path, "{not-json")?;
+
+        let inspection = store.inspect();
+        assert!(inspection.repair_available);
+
+        let repair = store.repair_from_backup()?;
+        assert!(repair.repaired);
+        assert_eq!(store.inspect().current.status, StoreFileStatus::Valid);
+
+        let _ = std::fs::remove_file(&path);
+        let _ = std::fs::remove_file(store.backup_path());
+        Ok(())
+    }
+
     #[cfg(unix)]
     #[test]
     fn command_extractor_reads_protocol_response() -> Result<(), Box<dyn std::error::Error>> {
@@ -1275,5 +1971,9 @@ mod tests {
                 Ok(())
             }
         }
+    }
+
+    fn temp_store_path(name: &str) -> PathBuf {
+        std::env::temp_dir().join(format!("mneme-core-{name}-{}.json", std::process::id()))
     }
 }

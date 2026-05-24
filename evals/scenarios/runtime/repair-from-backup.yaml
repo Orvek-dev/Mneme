@@ -1,0 +1,37 @@
+id: runtime-repair-from-backup
+tags:
+  - runtime
+  - repair
+  - backup
+  - category-runtime
+maintenance:
+  repair_from_backup: true
+events:
+  - speaker_id: user
+    actor_agent_id: codex
+    scope: private
+    trust_level: trusted_user
+    text: "remember: user prefers recoverable memory"
+expected:
+  event_append:
+    count: 1
+  claims:
+    - subject: user
+      predicate: prefers
+      object: recoverable memory
+      status: active
+      scope: private
+  context_pack:
+    query: "recoverable"
+    must_include:
+      - recoverable memory
+    citation_required: true
+  budget:
+    hard_cap_violations: 0
+  audit:
+    read_write_events_required: true
+  store:
+    schema_version: 1
+    valid: true
+    backup_required: true
+    repair_performed: true

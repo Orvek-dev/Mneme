@@ -15,6 +15,8 @@ pub(crate) struct Scenario {
     pub(crate) budget: Budget,
     #[serde(default)]
     pub(crate) persistence: Option<Persistence>,
+    #[serde(default)]
+    pub(crate) maintenance: Maintenance,
     pub(crate) events: Vec<InputEvent>,
     pub(crate) expected: Expected,
 }
@@ -39,6 +41,14 @@ pub(crate) struct Persistence {
     pub(crate) restart_after_event: usize,
 }
 
+#[derive(Debug, Clone, Default, Deserialize)]
+#[serde(default, deny_unknown_fields)]
+pub(crate) struct Maintenance {
+    pub(crate) export_import_roundtrip: bool,
+    pub(crate) compact_after_events: bool,
+    pub(crate) repair_from_backup: bool,
+}
+
 #[derive(Debug, Clone, Deserialize)]
 #[serde(deny_unknown_fields)]
 pub(crate) struct InputEvent {
@@ -60,6 +70,7 @@ pub(crate) struct Expected {
     pub(crate) context_pack: Option<ContextPackExpected>,
     pub(crate) budget: Option<BudgetExpected>,
     pub(crate) audit: Option<AuditExpected>,
+    pub(crate) store: Option<StoreExpected>,
 }
 
 impl Expected {
@@ -69,6 +80,7 @@ impl Expected {
             && self.context_pack.is_none()
             && self.budget.is_none()
             && self.audit.is_none()
+            && self.store.is_none()
     }
 }
 
@@ -109,6 +121,17 @@ pub(crate) struct BudgetExpected {
 pub(crate) struct AuditExpected {
     pub(crate) read_write_events_required: bool,
     pub(crate) claim_update_required: bool,
+}
+
+#[derive(Debug, Clone, Default, Deserialize)]
+#[serde(default, deny_unknown_fields)]
+pub(crate) struct StoreExpected {
+    pub(crate) schema_version: Option<u32>,
+    pub(crate) valid: bool,
+    pub(crate) backup_required: bool,
+    pub(crate) repair_performed: bool,
+    pub(crate) compacted: bool,
+    pub(crate) imported: bool,
 }
 
 pub(crate) fn load_scenario(path: &Path) -> Result<Scenario, EvalError> {
