@@ -1,6 +1,8 @@
 use crate::error::EvalError;
 use crate::report::{CheckReport, ScenarioReport};
-use crate::scenario::{AuditExpected, ClaimExpected, ContextPackExpected, Expected, Scenario};
+use crate::scenario::{
+    AuditExpected, ClaimExpected, ContextPackExpected, Expected, Scenario, StoreExpected,
+};
 use crate::target::{ActualState, ContextPack, EvalTarget, TargetRunOptions};
 
 pub(crate) fn replay_scenario(
@@ -58,6 +60,9 @@ fn check_expected(scenario: &Scenario, actual: &ActualState) -> Vec<CheckReport>
     }
     if let Some(expected) = &scenario.expected.audit {
         checks.extend(check_audit(expected, actual));
+    }
+    if let Some(expected) = &scenario.expected.store {
+        checks.extend(check_store(expected, actual));
     }
     checks
 }
@@ -245,6 +250,101 @@ fn check_claim_update_audit(actual: &ActualState) -> CheckReport {
     }
 }
 
+fn check_store(expected: &StoreExpected, actual: &ActualState) -> Vec<CheckReport> {
+    let mut checks = Vec::new();
+    let Some(store) = &actual.store else {
+        return vec![CheckReport::fail(
+            "store.present",
+            "present",
+            "missing",
+            "actual.store",
+        )];
+    };
+
+    if expected.valid == store.valid {
+        checks.push(CheckReport::pass(
+            "store.valid",
+            expected.valid.to_string(),
+            store.valid.to_string(),
+        ));
+    } else {
+        checks.push(CheckReport::fail(
+            "store.valid",
+            expected.valid.to_string(),
+            store.valid.to_string(),
+            format!("actual.store.error_count={}", store.error_count),
+        ));
+    }
+
+    if let Some(schema_version) = expected.schema_version {
+        if store.schema_version == Some(schema_version) {
+            checks.push(CheckReport::pass(
+                "store.schema_version",
+                schema_version.to_string(),
+                schema_version.to_string(),
+            ));
+        } else {
+            checks.push(CheckReport::fail(
+                "store.schema_version",
+                schema_version.to_string(),
+                format!("{:?}", store.schema_version),
+                "actual.store.schema_version",
+            ));
+        }
+    }
+
+    checks.push(check_store_bool(
+        "store.backup_required",
+        expected.backup_required,
+        store.backup_present,
+    ));
+    checks.push(check_store_bool(
+        "store.repair_performed",
+        expected.repair_performed,
+        store.repair_performed,
+    ));
+    checks.push(check_store_bool(
+        "store.compacted",
+        expected.compacted,
+        store.compacted,
+    ));
+    checks.push(check_store_bool(
+        "store.imported",
+        expected.imported,
+        store.imported,
+    ));
+
+    if store.generation.unwrap_or_default() > 0 {
+        checks.push(CheckReport::pass(
+            "store.generation",
+            ">0",
+            store.generation.unwrap_or_default().to_string(),
+        ));
+    } else {
+        checks.push(CheckReport::fail(
+            "store.generation",
+            ">0",
+            format!("{:?}", store.generation),
+            "actual.store.generation",
+        ));
+    }
+
+    checks
+}
+
+fn check_store_bool(name: &str, expected: bool, actual: bool) -> CheckReport {
+    if expected == actual {
+        CheckReport::pass(name, expected.to_string(), actual.to_string())
+    } else {
+        CheckReport::fail(
+            name,
+            expected.to_string(),
+            actual.to_string(),
+            "actual.store",
+        )
+    }
+}
+
 fn option_matches(expected: Option<&String>, actual: &str) -> bool {
     match expected {
         Some(expected) => expected == actual,
@@ -258,7 +358,7 @@ mod tests {
     use crate::fake::FakeEvalTarget;
     use crate::scenario::{
         Budget, BudgetExpected, ContextPackExpected, EventAppendExpected, Expected, InputEvent,
-        Scenario,
+        Maintenance, Scenario,
     };
     use crate::target::FaultMode;
 
@@ -271,6 +371,7 @@ mod tests {
                 daily_cloud_tokens: 100,
             },
             persistence: None,
+            maintenance: Maintenance::default(),
             events: vec![InputEvent {
                 speaker_id: "user".to_owned(),
                 actor_agent_id: Some("codex".to_owned()),
@@ -301,6 +402,7 @@ mod tests {
                     read_write_events_required: true,
                     claim_update_required: false,
                 }),
+                store: None,
             },
         };
         let target = FakeEvalTarget;
@@ -321,6 +423,7 @@ mod tests {
                 daily_cloud_tokens: 100,
             },
             persistence: None,
+            maintenance: Maintenance::default(),
             events: vec![InputEvent {
                 speaker_id: "user".to_owned(),
                 actor_agent_id: None,
@@ -341,6 +444,7 @@ mod tests {
                 context_pack: None,
                 budget: None,
                 audit: None,
+                store: None,
             },
         };
         let target = FakeEvalTarget;

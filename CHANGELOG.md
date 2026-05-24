@@ -4,6 +4,27 @@ This project follows the spirit of Keep a Changelog.
 
 ## Unreleased
 
+## [0.9.0] - 2026-05-24
+
+### Added
+
+- Added schema metadata, generation tracking, and migration records to local
+  v1 JSON stores.
+- Added atomic JSON store writes, automatic `.bak` backup creation, store
+  inspection, and backup repair support.
+- Added `mneme validate`, `export`, `import`, `compact`, and `repair` CLI
+  commands for personal runtime maintenance.
+- Added the public `runtime` eval suite covering import/export, compaction,
+  backup repair, and persisted secret blocking.
+- Added personal runtime documentation and a Phase 3 MVP spec.
+
+### Changed
+
+- Extended eval scenarios with optional `maintenance` actions and `store`
+  expectations.
+- Extended the release quality gate with runtime suite validation, replay, and
+  acceptance checks.
+
 ## [0.8.0] - 2026-05-24
 
 ### Added

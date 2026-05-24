@@ -1,13 +1,16 @@
 use std::path::{Path, PathBuf};
 use std::time::{SystemTime, UNIX_EPOCH};
 
-use mneme_core::{CommandExtractor, EventInput, JsonFileStore, MnemeConfig, MnemeEngine};
+use mneme_core::{
+    CommandExtractor, EventInput, JsonFileStore, MnemeConfig, MnemeEngine, MnemeStore,
+    StoreFileStatus,
+};
 
 use crate::error::EvalError;
 use crate::scenario::Scenario;
 use crate::target::{
     ActualState, AuditEvent, BudgetActual, Claim, ContextItem, ContextPack, EvalTarget,
-    EvalTargetMetadata, FaultMode, OmittedItem, RecordedEvent, TargetRunOptions,
+    EvalTargetMetadata, FaultMode, OmittedItem, RecordedEvent, StoreActual, TargetRunOptions,
 };
 
 pub(crate) struct MnemeV1EvalTarget;
@@ -27,10 +30,7 @@ impl EvalTarget for MnemeV1EvalTarget {
         scenario: &Scenario,
         options: TargetRunOptions,
     ) -> Result<ActualState, EvalError> {
-        let persistence_path = scenario
-            .persistence
-            .as_ref()
-            .map(|_| temp_store_path(&scenario.id));
+        let persistence_path = needs_store(scenario).then(|| temp_store_path(&scenario.id));
         let result = run_with_optional_persistence(
             scenario,
             options,
@@ -38,7 +38,8 @@ impl EvalTarget for MnemeV1EvalTarget {
             ExtractorMode::Rule,
         );
         if let Some(path) = persistence_path {
-            let _ = std::fs::remove_file(path);
+            let _ = std::fs::remove_file(&path);
+            let _ = std::fs::remove_file(backup_path_for(&path));
         }
         result
     }
@@ -58,10 +59,7 @@ impl EvalTarget for MnemeV1CommandEvalTarget {
         scenario: &Scenario,
         options: TargetRunOptions,
     ) -> Result<ActualState, EvalError> {
-        let persistence_path = scenario
-            .persistence
-            .as_ref()
-            .map(|_| temp_store_path(&scenario.id));
+        let persistence_path = needs_store(scenario).then(|| temp_store_path(&scenario.id));
         let result = run_with_optional_persistence(
             scenario,
             options,
@@ -69,7 +67,8 @@ impl EvalTarget for MnemeV1CommandEvalTarget {
             ExtractorMode::Command,
         );
         if let Some(path) = persistence_path {
-            let _ = std::fs::remove_file(path);
+            let _ = std::fs::remove_file(&path);
+            let _ = std::fs::remove_file(backup_path_for(&path));
         }
         result
     }
@@ -91,6 +90,7 @@ fn run_with_optional_persistence(
         daily_cloud_tokens: scenario.budget.daily_cloud_tokens,
     };
     let mut engine = MnemeEngine::new(config);
+    let mut store_run = StoreRunState::default();
     let command_extractor = match extractor_mode {
         ExtractorMode::Rule => None,
         ExtractorMode::Command => {
@@ -103,6 +103,7 @@ fn run_with_optional_persistence(
             ))
         }
     };
+
     for (idx, input) in scenario.events.iter().enumerate() {
         let event = EventInput {
             speaker_id: input.speaker_id.clone(),
@@ -134,11 +135,66 @@ fn run_with_optional_persistence(
         }
     }
 
+    if scenario.maintenance.compact_after_events {
+        engine.compact();
+        store_run.compacted = true;
+    }
+
+    if scenario.maintenance.export_import_roundtrip {
+        let Some(path) = persistence_path else {
+            return Err(EvalError::scenario(format!(
+                "scenario {} missing persistence path for export/import",
+                scenario.id
+            )));
+        };
+        let import_path = temp_store_path(&format!("{}-import", scenario.id));
+        engine = export_import_roundtrip(&engine, config, path, &import_path, &scenario.id)?;
+        let _ = std::fs::remove_file(&import_path);
+        let _ = std::fs::remove_file(backup_path_for(&import_path));
+        store_run.imported = true;
+    }
+
+    if scenario.maintenance.repair_from_backup {
+        let Some(path) = persistence_path else {
+            return Err(EvalError::scenario(format!(
+                "scenario {} missing persistence path for repair",
+                scenario.id
+            )));
+        };
+        let store = JsonFileStore::new(path.to_path_buf());
+        persist_to_store(&engine, path, &scenario.id)?;
+        persist_to_store(&engine, path, &scenario.id)?;
+        std::fs::write(path, "{not-json").map_err(|source| {
+            EvalError::scenario(format!(
+                "scenario {} failed to corrupt store for repair: {source}",
+                scenario.id
+            ))
+        })?;
+        let repair = store.repair_from_backup().map_err(|source| {
+            EvalError::scenario(format!(
+                "scenario {} failed to repair store: {source}",
+                scenario.id
+            ))
+        })?;
+        store_run.repair_performed = repair.repaired;
+        engine = MnemeEngine::from_store(config, &store).map_err(|source| {
+            EvalError::scenario(format!(
+                "scenario {} failed to reload repaired store: {source}",
+                scenario.id
+            ))
+        })?;
+    }
+
     let context_pack = scenario
         .expected
         .context_pack
         .as_ref()
         .map(|expected| engine.build_context_pack(expected.query.clone()));
+    if needs_store(scenario) {
+        if let Some(path) = persistence_path {
+            persist_to_store(&engine, path, &scenario.id)?;
+        }
+    }
     let snapshot = engine.snapshot();
     let mut actual = ActualState {
         events: snapshot
@@ -197,6 +253,7 @@ fn run_with_optional_persistence(
                 target_id: event.target_id,
             })
             .collect(),
+        store: persistence_path.map(|path| store_actual(path, &store_run)),
     };
     apply_seeded_fault(&mut actual, options.fault_mode);
     Ok(actual)
@@ -208,17 +265,90 @@ fn persist_and_reload(
     path: &Path,
     scenario_id: &str,
 ) -> Result<MnemeEngine, EvalError> {
-    let mut store = JsonFileStore::new(path.to_path_buf());
-    engine.persist(&mut store).map_err(|source| {
-        EvalError::scenario(format!(
-            "scenario {scenario_id} failed to persist mneme-v1 state: {source}"
-        ))
-    })?;
+    persist_to_store(engine, path, scenario_id)?;
+    let store = JsonFileStore::new(path.to_path_buf());
     MnemeEngine::from_store(config, &store).map_err(|source| {
         EvalError::scenario(format!(
             "scenario {scenario_id} failed to reload mneme-v1 state: {source}"
         ))
     })
+}
+
+fn persist_to_store(engine: &MnemeEngine, path: &Path, scenario_id: &str) -> Result<(), EvalError> {
+    let mut store = JsonFileStore::new(path.to_path_buf());
+    engine.persist(&mut store).map_err(|source| {
+        EvalError::scenario(format!(
+            "scenario {scenario_id} failed to persist mneme-v1 state: {source}"
+        ))
+    })
+}
+
+fn export_import_roundtrip(
+    engine: &MnemeEngine,
+    config: MnemeConfig,
+    source_path: &Path,
+    import_path: &Path,
+    scenario_id: &str,
+) -> Result<MnemeEngine, EvalError> {
+    persist_to_store(engine, source_path, scenario_id)?;
+    let source_store = JsonFileStore::new(source_path.to_path_buf());
+    let state = source_store.load().map_err(|source| {
+        EvalError::scenario(format!(
+            "scenario {scenario_id} failed to export state: {source}"
+        ))
+    })?;
+    let state = state
+        .ok_or_else(|| EvalError::scenario(format!("scenario {scenario_id} exported no state")))?;
+    let mut import_store = JsonFileStore::new(import_path.to_path_buf());
+    import_store.save(&state).map_err(|source| {
+        EvalError::scenario(format!(
+            "scenario {scenario_id} failed to import state: {source}"
+        ))
+    })?;
+    MnemeEngine::from_store(config, &import_store).map_err(|source| {
+        EvalError::scenario(format!(
+            "scenario {scenario_id} failed to reload imported state: {source}"
+        ))
+    })
+}
+
+fn store_actual(path: &Path, run: &StoreRunState) -> StoreActual {
+    let store = JsonFileStore::new(path.to_path_buf());
+    let inspection = store.inspect();
+    let validation = inspection.current.validation.as_ref();
+    StoreActual {
+        schema_version: inspection.current.schema_version,
+        valid: inspection.current.status == StoreFileStatus::Valid,
+        backup_present: inspection.backup.status != StoreFileStatus::Missing,
+        repair_performed: run.repair_performed,
+        compacted: run.compacted,
+        imported: run.imported,
+        generation: inspection.current.generation,
+        error_count: validation.map_or(1, |report| report.error_count),
+    }
+}
+
+#[derive(Debug, Default)]
+struct StoreRunState {
+    compacted: bool,
+    imported: bool,
+    repair_performed: bool,
+}
+
+fn needs_store(scenario: &Scenario) -> bool {
+    scenario.persistence.is_some()
+        || scenario.maintenance.export_import_roundtrip
+        || scenario.maintenance.compact_after_events
+        || scenario.maintenance.repair_from_backup
+        || scenario.expected.store.is_some()
+}
+
+fn backup_path_for(path: &Path) -> PathBuf {
+    let file_name = path
+        .file_name()
+        .and_then(|value| value.to_str())
+        .unwrap_or("mneme-v1.json");
+    path.with_file_name(format!("{file_name}.bak"))
 }
 
 fn temp_store_path(scenario_id: &str) -> PathBuf {

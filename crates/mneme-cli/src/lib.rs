@@ -6,9 +6,10 @@ use std::io::{self, Write};
 use std::path::{Path, PathBuf};
 
 use mneme_core::{
-    BuildStage, ClaimRecord, CommandExtractor, ContextPack, EngineSnapshot, EventInput,
-    ExtractorError, JsonFileStore, MnemeConfig, MnemeEngine, MnemeExtractor, RuleBasedExtractor,
-    PRODUCT_NAME,
+    validate_state, BuildStage, ClaimRecord, CommandExtractor, CompactionReport, ContextPack,
+    EngineSnapshot, EventInput, ExtractorError, JsonFileStore, MnemeConfig, MnemeEngine,
+    MnemeExtractor, MnemeState, MnemeStore, RuleBasedExtractor, StateValidationReport,
+    StoreFileStatus, StoreInspection, StoreRepairReport, PRODUCT_NAME,
 };
 use serde::Serialize;
 
@@ -44,6 +45,13 @@ impl CliError {
     fn json(source: serde_json::Error) -> Self {
         Self {
             message: format!("serialize CLI output: {source}"),
+            exit_code: 1,
+        }
+    }
+
+    fn json_file(action: &str, path: &Path, source: serde_json::Error) -> Self {
+        Self {
+            message: format!("{action} {}: {source}", path.display()),
             exit_code: 1,
         }
     }
@@ -98,8 +106,13 @@ fn run_cli_with_writer(
         "forget" => run_forget(args.collect(), writer),
         "context" => run_context(args.collect(), writer),
         "snapshot" => run_snapshot(args.collect(), writer),
+        "validate" => run_validate_store(args.collect(), writer),
+        "export" => run_export(args.collect(), writer),
+        "import" => run_import(args.collect(), writer),
+        "compact" => run_compact(args.collect(), writer),
+        "repair" => run_repair(args.collect(), writer),
         _ => Err(CliError::invalid_cli(format!(
-            "unknown mneme command: {command}\navailable commands: doctor, version, ingest, remember, correct, forget, context, snapshot"
+            "unknown mneme command: {command}\navailable commands: doctor, version, ingest, remember, correct, forget, context, snapshot, validate, export, import, compact, repair"
         ))),
     }
 }
@@ -211,6 +224,46 @@ struct SnapshotReport {
     snapshot: EngineSnapshot,
 }
 
+#[derive(Debug, Serialize)]
+struct StoreValidationCliReport {
+    store: String,
+    inspection: StoreInspection,
+}
+
+#[derive(Debug, Serialize)]
+struct ExportReport {
+    command: String,
+    store: String,
+    path: String,
+    schema_version: u32,
+    generation: u64,
+    event_count: usize,
+    claim_count: usize,
+}
+
+#[derive(Debug, Serialize)]
+struct ImportReport {
+    command: String,
+    store: String,
+    path: String,
+    validation: StateValidationReport,
+    event_count: usize,
+    claim_count: usize,
+}
+
+#[derive(Debug, Serialize)]
+struct CompactReport {
+    command: String,
+    store: String,
+    compaction: CompactionReport,
+}
+
+#[derive(Debug, Serialize)]
+struct RepairCliReport {
+    store: String,
+    repair: StoreRepairReport,
+}
+
 fn run_ingest(raw_args: Vec<String>, writer: &mut impl Write) -> Result<(), CliError> {
     let (text, options) = parse_ingest_args(raw_args)?;
     run_event_command("ingest", text, options, writer)
@@ -301,6 +354,138 @@ fn run_snapshot(raw_args: Vec<String>, writer: &mut impl Write) -> Result<(), Cl
         snapshot: engine.snapshot(),
     };
     emit_snapshot_report(&report, options.json, writer)
+}
+
+fn run_validate_store(raw_args: Vec<String>, writer: &mut impl Write) -> Result<(), CliError> {
+    let options = parse_no_position_args(raw_args, "validate")?;
+    let store_path = resolve_store_path(&options)?;
+    let store = JsonFileStore::new(store_path.clone());
+    let inspection = store.inspect();
+    let report = StoreValidationCliReport {
+        store: store_path.display().to_string(),
+        inspection,
+    };
+    emit_store_validation_report(&report, options.json, writer)?;
+    if report.inspection.current.status == StoreFileStatus::Valid {
+        Ok(())
+    } else {
+        Err(CliError::store(
+            "validate store",
+            &store_path,
+            "store is not valid",
+        ))
+    }
+}
+
+fn run_export(raw_args: Vec<String>, writer: &mut impl Write) -> Result<(), CliError> {
+    let (path, options) = parse_path_command_args(
+        raw_args,
+        "usage: mneme export <path> [--store <path>] [--json]",
+    )?;
+    let store_path = resolve_store_path(&options)?;
+    let store = JsonFileStore::new(store_path.clone());
+    let state = store
+        .load()
+        .map_err(|source| CliError::store("load store", &store_path, source))?
+        .ok_or_else(|| CliError::store("load store", &store_path, "store does not exist"))?;
+    let validation = validate_state(&state);
+    if !validation.ok {
+        return Err(CliError::store(
+            "export store",
+            &store_path,
+            "store validation failed",
+        ));
+    }
+    write_state_json(&path, &state)?;
+    let report = ExportReport {
+        command: "export".to_owned(),
+        store: store_path.display().to_string(),
+        path: path.display().to_string(),
+        schema_version: state.schema_version,
+        generation: state.metadata.generation,
+        event_count: state.events.len(),
+        claim_count: state.claims.len(),
+    };
+    emit_export_report(&report, options.json, writer)
+}
+
+fn run_import(raw_args: Vec<String>, writer: &mut impl Write) -> Result<(), CliError> {
+    let (path, options) = parse_path_command_args(
+        raw_args,
+        "usage: mneme import <path> [--store <path>] [--json]",
+    )?;
+    let store_path = resolve_store_path(&options)?;
+    let text =
+        std::fs::read_to_string(&path).map_err(|source| CliError::io("read", &path, source))?;
+    let state: MnemeState = serde_json::from_str(&text)
+        .map_err(|source| CliError::json_file("parse", &path, source))?;
+    let validation = validate_state(&state);
+    if !validation.ok {
+        let report = ImportReport {
+            command: "import".to_owned(),
+            store: store_path.display().to_string(),
+            path: path.display().to_string(),
+            validation,
+            event_count: state.events.len(),
+            claim_count: state.claims.len(),
+        };
+        emit_import_report(&report, options.json, writer)?;
+        return Err(CliError::store(
+            "import store",
+            &store_path,
+            "import validation failed",
+        ));
+    }
+    let mut store = JsonFileStore::new(store_path.clone());
+    store
+        .save(&state)
+        .map_err(|source| CliError::store("save store", &store_path, source))?;
+    let report = ImportReport {
+        command: "import".to_owned(),
+        store: store_path.display().to_string(),
+        path: path.display().to_string(),
+        validation,
+        event_count: state.events.len(),
+        claim_count: state.claims.len(),
+    };
+    emit_import_report(&report, options.json, writer)
+}
+
+fn run_compact(raw_args: Vec<String>, writer: &mut impl Write) -> Result<(), CliError> {
+    let options = parse_no_position_args(raw_args, "compact")?;
+    let store_path = resolve_store_path(&options)?;
+    let mut engine = load_engine(&store_path)?;
+    let compaction = engine.compact();
+    persist_engine(&store_path, &engine)?;
+    let report = CompactReport {
+        command: "compact".to_owned(),
+        store: store_path.display().to_string(),
+        compaction,
+    };
+    emit_compact_report(&report, options.json, writer)
+}
+
+fn run_repair(raw_args: Vec<String>, writer: &mut impl Write) -> Result<(), CliError> {
+    let options = parse_no_position_args(raw_args, "repair")?;
+    let store_path = resolve_store_path(&options)?;
+    let store = JsonFileStore::new(store_path.clone());
+    let repair = store
+        .repair_from_backup()
+        .map_err(|source| CliError::store("repair store", &store_path, source))?;
+    let report = RepairCliReport {
+        store: store_path.display().to_string(),
+        repair,
+    };
+    emit_repair_report(&report, options.json, writer)?;
+    if report.repair.repaired || report.repair.after.current.status == StoreFileStatus::Valid {
+        Ok(())
+    } else {
+        Err(CliError::store(
+            "repair store",
+            &store_path,
+            "store could not be repaired",
+        ))
+    }
 }
 
 fn parse_event_args(
@@ -536,6 +721,53 @@ fn parse_snapshot_args(raw_args: Vec<String>) -> Result<CommonOptions, CliError>
     Ok(options)
 }
 
+fn parse_no_position_args(
+    raw_args: Vec<String>,
+    command: &'static str,
+) -> Result<CommonOptions, CliError> {
+    let mut options = CommonOptions::default();
+    let mut idx = 0;
+    while idx < raw_args.len() {
+        if parse_common_option(&raw_args, &mut idx, &mut options)? {
+            idx += 1;
+            continue;
+        }
+        return Err(CliError::invalid_cli(format!(
+            "unknown {command} option: {}",
+            raw_args[idx]
+        )));
+    }
+    Ok(options)
+}
+
+fn parse_path_command_args(
+    raw_args: Vec<String>,
+    usage: &'static str,
+) -> Result<(PathBuf, CommonOptions), CliError> {
+    let mut options = CommonOptions::default();
+    let mut positionals = Vec::new();
+    let mut idx = 0;
+    while idx < raw_args.len() {
+        if parse_common_option(&raw_args, &mut idx, &mut options)? {
+            idx += 1;
+            continue;
+        }
+        match raw_args[idx].as_str() {
+            value if value.starts_with('-') => {
+                return Err(CliError::invalid_cli(format!(
+                    "unknown path command option: {value}"
+                )));
+            }
+            value => positionals.push(value.to_owned()),
+        }
+        idx += 1;
+    }
+    if positionals.len() != 1 {
+        return Err(CliError::invalid_cli(usage));
+    }
+    Ok((PathBuf::from(positionals.remove(0)), options))
+}
+
 fn parse_common_option(
     raw_args: &[String],
     idx: &mut usize,
@@ -617,6 +849,18 @@ fn persist_engine(path: &Path, engine: &MnemeEngine) -> Result<(), CliError> {
         .map_err(|source| CliError::store("save store", path, source))
 }
 
+fn write_state_json(path: &Path, state: &MnemeState) -> Result<(), CliError> {
+    if let Some(parent) = path
+        .parent()
+        .filter(|parent| !parent.as_os_str().is_empty())
+    {
+        std::fs::create_dir_all(parent)
+            .map_err(|source| CliError::io("create dir", parent, source))?;
+    }
+    let json = serde_json::to_string_pretty(state).map_err(CliError::json)?;
+    std::fs::write(path, format!("{json}\n")).map_err(|source| CliError::io("write", path, source))
+}
+
 fn emit_event_report(
     report: &EventCommandReport,
     json: bool,
@@ -674,6 +918,93 @@ fn emit_snapshot_report(
         report.snapshot.events.len(),
         report.snapshot.claims.len(),
         report.snapshot.audit.len()
+    )
+    .map_err(|source| CliError::io("write", Path::new("<stdout>"), source))
+}
+
+fn emit_store_validation_report(
+    report: &StoreValidationCliReport,
+    json: bool,
+    writer: &mut impl Write,
+) -> Result<(), CliError> {
+    if json {
+        return write_json(writer, report);
+    }
+    writeln!(
+        writer,
+        "mneme: validate {} (current={:?}, backup={:?}, repair_available={})",
+        report.store,
+        report.inspection.current.status,
+        report.inspection.backup.status,
+        report.inspection.repair_available
+    )
+    .map_err(|source| CliError::io("write", Path::new("<stdout>"), source))
+}
+
+fn emit_export_report(
+    report: &ExportReport,
+    json: bool,
+    writer: &mut impl Write,
+) -> Result<(), CliError> {
+    if json {
+        return write_json(writer, report);
+    }
+    writeln!(
+        writer,
+        "mneme: exported {} to {} (events={}, claims={}, generation={})",
+        report.store, report.path, report.event_count, report.claim_count, report.generation
+    )
+    .map_err(|source| CliError::io("write", Path::new("<stdout>"), source))
+}
+
+fn emit_import_report(
+    report: &ImportReport,
+    json: bool,
+    writer: &mut impl Write,
+) -> Result<(), CliError> {
+    if json {
+        return write_json(writer, report);
+    }
+    writeln!(
+        writer,
+        "mneme: imported {} into {} (events={}, claims={}, validation_ok={})",
+        report.path, report.store, report.event_count, report.claim_count, report.validation.ok
+    )
+    .map_err(|source| CliError::io("write", Path::new("<stdout>"), source))
+}
+
+fn emit_compact_report(
+    report: &CompactReport,
+    json: bool,
+    writer: &mut impl Write,
+) -> Result<(), CliError> {
+    if json {
+        return write_json(writer, report);
+    }
+    writeln!(
+        writer,
+        "mneme: compacted {} (events {}->{}, claims {}->{})",
+        report.store,
+        report.compaction.events_before,
+        report.compaction.events_after,
+        report.compaction.claims_before,
+        report.compaction.claims_after
+    )
+    .map_err(|source| CliError::io("write", Path::new("<stdout>"), source))
+}
+
+fn emit_repair_report(
+    report: &RepairCliReport,
+    json: bool,
+    writer: &mut impl Write,
+) -> Result<(), CliError> {
+    if json {
+        return write_json(writer, report);
+    }
+    writeln!(
+        writer,
+        "mneme: repair {} (action={}, repaired={})",
+        report.store, report.repair.action, report.repair.repaired
     )
     .map_err(|source| CliError::io("write", Path::new("<stdout>"), source))
 }
@@ -856,6 +1187,158 @@ mod tests {
                 Ok(())
             }
         }
+    }
+
+    #[test]
+    fn export_import_validate_and_compact_store() -> Result<(), Box<dyn std::error::Error>> {
+        let source = temp_store_path("export-import-source");
+        let target = temp_store_path("export-import-target");
+        let export_path = temp_store_path("export-import-export");
+        for path in [&source, &target, &export_path] {
+            let _ = std::fs::remove_file(path);
+            let _ = std::fs::remove_file(format!("{}.bak", path.display()));
+        }
+
+        run_cli_with_writer(
+            vec![
+                "mneme".to_owned(),
+                "remember".to_owned(),
+                "user prefers local-first tools".to_owned(),
+                "--store".to_owned(),
+                source.display().to_string(),
+            ],
+            &mut Vec::new(),
+        )?;
+        run_cli_with_writer(
+            vec![
+                "mneme".to_owned(),
+                "correct".to_owned(),
+                "user prefers local-first tools".to_owned(),
+                "user prefers desktop IDE".to_owned(),
+                "--store".to_owned(),
+                source.display().to_string(),
+            ],
+            &mut Vec::new(),
+        )?;
+        run_cli_with_writer(
+            vec![
+                "mneme".to_owned(),
+                "validate".to_owned(),
+                "--store".to_owned(),
+                source.display().to_string(),
+            ],
+            &mut Vec::new(),
+        )?;
+        run_cli_with_writer(
+            vec![
+                "mneme".to_owned(),
+                "compact".to_owned(),
+                "--store".to_owned(),
+                source.display().to_string(),
+            ],
+            &mut Vec::new(),
+        )?;
+        run_cli_with_writer(
+            vec![
+                "mneme".to_owned(),
+                "export".to_owned(),
+                export_path.display().to_string(),
+                "--store".to_owned(),
+                source.display().to_string(),
+            ],
+            &mut Vec::new(),
+        )?;
+        run_cli_with_writer(
+            vec![
+                "mneme".to_owned(),
+                "import".to_owned(),
+                export_path.display().to_string(),
+                "--store".to_owned(),
+                target.display().to_string(),
+            ],
+            &mut Vec::new(),
+        )?;
+
+        let mut output = Vec::new();
+        run_cli_with_writer(
+            vec![
+                "mneme".to_owned(),
+                "context".to_owned(),
+                "desktop".to_owned(),
+                "--store".to_owned(),
+                target.display().to_string(),
+                "--json".to_owned(),
+            ],
+            &mut output,
+        )?;
+        let text = String::from_utf8(output)?;
+        assert!(text.contains("desktop IDE"));
+        assert!(!text.contains("local-first tools"));
+
+        for path in [&source, &target, &export_path] {
+            let _ = std::fs::remove_file(path);
+            let _ = std::fs::remove_file(format!("{}.bak", path.display()));
+        }
+        Ok(())
+    }
+
+    #[test]
+    fn repair_command_restores_corrupted_store_from_backup(
+    ) -> Result<(), Box<dyn std::error::Error>> {
+        let path = temp_store_path("repair-command");
+        let backup = PathBuf::from(format!("{}.bak", path.display()));
+        let _ = std::fs::remove_file(&path);
+        let _ = std::fs::remove_file(&backup);
+
+        run_cli_with_writer(
+            vec![
+                "mneme".to_owned(),
+                "remember".to_owned(),
+                "user prefers recoverable memory".to_owned(),
+                "--store".to_owned(),
+                path.display().to_string(),
+            ],
+            &mut Vec::new(),
+        )?;
+        run_cli_with_writer(
+            vec![
+                "mneme".to_owned(),
+                "remember".to_owned(),
+                "user prefers backups".to_owned(),
+                "--store".to_owned(),
+                path.display().to_string(),
+            ],
+            &mut Vec::new(),
+        )?;
+        std::fs::write(&path, "{not-json")?;
+
+        let mut repair_output = Vec::new();
+        run_cli_with_writer(
+            vec![
+                "mneme".to_owned(),
+                "repair".to_owned(),
+                "--store".to_owned(),
+                path.display().to_string(),
+                "--json".to_owned(),
+            ],
+            &mut repair_output,
+        )?;
+        let repair_text = String::from_utf8(repair_output)?;
+        assert!(repair_text.contains("\"repaired\": true"));
+
+        run_cli_with_writer(
+            vec![
+                "mneme".to_owned(),
+                "validate".to_owned(),
+                "--store".to_owned(),
+                path.display().to_string(),
+            ],
+            &mut Vec::new(),
+        )?;
+
+        let _ = std::fs::remove_file(&path);
+        let _ = std::fs::remove_file(&backup);
+        Ok(())
     }
 
     fn temp_store_path(name: &str) -> PathBuf {

@@ -55,3 +55,9 @@ large implementation phase should focus on one of these product surfaces:
 
 The recommended next phase is **Personal Memory Runtime MVP**, because Phase 2
 already made the model/eval side strong enough to guard provider experiments.
+
+## Phase 3 Execution
+
+Phase 3 shipped the **Personal Memory Runtime MVP** in `v0.9.0`. The next large
+phase should build on the new runtime maintenance surface instead of adding more
+storage scaffolding.

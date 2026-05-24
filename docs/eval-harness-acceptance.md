@@ -8,6 +8,7 @@ Run it locally with:
 ```sh
 cargo run -p mneme-eval -- acceptance --suite core --target fake
 cargo run -p mneme-eval -- acceptance --suite core --target mneme-v1
+cargo run -p mneme-eval -- acceptance --suite runtime --target mneme-v1
 cargo run -p mneme-eval -- acceptance --suite model --target mneme-v1-command --extractor-command evals/fixtures/command-extractor.sh
 ```
 
@@ -16,6 +17,7 @@ Use JSON output for automation:
 ```sh
 cargo run -p mneme-eval -- acceptance --suite core --target fake --json
 cargo run -p mneme-eval -- acceptance --suite core --target mneme-v1 --json
+cargo run -p mneme-eval -- acceptance --suite runtime --target mneme-v1 --json
 cargo run -p mneme-eval -- acceptance --suite model --target mneme-v1-command --extractor-command evals/fixtures/command-extractor.sh --json
 ```
 
@@ -49,9 +51,17 @@ The current `core` suite covers:
 - read/write audit evidence;
 - seeded fault detection for claims, secrets, and citations.
 
-The current `core` suite does not yet cover:
+The `runtime` suite covers:
 
-- production-grade storage migrations, compaction, or concurrent writes;
+- schema metadata on persisted stores;
+- export/import round trips;
+- compaction after correction lifecycle changes;
+- backup repair after current-store corruption;
+- persisted secret blocking.
+
+The current suites do not yet cover:
+
+- concurrent writes;
 - concurrent sessions or multi-agent conflict resolution;
 - team/shared memory scopes;
 - real LLM extraction quality;

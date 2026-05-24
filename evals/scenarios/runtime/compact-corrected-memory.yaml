@@ -1,0 +1,48 @@
+id: runtime-compact-corrected-memory
+tags:
+  - runtime
+  - compaction
+  - lifecycle
+  - category-runtime
+maintenance:
+  compact_after_events: true
+events:
+  - speaker_id: user
+    actor_agent_id: codex
+    scope: private
+    trust_level: trusted_user
+    text: "remember: user prefers local-first tools"
+  - speaker_id: user
+    actor_agent_id: codex
+    scope: private
+    trust_level: trusted_user
+    text: "correct: user prefers local-first tools -> user prefers desktop IDE"
+expected:
+  event_append:
+    count: 2
+  claims:
+    - subject: user
+      predicate: prefers
+      object: local-first tools
+      must_not_exist: true
+    - subject: user
+      predicate: prefers
+      object: desktop IDE
+      status: active
+      scope: private
+  context_pack:
+    query: "desktop"
+    must_include:
+      - desktop IDE
+    must_not_include:
+      - local-first tools
+    citation_required: true
+  budget:
+    hard_cap_violations: 0
+  audit:
+    read_write_events_required: true
+    claim_update_required: true
+  store:
+    schema_version: 1
+    valid: true
+    compacted: true

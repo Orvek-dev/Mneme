@@ -20,7 +20,10 @@ The v1 core supports:
 - source event citations on context items;
 - read/write audit records;
 - serializable state snapshots;
-- an in-memory store and local JSON file store for restart tests.
+- an in-memory store and local JSON file store for restart tests;
+- schema metadata, generation tracking, and migration records;
+- atomic local JSON writes with `.bak` backup creation;
+- store validation, backup repair, import/export, and compaction;
 - a rule-based extractor used by default for deterministic v1 behavior;
 - a command extractor protocol for opt-in model-backed experiments.
 
@@ -28,7 +31,7 @@ The v1 core supports:
 
 The v1 core does not yet provide:
 
-- production-grade storage, migrations, compaction, or concurrent writes;
+- multi-user or concurrent-write storage;
 - concurrent sessions;
 - team/shared memory;
 - provider-specific production LLM extraction adapters;
