@@ -45,6 +45,8 @@ eval update land in the same PR.
 - `mneme-cli` supports `doctor`, `remember`, `correct`, `forget`, `context`,
   `snapshot`, `begin`, `end`, `validate`, `export`, `import`, `compact`,
   `repair`, `version`, and command-specific help.
+- `mneme hook begin/end` emit the `mneme.agent_hook.v1` JSON envelope for
+  success and failure, with non-zero process exits on failure.
 - `mneme-cli --store <path>` isolates local state.
 - `scripts/quality-gate.sh` is the local and release verification entry point.
 - `RUSTDOCFLAGS="-D warnings" cargo doc --workspace --no-deps` must pass before

@@ -1,23 +1,28 @@
 # Agent Integration
 
 Mneme v1 exposes a small local protocol that agents can call around a task.
+For automation, prefer `mneme hook begin/end`; the older `begin/end --json`
+commands remain useful for direct CLI inspection.
 
 ## Start A Task
 
-Use `begin` to retrieve task-scoped context and create a session record:
+Use `hook begin` to retrieve task-scoped context and create a session record:
 
 ```sh
-cargo run -p mneme-cli -- begin "Draft a setup plan" \
+cargo run -p mneme-cli -- hook begin "Draft a setup plan" \
   --query "local-first" \
   --scope private \
   --max-items 3 \
   --agent codex \
-  --store /tmp/mneme.json \
-  --json
+  --store /tmp/mneme.json
 ```
 
 The JSON output includes:
 
+- `schema_version: mneme.agent_hook.v1`
+- `ok`
+- `operation`
+- `session_id`
 - `report.session.id`
 - `report.session.context_claim_ids`
 - `report.context_pack.items`
@@ -30,19 +35,22 @@ pass `--max-items <n>` when a task needs a tighter context budget.
 
 ## End A Task
 
-Use `end` to close the session and optionally write explicit memory claims:
+Use `hook end` to close the session and optionally write explicit memory claims:
 
 ```sh
-cargo run -p mneme-cli -- end session-001 \
+cargo run -p mneme-cli -- hook end session-001 \
   --summary "Prepared a concise setup plan" \
   --remember "user prefers concise setup plans" \
-  --store /tmp/mneme.json \
-  --json
+  --store /tmp/mneme.json
 ```
 
 `--summary` is recorded on the session. Each `--remember` value is written as a
 normal v1 memory event through the rule extractor, so secret blocking, citation,
 budget, and audit behavior stay centralized in `mneme-core`.
+
+Hook failures write a JSON envelope to stdout and exit non-zero. Agents should
+read `ok`, `recoverable`, `error.kind`, `error.message`, and `error.exit_code`
+instead of parsing stderr.
 
 ## Session Records
 

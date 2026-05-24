@@ -5,7 +5,9 @@ use std::io::Write;
 fn main() {
     if let Err(error) = mneme_cli::run_cli(std::env::args()) {
         let _ = std::io::stdout().flush();
-        eprintln!("{error}");
+        if error.should_print() {
+            eprintln!("{error}");
+        }
         std::process::exit(error.exit_code());
     }
 }

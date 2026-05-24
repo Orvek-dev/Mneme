@@ -19,11 +19,16 @@ use mneme_core::{
 };
 use serde::Serialize;
 
+const AGENT_HOOK_SCHEMA_VERSION: &str = "mneme.agent_hook.v1";
+
 /// Error type returned by the Mneme local CLI.
 #[derive(Debug)]
 pub struct CliError {
     message: String,
     exit_code: i32,
+    kind: CliErrorKind,
+    recoverable: bool,
+    print_message: bool,
 }
 
 impl CliError {
@@ -31,6 +36,9 @@ impl CliError {
         Self {
             message: format_invalid_cli_message(message.into()),
             exit_code: 2,
+            kind: CliErrorKind::InvalidCli,
+            recoverable: false,
+            print_message: true,
         }
     }
 
@@ -38,6 +46,9 @@ impl CliError {
         Self {
             message: format!("{action} {}: {source}", path.display()),
             exit_code: 1,
+            kind: CliErrorKind::Io,
+            recoverable: true,
+            print_message: true,
         }
     }
 
@@ -45,6 +56,9 @@ impl CliError {
         Self {
             message: format!("{action} {}: {source}", path.display()),
             exit_code: 1,
+            kind: CliErrorKind::Store,
+            recoverable: true,
+            print_message: true,
         }
     }
 
@@ -52,6 +66,9 @@ impl CliError {
         Self {
             message: format!("serialize CLI output: {source}"),
             exit_code: 1,
+            kind: CliErrorKind::Json,
+            recoverable: false,
+            print_message: true,
         }
     }
 
@@ -59,6 +76,9 @@ impl CliError {
         Self {
             message: format!("{action} {}: {source}", path.display()),
             exit_code: 1,
+            kind: CliErrorKind::Json,
+            recoverable: false,
+            print_message: true,
         }
     }
 
@@ -66,6 +86,9 @@ impl CliError {
         Self {
             message: format!("extract memory claim: {source}"),
             exit_code: 1,
+            kind: CliErrorKind::Extractor,
+            recoverable: true,
+            print_message: true,
         }
     }
 
@@ -73,6 +96,19 @@ impl CliError {
         Self {
             message: format!("agent session: {source}"),
             exit_code: 1,
+            kind: CliErrorKind::Session,
+            recoverable: false,
+            print_message: true,
+        }
+    }
+
+    fn reported(exit_code: i32) -> Self {
+        Self {
+            message: "agent hook error reported".to_owned(),
+            exit_code,
+            kind: CliErrorKind::Reported,
+            recoverable: false,
+            print_message: false,
         }
     }
 
@@ -80,6 +116,37 @@ impl CliError {
     /// Process exit code that matches the error category.
     pub fn exit_code(&self) -> i32 {
         self.exit_code
+    }
+
+    #[must_use]
+    /// Whether the CLI entry point should print this error to stderr.
+    pub fn should_print(&self) -> bool {
+        self.print_message
+    }
+}
+
+#[derive(Debug, Clone, Copy)]
+enum CliErrorKind {
+    InvalidCli,
+    Io,
+    Store,
+    Json,
+    Extractor,
+    Session,
+    Reported,
+}
+
+impl CliErrorKind {
+    const fn as_str(self) -> &'static str {
+        match self {
+            Self::InvalidCli => "invalid_cli",
+            Self::Io => "io",
+            Self::Store => "store",
+            Self::Json => "json",
+            Self::Extractor => "extractor",
+            Self::Session => "session",
+            Self::Reported => "reported",
+        }
     }
 }
 
@@ -134,6 +201,7 @@ fn run_cli_with_writer(
         "snapshot" => run_command_or_help("snapshot", raw_args, writer, run_snapshot),
         "begin" => run_command_or_help("begin", raw_args, writer, run_begin),
         "end" => run_command_or_help("end", raw_args, writer, run_end),
+        "hook" => run_command_or_help("hook", raw_args, writer, run_agent_hook),
         "validate" => run_command_or_help("validate", raw_args, writer, run_validate_store),
         "export" => run_command_or_help("export", raw_args, writer, run_export),
         "import" => run_command_or_help("import", raw_args, writer, run_import),
@@ -189,7 +257,7 @@ fn print_help(command: Option<&str>, writer: &mut impl Write) -> Result<(), CliE
         None => MNEME_HELP,
         Some(command) => command_help(command).ok_or_else(|| {
             CliError::invalid_cli(format!(
-                "unknown mneme help topic: {command}\navailable help topics: doctor, version, ingest, remember, correct, forget, context, snapshot, begin, end, validate, export, import, compact, repair"
+                "unknown mneme help topic: {command}\navailable help topics: doctor, version, ingest, remember, correct, forget, context, snapshot, begin, end, hook, validate, export, import, compact, repair"
             ))
         })?,
     };
@@ -209,6 +277,7 @@ fn command_help(command: &str) -> Option<&'static str> {
         "snapshot" => Some(MNEME_SNAPSHOT_HELP),
         "begin" => Some(MNEME_BEGIN_HELP),
         "end" => Some(MNEME_END_HELP),
+        "hook" => Some(MNEME_HOOK_HELP),
         "validate" => Some(MNEME_VALIDATE_HELP),
         "export" => Some(MNEME_EXPORT_HELP),
         "import" => Some(MNEME_IMPORT_HELP),
@@ -235,6 +304,7 @@ Commands:
   snapshot    Print the current store snapshot.
   begin       Start an agent task session and retrieve context.
   end         Close an agent task session and optionally remember claims.
+  hook        Agent hook JSON contract for begin/end automation.
   validate    Inspect the current store and backup.
   export      Export the current store state to JSON.
   import      Import a store state from JSON.
@@ -248,6 +318,7 @@ Common options:
 Examples:
   mneme remember "user prefers local-first tools" --store /tmp/mneme.json
   mneme context "local-first" --store /tmp/mneme.json --json
+  mneme hook begin "Draft setup plan" --query "local-first" --store /tmp/mneme.json
   mneme help begin"#;
 
 const MNEME_DOCTOR_HELP: &str = r#"Usage: mneme doctor
@@ -318,6 +389,17 @@ Close an agent task session and optionally write explicit memory claims.
 
 Example:
   mneme end session-001 --summary "Prepared a concise setup plan" --remember "user prefers concise setup plans" --store /tmp/mneme.json --json"#;
+
+const MNEME_HOOK_HELP: &str = r#"Usage:
+  mneme hook begin <task> [--query <query>] [--scope <scope>]... [--max-items <n>] [--agent <id>] [--store <path>]
+  mneme hook end <session-id> [--summary <text>] [--remember <claim>]... [--agent <id>] [--store <path>]
+
+Run agent begin/end hooks with the stable mneme.agent_hook.v1 JSON envelope.
+Success and failure both write JSON to stdout. Failures exit non-zero.
+
+Examples:
+  mneme hook begin "Draft setup plan" --query "local-first" --agent codex --store /tmp/mneme.json
+  mneme hook end session-001 --summary "Prepared a concise setup plan" --remember "user prefers concise setup plans" --store /tmp/mneme.json"#;
 
 const MNEME_VALIDATE_HELP: &str = r#"Usage: mneme validate [--store <path>] [--json]
 
@@ -498,6 +580,51 @@ struct EndCliReport {
 }
 
 #[derive(Debug, Serialize)]
+struct AgentHookBeginReport {
+    schema_version: &'static str,
+    ok: bool,
+    operation: &'static str,
+    recoverable: bool,
+    store: String,
+    session_id: String,
+    context_item_count: usize,
+    omitted_count: usize,
+    context_claim_ids: Vec<String>,
+    report: SessionBeginReport,
+}
+
+#[derive(Debug, Serialize)]
+struct AgentHookEndReport {
+    schema_version: &'static str,
+    ok: bool,
+    operation: &'static str,
+    recoverable: bool,
+    store: String,
+    session_id: String,
+    remembered_event_count: usize,
+    remembered_claim_count: usize,
+    remembered_event_ids: Vec<String>,
+    remembered_claim_ids: Vec<String>,
+    report: SessionEndReport,
+}
+
+#[derive(Debug, Serialize)]
+struct AgentHookErrorReport {
+    schema_version: &'static str,
+    ok: bool,
+    operation: Option<String>,
+    recoverable: bool,
+    error: AgentHookErrorBody,
+}
+
+#[derive(Debug, Serialize)]
+struct AgentHookErrorBody {
+    kind: &'static str,
+    message: String,
+    exit_code: i32,
+}
+
+#[derive(Debug, Serialize)]
 struct StoreValidationCliReport {
     store: String,
     inspection: StoreInspection,
@@ -669,6 +796,98 @@ fn run_end(raw_args: Vec<String>, writer: &mut impl Write) -> Result<(), CliErro
         report,
     };
     emit_end_report(&cli_report, options.common.json, writer)
+}
+
+fn run_agent_hook(raw_args: Vec<String>, writer: &mut impl Write) -> Result<(), CliError> {
+    if wants_command_help(&raw_args) {
+        return print_help(Some("hook"), writer);
+    }
+    let operation = raw_args.first().and_then(|value| match value.as_str() {
+        "begin" | "end" => Some(value.clone()),
+        _ => None,
+    });
+    match run_agent_hook_inner(raw_args, writer) {
+        Ok(()) => Ok(()),
+        Err(error) => {
+            emit_agent_hook_error(operation, &error, writer)?;
+            Err(CliError::reported(error.exit_code()))
+        }
+    }
+}
+
+fn run_agent_hook_inner(
+    mut raw_args: Vec<String>,
+    writer: &mut impl Write,
+) -> Result<(), CliError> {
+    if raw_args.is_empty() {
+        return Err(CliError::invalid_cli(
+            "usage: mneme hook <begin|end> [options]",
+        ));
+    }
+    let operation = raw_args.remove(0);
+    match operation.as_str() {
+        "begin" => run_agent_hook_begin(raw_args, writer),
+        "end" => run_agent_hook_end(raw_args, writer),
+        value => Err(CliError::invalid_cli(format!(
+            "unknown hook operation: {value}\navailable hook operations: begin, end"
+        ))),
+    }
+}
+
+fn run_agent_hook_begin(raw_args: Vec<String>, writer: &mut impl Write) -> Result<(), CliError> {
+    let (task, options) = parse_begin_args(raw_args)?;
+    let store_path = resolve_store_path(&options.common)?;
+    let mut engine = load_engine(&store_path)?;
+    let report = engine.begin_session(SessionBeginInput {
+        task,
+        actor_agent_id: options.actor_agent_id,
+        query: options.query,
+        allowed_scopes: effective_allowed_scopes(options.allowed_scopes),
+        max_items: effective_max_items(options.max_items),
+    });
+    persist_engine(&store_path, &engine)?;
+    let hook_report = AgentHookBeginReport {
+        schema_version: AGENT_HOOK_SCHEMA_VERSION,
+        ok: true,
+        operation: "begin",
+        recoverable: false,
+        store: store_path.display().to_string(),
+        session_id: report.session.id.clone(),
+        context_item_count: report.context_pack.items.len(),
+        omitted_count: report.context_pack.omitted.len(),
+        context_claim_ids: report.session.context_claim_ids.clone(),
+        report,
+    };
+    write_json(writer, &hook_report)
+}
+
+fn run_agent_hook_end(raw_args: Vec<String>, writer: &mut impl Write) -> Result<(), CliError> {
+    let (session_id, options) = parse_end_args(raw_args)?;
+    let store_path = resolve_store_path(&options.common)?;
+    let mut engine = load_engine(&store_path)?;
+    let report = engine
+        .end_session(SessionEndInput {
+            session_id,
+            actor_agent_id: options.actor_agent_id,
+            summary: options.summary,
+            remember: options.remember,
+        })
+        .map_err(CliError::session)?;
+    persist_engine(&store_path, &engine)?;
+    let hook_report = AgentHookEndReport {
+        schema_version: AGENT_HOOK_SCHEMA_VERSION,
+        ok: true,
+        operation: "end",
+        recoverable: false,
+        store: store_path.display().to_string(),
+        session_id: report.session.id.clone(),
+        remembered_event_count: report.remembered_event_ids.len(),
+        remembered_claim_count: report.remembered_claim_ids.len(),
+        remembered_event_ids: report.remembered_event_ids.clone(),
+        remembered_claim_ids: report.remembered_claim_ids.clone(),
+        report,
+    };
+    write_json(writer, &hook_report)
 }
 
 fn run_validate_store(raw_args: Vec<String>, writer: &mut impl Write) -> Result<(), CliError> {
@@ -1416,6 +1635,25 @@ fn emit_end_report(
     .map_err(|source| CliError::io("write", Path::new("<stdout>"), source))
 }
 
+fn emit_agent_hook_error(
+    operation: Option<String>,
+    error: &CliError,
+    writer: &mut impl Write,
+) -> Result<(), CliError> {
+    let report = AgentHookErrorReport {
+        schema_version: AGENT_HOOK_SCHEMA_VERSION,
+        ok: false,
+        operation,
+        recoverable: error.recoverable,
+        error: AgentHookErrorBody {
+            kind: error.kind.as_str(),
+            message: error.to_string(),
+            exit_code: error.exit_code(),
+        },
+    };
+    write_json(writer, &report)
+}
+
 fn emit_store_validation_report(
     report: &StoreValidationCliReport,
     json: bool,
@@ -1520,6 +1758,7 @@ mod tests {
         let text = String::from_utf8(output)?;
         assert!(text.contains("Usage:"));
         assert!(text.contains("mneme help begin"));
+        assert!(text.contains("hook"));
 
         let mut command_output = Vec::new();
         run_cli_with_writer(
@@ -1530,6 +1769,15 @@ mod tests {
         assert!(command_text.contains("Usage: mneme begin <task>"));
         assert!(command_text.contains("--query <query>"));
         assert!(command_text.contains("--max-items <n>"));
+
+        let mut hook_output = Vec::new();
+        run_cli_with_writer(
+            vec!["mneme".to_owned(), "hook".to_owned(), "--help".to_owned()],
+            &mut hook_output,
+        )?;
+        let hook_text = String::from_utf8(hook_output)?;
+        assert!(hook_text.contains("mneme hook begin"));
+        assert!(hook_text.contains("mneme.agent_hook.v1"));
         Ok(())
     }
 
@@ -2043,6 +2291,107 @@ mod tests {
 
         let _ = std::fs::remove_file(&path);
         let _ = std::fs::remove_file(format!("{}.bak", path.display()));
+        Ok(())
+    }
+
+    #[test]
+    fn hook_begin_end_emit_stable_json_envelope() -> Result<(), Box<dyn std::error::Error>> {
+        let path = temp_store_path("hook-begin-end");
+        let _ = std::fs::remove_file(&path);
+        let _ = std::fs::remove_file(format!("{}.bak", path.display()));
+
+        run_cli_with_writer(
+            vec![
+                "mneme".to_owned(),
+                "remember".to_owned(),
+                "user prefers local-first tools".to_owned(),
+                "--store".to_owned(),
+                path.display().to_string(),
+            ],
+            &mut Vec::new(),
+        )?;
+
+        let mut begin_output = Vec::new();
+        run_cli_with_writer(
+            vec![
+                "mneme".to_owned(),
+                "hook".to_owned(),
+                "begin".to_owned(),
+                "Draft setup plan".to_owned(),
+                "--query".to_owned(),
+                "local-first".to_owned(),
+                "--agent".to_owned(),
+                "codex".to_owned(),
+                "--store".to_owned(),
+                path.display().to_string(),
+            ],
+            &mut begin_output,
+        )?;
+        let begin_text = String::from_utf8(begin_output)?;
+        assert!(begin_text.contains("\"schema_version\": \"mneme.agent_hook.v1\""));
+        assert!(begin_text.contains("\"ok\": true"));
+        assert!(begin_text.contains("\"operation\": \"begin\""));
+        assert!(begin_text.contains("\"session_id\": \"session-001\""));
+        assert!(begin_text.contains("\"context_item_count\": 1"));
+
+        let mut end_output = Vec::new();
+        run_cli_with_writer(
+            vec![
+                "mneme".to_owned(),
+                "hook".to_owned(),
+                "end".to_owned(),
+                "session-001".to_owned(),
+                "--summary".to_owned(),
+                "Prepared a concise setup plan".to_owned(),
+                "--remember".to_owned(),
+                "user prefers concise setup plans".to_owned(),
+                "--store".to_owned(),
+                path.display().to_string(),
+            ],
+            &mut end_output,
+        )?;
+        let end_text = String::from_utf8(end_output)?;
+        assert!(end_text.contains("\"schema_version\": \"mneme.agent_hook.v1\""));
+        assert!(end_text.contains("\"operation\": \"end\""));
+        assert!(end_text.contains("\"remembered_event_count\": 1"));
+        assert!(end_text.contains("\"remembered_claim_count\": 1"));
+
+        let _ = std::fs::remove_file(&path);
+        let _ = std::fs::remove_file(format!("{}.bak", path.display()));
+        Ok(())
+    }
+
+    #[test]
+    fn hook_errors_emit_json_and_nonzero_exit() -> Result<(), Box<dyn std::error::Error>> {
+        let path = temp_store_path("hook-error");
+        let _ = std::fs::remove_file(&path);
+
+        let mut output = Vec::new();
+        let result = run_cli_with_writer(
+            vec![
+                "mneme".to_owned(),
+                "hook".to_owned(),
+                "end".to_owned(),
+                "session-404".to_owned(),
+                "--summary".to_owned(),
+                "Nothing happened".to_owned(),
+                "--store".to_owned(),
+                path.display().to_string(),
+            ],
+            &mut output,
+        );
+        let error = result.expect_err("unknown session should fail");
+        assert_eq!(error.exit_code(), 1);
+        assert!(!error.should_print());
+
+        let text = String::from_utf8(output)?;
+        assert!(text.contains("\"schema_version\": \"mneme.agent_hook.v1\""));
+        assert!(text.contains("\"ok\": false"));
+        assert!(text.contains("\"operation\": \"end\""));
+        assert!(text.contains("\"kind\": \"session\""));
+        assert!(text.contains("\"recoverable\": false"));
+
+        let _ = std::fs::remove_file(&path);
         Ok(())
     }
 
