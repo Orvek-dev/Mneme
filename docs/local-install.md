@@ -26,6 +26,7 @@ Then verify:
 mneme --version
 mneme doctor
 mneme init
+mneme doctor --json
 mneme help
 mneme review --help
 ```
@@ -58,6 +59,7 @@ Initialize the current directory before wiring an agent:
 
 ```sh
 mneme init
+mneme doctor
 ```
 
 This creates:
@@ -73,6 +75,7 @@ Refresh the generated files intentionally:
 
 ```sh
 mneme init --force
+mneme doctor --json
 ```
 
 Use explicit paths for automation tests or custom workspaces:

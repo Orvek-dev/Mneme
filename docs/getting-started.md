@@ -25,6 +25,7 @@ surface:
 ./scripts/install-local.sh
 mneme doctor
 mneme init
+mneme doctor --json
 mneme help
 cargo run -p mneme-eval -- doctor
 cargo run -p mneme-eval -- help
@@ -51,6 +52,7 @@ mneme validate --store "$STORE"
 
 `mneme init` creates the default `.mneme/mneme-v1.json` store and
 `.mneme/mneme-agent-hook.env` runtime profile in the current directory.
+`mneme doctor` is the canonical health check for that store/profile pair.
 `.mneme/` is ignored by git.
 
 ## Agent Session Flow
@@ -85,6 +87,7 @@ wrapper load the generated profile:
 
 ```sh
 mneme init
+mneme doctor
 scripts/mneme-agent-hook.sh doctor
 ```
 

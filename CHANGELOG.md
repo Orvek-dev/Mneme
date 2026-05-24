@@ -4,6 +4,20 @@ This project follows the spirit of Keep a Changelog.
 
 ## Unreleased
 
+## [0.27.0] - 2026-05-24
+
+### Added
+
+- Added `mneme doctor --json` workspace health reports covering store and
+  agent hook profile status.
+- Expanded plain `mneme doctor` with workspace, store, backup, profile, health,
+  and recommendation output.
+- Added agent hook profile validation for required keys, store alignment,
+  max-item parsing, duplicate keys, unknown keys, and configured binary paths.
+- Added installed-binary quality-gate checks for pre-init, post-init,
+  invalid-profile, and invalid-store doctor reports.
+- Added the Phase 21 workspace health and bootstrap stabilization feature spec.
+
 ## [0.26.0] - 2026-05-24
 
 ### Added

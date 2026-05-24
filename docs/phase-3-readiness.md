@@ -129,3 +129,8 @@ Phase 20 shipped the **First-Run Bootstrap & Installed Agent Hook MVP** in
 `v0.26.0`, adding `mneme init`, generated local store/profile bootstrap, and
 quality-gate checks that an installed `mneme` binary can initialize a temporary
 workspace and drive the agent hook wrapper through that profile.
+
+Phase 21 shipped the **Workspace Health & Bootstrap Stabilization MVP** in
+`v0.27.0`, adding `mneme doctor --json`, richer plain doctor output, profile
+validation, and quality-gate checks for pre-init, post-init, invalid-profile,
+and invalid-store workspace health reports.
