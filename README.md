@@ -9,6 +9,8 @@ Mneme currently provides:
 - `mneme-core`: the v1 personal-memory engine.
 - `mneme-cli`: a local CLI over the v1 engine and JSON file store.
 - `mneme-eval`: a scenario-based eval harness with acceptance gates.
+- `scripts/quality-gate.sh`: the single local gate used before PRs and
+  releases.
 
 ## Current Status
 
@@ -115,19 +117,14 @@ Use `--json` for machine-readable reports.
 Before opening a PR, run:
 
 ```sh
-cargo fmt --all --check
-cargo clippy --workspace --all-targets -- -D warnings
-cargo test --workspace --all-targets
-cargo run -p mneme-cli -- doctor
-cargo run -p mneme-eval -- acceptance --suite core --target fake
-cargo run -p mneme-eval -- acceptance --suite core --target mneme-v1
-cargo run -p mneme-eval -- acceptance --suite model --target mneme-v1-command --extractor-command evals/fixtures/command-extractor.sh
-MNEME_OPENAI_DRY_RUN=1 cargo run -p mneme-eval -- acceptance --suite model --target mneme-v1-command --extractor-command wrappers/openai_extractor.py
-MNEME_OPENAI_DRY_RUN=1 cargo run -p mneme-eval -- baseline --suite model --target mneme-v1-command --extractor-command wrappers/openai_extractor.py --iterations 2 --json
+./scripts/quality-gate.sh full
 ```
 
 Generated eval reports and local stores are ignored. Public scenarios under
 `evals/scenarios/` are tracked.
+
+CI runs on pull requests and `main` pushes only. Branch pushes do not trigger
+the full gate, which keeps action usage aligned with phase-sized work.
 
 ## Repository Layout
 
@@ -137,6 +134,7 @@ crates/mneme-cli    local developer CLI
 crates/mneme-eval   scenario replay, target adapters, acceptance gates
 docs/               public contracts and usage docs
 evals/              public scenario fixtures
+scripts/            local quality, safety, and live-baseline helpers
 spec/               feature specs and verification maps
 ```
 
@@ -151,6 +149,8 @@ spec/               feature specs and verification maps
 - [OpenAI Provider Wrapper](docs/openai-provider-wrapper.md)
 - [Live Provider Baseline](docs/live-provider-baseline.md)
 - [Live Provider Baseline Runbook](docs/live-provider-baseline-runbook.md)
+- [CI Cost Policy](docs/ci-cost-policy.md)
+- [Phase 3 Readiness](docs/phase-3-readiness.md)
 - [Mneme v1 Personal Core](docs/mneme-v1-personal-core.md)
 - [Mneme v1 Stability](docs/v1-stability.md)
 - [Release Checklist](docs/release-checklist.md)

@@ -4,6 +4,23 @@ This project follows the spirit of Keep a Changelog.
 
 ## Unreleased
 
+## [0.8.0] - 2026-05-24
+
+### Added
+
+- Added a single local quality gate script for format, lint, tests, evals,
+  dry-run baseline, and public safety checks.
+- Added public safety and live baseline helper scripts.
+- Added Phase 3 readiness documentation and a pre-Phase-3 consolidation spec.
+
+### Changed
+
+- Reduced GitHub Actions duplication by running CI on pull requests and `main`
+  pushes only, with concurrency cancellation for superseded runs.
+- Reworked auto PR merge to act on successful pull-request CI runs instead of
+  branch-push CI runs.
+- Made release verification reuse the same local quality gate script.
+
 ## [0.7.0] - 2026-05-24
 
 ### Added
