@@ -43,6 +43,9 @@ MNEME_AGENT_HOOK_CONFIG=examples/mneme-agent-hook.env.example scripts/mneme-agen
 rm -f "$STORE" "$STORE.bak"
 ```
 
+Run `scripts/mneme-agent-hook.sh doctor --check-extractor` only for an
+explicit extractor smoke check with a fixture or dry-run provider wrapper.
+
 ## Public Safety
 
 Before pushing a release tag, confirm:

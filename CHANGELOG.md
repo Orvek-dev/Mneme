@@ -4,6 +4,20 @@ This project follows the spirit of Keep a Changelog.
 
 ## Unreleased
 
+## [0.35.0] - 2026-05-25
+
+### Added
+
+- Added explicit runtime diagnostics to `scripts/mneme-agent-hook.sh doctor`,
+  including profile loading status, selected `mneme` source, runtime defaults,
+  and configured extractor command.
+- Added `scripts/mneme-agent-hook.sh doctor --check-extractor` for opt-in
+  command-extractor smoke checks.
+- Added release quality-gate coverage proving default wrapper doctor runs do
+  not execute configured command extractors, while `--check-extractor` does.
+- Added the Phase 29 agent runtime diagnostics and cost guardrails feature
+  spec.
+
 ## [0.34.0] - 2026-05-25
 
 ### Added

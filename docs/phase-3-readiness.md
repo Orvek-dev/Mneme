@@ -169,3 +169,8 @@ Phase 28 shipped the **Agent Runtime Extractor Installation MVP** in `v0.34.0`,
 adding `mneme init --extractor-command`, doctor/init visibility for installed
 extractor commands, and quality-gate coverage proving the hook wrapper can use
 only the generated profile for command-extracted session-end memory.
+
+Phase 29 shipped the **Agent Runtime Diagnostics & Cost Guardrails MVP** in
+`v0.35.0`, adding wrapper doctor runtime diagnostics and an explicit
+`--check-extractor` flag so routine diagnostics never run provider-backed
+extractors by default.

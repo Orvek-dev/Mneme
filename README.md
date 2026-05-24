@@ -44,6 +44,8 @@ Mneme is pre-1.0. The useful surface today is local development and evaluation:
 - agent hooks expose a stable JSON envelope for doctor/begin/end automation;
 - `scripts/mneme-agent-hook.sh` provides an environment-configurable local
   wrapper for agent runtimes;
+- wrapper doctor diagnostics report loaded runtime settings without running
+  provider-backed extractors by default;
 - agent hook runtime profiles can keep local store, agent, scope, and item-cap
   settings out of each invocation;
 - extraction and storage are behind adapter boundaries;
@@ -112,6 +114,10 @@ mneme init --extractor-command ./mneme-extractor-wrapper
 mneme doctor
 scripts/mneme-agent-hook.sh doctor
 ```
+
+`scripts/mneme-agent-hook.sh doctor` does not run configured command extractors
+by default. Use `scripts/mneme-agent-hook.sh doctor --check-extractor` only
+when you intentionally want to smoke the configured extractor command.
 
 Without `--store`, the CLI writes to `.mneme/mneme-v1.json` in the current
 directory. `.mneme/` is ignored by git.

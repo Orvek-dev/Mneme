@@ -123,6 +123,7 @@ hard-coding cargo commands:
 
 ```sh
 scripts/mneme-agent-hook.sh doctor
+scripts/mneme-agent-hook.sh doctor --check-extractor
 MNEME_STORE=/tmp/mneme.json MNEME_AGENT_ID=codex \
   scripts/mneme-agent-hook.sh begin "Draft setup plan" --query "local-first"
 MNEME_STORE=/tmp/mneme.json \
@@ -138,3 +139,8 @@ The wrapper uses `MNEME_BIN` when set, otherwise runs
 Profiles can be loaded with `MNEME_AGENT_HOOK_CONFIG`, `MNEME_CONFIG`, or the
 default ignored `.mneme/mneme-agent-hook.env` path. The file format is
 documented in [Agent Runtime Config](agent-runtime-config.md).
+
+Wrapper doctor diagnostics print loaded runtime settings and run only the
+isolated hook doctor/begin/end smoke by default. Configured command extractors
+are skipped unless `doctor --check-extractor` is passed, because provider-backed
+extractors may use network or API budget.

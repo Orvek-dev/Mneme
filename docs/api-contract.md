@@ -65,6 +65,9 @@ installation wrapper. It delegates to an installed `MNEME_BIN`, otherwise runs
 cargo from the repository, and uses a local debug binary only when cargo is
 unavailable. The wrapper can load runtime profiles from
 `MNEME_AGENT_HOOK_CONFIG`, `MNEME_CONFIG`, or `.mneme/mneme-agent-hook.env`.
+Wrapper doctor diagnostics are no-cost by default for configured command
+extractors; `doctor --check-extractor` is the explicit command-extractor smoke
+path.
 
 Local users can install the CLI with `scripts/install-local.sh`. It installs
 the repository-local `mneme-cli` package as the `mneme` binary and runs a small

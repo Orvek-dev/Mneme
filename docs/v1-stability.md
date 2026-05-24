@@ -81,6 +81,9 @@ eval update land in the same PR.
   remembered notes using the same command protocol as `ingest`.
 - `scripts/mneme-agent-hook.sh` provides the repository-local wrapper for agent
   runtime installation smoke checks and env-based hook defaults.
+- `scripts/mneme-agent-hook.sh doctor` reports wrapper runtime diagnostics and
+  skips configured command extractors by default; extractor smoke requires the
+  explicit `--check-extractor` flag.
 - The hook wrapper reads runtime profiles from `MNEME_AGENT_HOOK_CONFIG`,
   `MNEME_CONFIG`, or `.mneme/mneme-agent-hook.env`; CLI flags override env,
   and env overrides profile values.

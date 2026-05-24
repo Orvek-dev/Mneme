@@ -95,6 +95,9 @@ grep -q '"ok": true' "$INSTALL_REPAIR_CHECK_BAD"
 "$INSTALL_BIN" validate --store "$INSTALL_WORKSPACE_STORE"
 MNEME_AGENT_HOOK_CONFIG="$INSTALL_PROFILE" ./scripts/mneme-agent-hook.sh doctor > "$INSTALL_WRAPPER_DOCTOR"
 grep -q 'mneme-agent-hook: config=' "$INSTALL_WRAPPER_DOCTOR"
+grep -q 'mneme-agent-hook: config_loaded=true' "$INSTALL_WRAPPER_DOCTOR"
+grep -q 'mneme-agent-hook: hook_smoke=ok' "$INSTALL_WRAPPER_DOCTOR"
+grep -q 'mneme-agent-hook: extractor_smoke=skipped:not-configured' "$INSTALL_WRAPPER_DOCTOR"
 grep -q 'mneme-agent-hook: ok' "$INSTALL_WRAPPER_DOCTOR"
 "$INSTALL_BIN" remember "user prefers bootstrap workflows" --store "$INSTALL_WORKSPACE_STORE"
 MNEME_AGENT_HOOK_CONFIG="$INSTALL_PROFILE" \
@@ -119,6 +122,9 @@ grep -q -- "--force" "$MNEME_HELP"
 cargo run -p mneme-cli -- doctor --help > "$MNEME_HELP"
 grep -q "Usage: mneme doctor" "$MNEME_HELP"
 grep -q -- "--config <path>" "$MNEME_HELP"
+./scripts/mneme-agent-hook.sh help > "$MNEME_HELP"
+grep -q "scripts/mneme-agent-hook.sh doctor \[--check-extractor\]" "$MNEME_HELP"
+grep -q -- "--check-extractor" "$MNEME_HELP"
 cargo run -p mneme-cli -- begin --help > "$MNEME_HELP"
 grep -q "Usage: mneme begin" "$MNEME_HELP"
 cargo run -p mneme-cli -- hook --help > "$MNEME_HELP"
@@ -369,6 +375,9 @@ rm -f "$WRAPPER_DOCTOR" "$WRAPPER_STORE" "$WRAPPER_STORE.bak" "$WRAPPER_STORE.lo
   "$WRAPPER_CONFIG" "$WRAPPER_CONFIG_STORE" "$WRAPPER_CONFIG_STORE.bak" "$WRAPPER_CONFIG_STORE.lock" \
   "$WRAPPER_CONFIG_DOCTOR" "$WRAPPER_CONFIG_BEGIN" "$WRAPPER_CONFIG_END"
 ./scripts/mneme-agent-hook.sh doctor > "$WRAPPER_DOCTOR"
+grep -q 'mneme-agent-hook: config_loaded=false' "$WRAPPER_DOCTOR"
+grep -q 'mneme-agent-hook: hook_smoke=ok' "$WRAPPER_DOCTOR"
+grep -q 'mneme-agent-hook: extractor_smoke=skipped:not-configured' "$WRAPPER_DOCTOR"
 grep -q 'mneme-agent-hook: ok' "$WRAPPER_DOCTOR"
 cargo run -p mneme-cli -- remember "user prefers wrapper workflows" --store "$WRAPPER_STORE"
 MNEME_STORE="$WRAPPER_STORE" MNEME_AGENT_ID=codex MNEME_SCOPE=private MNEME_MAX_ITEMS=2 \
@@ -386,6 +395,10 @@ MNEME_MAX_ITEMS=2
 EOF
 MNEME_AGENT_HOOK_CONFIG="$WRAPPER_CONFIG" ./scripts/mneme-agent-hook.sh doctor > "$WRAPPER_CONFIG_DOCTOR"
 grep -q 'mneme-agent-hook: config=' "$WRAPPER_CONFIG_DOCTOR"
+grep -q 'mneme-agent-hook: config_loaded=true' "$WRAPPER_CONFIG_DOCTOR"
+grep -q "mneme-agent-hook: store=$WRAPPER_CONFIG_STORE" "$WRAPPER_CONFIG_DOCTOR"
+grep -q 'mneme-agent-hook: hook_smoke=ok' "$WRAPPER_CONFIG_DOCTOR"
+grep -q 'mneme-agent-hook: extractor_smoke=skipped:not-configured' "$WRAPPER_CONFIG_DOCTOR"
 grep -q 'mneme-agent-hook: ok' "$WRAPPER_CONFIG_DOCTOR"
 cargo run -p mneme-cli -- remember "user prefers config profiles" --store "$WRAPPER_CONFIG_STORE"
 MNEME_AGENT_HOOK_CONFIG="$WRAPPER_CONFIG" \
@@ -452,8 +465,14 @@ cargo run -p mneme-cli -- context "planning docs" --store "$AGENT_COMMAND_STORE"
 WRAPPER_COMMAND_STORE="${TMP_ROOT}/mneme-quality-gate-wrapper-command.json"
 WRAPPER_COMMAND_CONFIG="${TMP_ROOT}/mneme-quality-gate-wrapper-command.env"
 WRAPPER_COMMAND_DOCTOR="${TMP_ROOT}/mneme-quality-gate-wrapper-command-doctor.json"
+WRAPPER_COMMAND_WRAPPER_DOCTOR="${TMP_ROOT}/mneme-quality-gate-wrapper-command-wrapper-doctor.txt"
+WRAPPER_COMMAND_EXTRACTOR_DOCTOR="${TMP_ROOT}/mneme-quality-gate-wrapper-command-extractor-doctor.txt"
 WRAPPER_COMMAND_END="${TMP_ROOT}/mneme-quality-gate-wrapper-command-end.json"
-rm -f "$WRAPPER_COMMAND_STORE" "$WRAPPER_COMMAND_CONFIG" "$WRAPPER_COMMAND_DOCTOR" "$WRAPPER_COMMAND_END"
+WRAPPER_FAILING_COMMAND_CONFIG="${TMP_ROOT}/mneme-quality-gate-wrapper-failing-command.env"
+WRAPPER_FAILING_COMMAND_DOCTOR="${TMP_ROOT}/mneme-quality-gate-wrapper-failing-command-doctor.txt"
+rm -f "$WRAPPER_COMMAND_STORE" "$WRAPPER_COMMAND_CONFIG" "$WRAPPER_COMMAND_DOCTOR" \
+  "$WRAPPER_COMMAND_WRAPPER_DOCTOR" "$WRAPPER_COMMAND_EXTRACTOR_DOCTOR" "$WRAPPER_COMMAND_END" \
+  "$WRAPPER_FAILING_COMMAND_CONFIG" "$WRAPPER_FAILING_COMMAND_DOCTOR"
 cargo run -p mneme-cli -- init \
   --store "$WRAPPER_COMMAND_STORE" \
   --config "$WRAPPER_COMMAND_CONFIG" \
@@ -467,6 +486,27 @@ cargo run -p mneme-cli -- doctor \
   --config "$WRAPPER_COMMAND_CONFIG" \
   --json > "$WRAPPER_COMMAND_DOCTOR"
 grep -q '"mneme_extractor_command": "evals/fixtures/command-extractor.sh"' "$WRAPPER_COMMAND_DOCTOR"
+MNEME_AGENT_HOOK_CONFIG="$WRAPPER_COMMAND_CONFIG" scripts/mneme-agent-hook.sh doctor > "$WRAPPER_COMMAND_WRAPPER_DOCTOR"
+grep -q 'mneme-agent-hook: extractor_command=evals/fixtures/command-extractor.sh' "$WRAPPER_COMMAND_WRAPPER_DOCTOR"
+grep -q 'mneme-agent-hook: hook_smoke=ok' "$WRAPPER_COMMAND_WRAPPER_DOCTOR"
+grep -q 'mneme-agent-hook: extractor_smoke=skipped:requires --check-extractor' "$WRAPPER_COMMAND_WRAPPER_DOCTOR"
+if grep -q 'mneme-agent-hook: extractor_smoke=ok' "$WRAPPER_COMMAND_WRAPPER_DOCTOR"; then
+  echo "quality-gate: wrapper doctor ran extractor smoke without --check-extractor" >&2
+  exit 1
+fi
+cat > "$WRAPPER_FAILING_COMMAND_CONFIG" <<EOF
+MNEME_STORE=$WRAPPER_COMMAND_STORE
+MNEME_AGENT_ID=codex
+MNEME_SCOPE=private
+MNEME_MAX_ITEMS=3
+MNEME_EXTRACTOR_COMMAND=/bin/false
+EOF
+MNEME_AGENT_HOOK_CONFIG="$WRAPPER_FAILING_COMMAND_CONFIG" scripts/mneme-agent-hook.sh doctor > "$WRAPPER_FAILING_COMMAND_DOCTOR"
+grep -q 'mneme-agent-hook: extractor_command=/bin/false' "$WRAPPER_FAILING_COMMAND_DOCTOR"
+grep -q 'mneme-agent-hook: extractor_smoke=skipped:requires --check-extractor' "$WRAPPER_FAILING_COMMAND_DOCTOR"
+MNEME_AGENT_HOOK_CONFIG="$WRAPPER_COMMAND_CONFIG" scripts/mneme-agent-hook.sh doctor --check-extractor > "$WRAPPER_COMMAND_EXTRACTOR_DOCTOR"
+grep -q 'mneme-agent-hook: extractor_smoke=ok' "$WRAPPER_COMMAND_EXTRACTOR_DOCTOR"
+grep -q 'mneme-agent-hook: ok' "$WRAPPER_COMMAND_EXTRACTOR_DOCTOR"
 MNEME_AGENT_HOOK_CONFIG="$WRAPPER_COMMAND_CONFIG" scripts/mneme-agent-hook.sh begin "Draft planning docs" \
   --query "planning docs" > /dev/null
 MNEME_AGENT_HOOK_CONFIG="$WRAPPER_COMMAND_CONFIG" scripts/mneme-agent-hook.sh end session-001 \
