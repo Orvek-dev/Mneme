@@ -223,6 +223,14 @@ fn compact_actual(actual: &mut ActualState) {
 }
 
 fn apply_lifecycle_event(actual: &mut ActualState, event: &RecordedEvent) -> bool {
+    if let Some(target_id) = find_forget_id_marker(&event.text) {
+        forget_claim_by_id(actual, target_id);
+        return true;
+    }
+    if let Some((target_id, new_text)) = find_correct_id_marker(&event.text) {
+        correct_claim_by_id(actual, event, target_id, new_text);
+        return true;
+    }
     if let Some(target) = find_forget_marker(&event.text) {
         forget_claims(actual, target);
         return true;
@@ -232,6 +240,20 @@ fn apply_lifecycle_event(actual: &mut ActualState, event: &RecordedEvent) -> boo
         return true;
     }
     false
+}
+
+fn forget_claim_by_id(actual: &mut ActualState, target_id: &str) {
+    let target_id = target_id.trim();
+    for claim in &mut actual.claims {
+        if claim.status == "active" && claim.id == target_id {
+            claim.status = "forgotten".to_owned();
+            actual.audit.push(AuditEvent {
+                kind: "claim.update".to_owned(),
+                target_id: claim.id.clone(),
+            });
+            break;
+        }
+    }
 }
 
 fn forget_claims(actual: &mut ActualState, target: &str) {
@@ -244,6 +266,40 @@ fn forget_claims(actual: &mut ActualState, target: &str) {
             });
         }
     }
+}
+
+fn correct_claim_by_id(
+    actual: &mut ActualState,
+    event: &RecordedEvent,
+    target_id: &str,
+    new_text: &str,
+) {
+    let target_id = target_id.trim();
+    let mut source_event_ids = Vec::new();
+    for claim in &mut actual.claims {
+        if claim.status == "active" && claim.id == target_id {
+            claim.status = "superseded".to_owned();
+            source_event_ids.extend(claim.source_event_ids.clone());
+            actual.audit.push(AuditEvent {
+                kind: "claim.update".to_owned(),
+                target_id: claim.id.clone(),
+            });
+            break;
+        }
+    }
+
+    if source_event_ids.is_empty() {
+        return;
+    }
+    source_event_ids.push(event.id.clone());
+    dedupe_ids(&mut source_event_ids);
+
+    let claim = claim_from_marker(event, actual.claims.len() + 1, new_text, source_event_ids);
+    actual.audit.push(AuditEvent {
+        kind: "claim.write".to_owned(),
+        target_id: claim.id.clone(),
+    });
+    actual.claims.push(claim);
 }
 
 fn correct_claims(actual: &mut ActualState, event: &RecordedEvent, old_text: &str, new_text: &str) {
@@ -355,6 +411,16 @@ fn find_forget_marker(text: &str) -> Option<&str> {
     None
 }
 
+fn find_forget_id_marker(text: &str) -> Option<&str> {
+    if let Some((_, rest)) = text.split_once("forget-id:") {
+        let trimmed = rest.trim();
+        if !trimmed.is_empty() {
+            return Some(trimmed);
+        }
+    }
+    None
+}
+
 fn find_correct_marker(text: &str) -> Option<(&str, &str)> {
     for marker in ["correct:", "수정:"] {
         if let Some((_, rest)) = text.split_once(marker) {
@@ -364,6 +430,18 @@ fn find_correct_marker(text: &str) -> Option<(&str, &str)> {
             if !old_text.is_empty() && !new_text.is_empty() {
                 return Some((old_text, new_text));
             }
+        }
+    }
+    None
+}
+
+fn find_correct_id_marker(text: &str) -> Option<(&str, &str)> {
+    if let Some((_, rest)) = text.split_once("correct-id:") {
+        let (target_id, new_text) = rest.split_once("->")?;
+        let target_id = target_id.trim();
+        let new_text = new_text.trim();
+        if !target_id.is_empty() && !new_text.is_empty() {
+            return Some((target_id, new_text));
         }
     }
     None

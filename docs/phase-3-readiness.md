@@ -100,3 +100,7 @@ classification, and quality-gate checks for hook success and failure paths.
 Phase 13 shipped the **Local Store Lock & Conflict Safety MVP** in `v0.19.0`,
 adding exclusive JSON store lock files, stable `store_lock` error
 classification, and hook/quality-gate checks for recoverable lock conflicts.
+
+Phase 14 shipped the **Memory Review & Policy Controls MVP** in `v0.20.0`,
+adding `mneme claims`, claim-ID based forget/correct controls, and eval plus
+quality-gate checks that duplicate claim text is only updated by selected ID.

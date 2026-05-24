@@ -49,6 +49,8 @@ boundary for restart verification.
   adapter boundary for claim extraction.
 - [REQ-V1-015][Ubiquitous] Extractor output shall still pass through engine
   safety, provenance, and audit rules.
+- [REQ-V1-016][Event-driven] Claim-ID lifecycle events shall target exactly one
+  active claim.
 
 ## Verification Map
 
@@ -69,3 +71,4 @@ boundary for restart verification.
 | REQ-V1-013 | lifecycle context-pack checks in core suite | verified |
 | REQ-V1-014 | custom extractor unit test and `RuleBasedExtractor` default path | verified |
 | REQ-V1-015 | extractor secret-blocking unit test | verified |
+| REQ-V1-016 | `id-lifecycle-targets-one-claim` core scenario | verified |
