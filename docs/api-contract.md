@@ -49,6 +49,9 @@ CLI-bound review workflows can use `mneme review <path>` to write a Markdown or
 JSON artifact without mutating the store. Review artifacts redact sensitive
 claim text by default; raw export requires `--include-sensitive`.
 
+CLI-bound first-run workflows can use `mneme init` to create the default local
+store and `.mneme/mneme-agent-hook.env` profile before wiring an agent runtime.
+
 Agent runtimes can use `scripts/mneme-agent-hook.sh` as the repository-local
 installation wrapper. It delegates to an installed `MNEME_BIN`, otherwise runs
 cargo from the repository, and uses a local debug binary only when cargo is

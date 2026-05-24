@@ -9,7 +9,8 @@ For automation, prefer `mneme hook doctor/begin/end`; the older
 Check the local hook runtime first:
 
 ```sh
-cargo run -p mneme-cli -- hook doctor --store /tmp/mneme.json
+mneme init
+mneme hook doctor --store /tmp/mneme.json
 scripts/mneme-agent-hook.sh doctor
 ```
 
@@ -88,10 +89,11 @@ Supported environment variables:
 - `MNEME_SCOPE`: begin scope appended when `--scope` is absent.
 - `MNEME_MAX_ITEMS`: begin item cap appended when `--max-items` is absent.
 
-For persistent local configuration, copy
-`examples/mneme-agent-hook.env.example` to `.mneme/mneme-agent-hook.env`.
-Runtime values resolve as CLI flags, then environment variables, then profile
-values, then command defaults.
+For persistent local configuration, run `mneme init` to create
+`.mneme/mneme-agent-hook.env`. The
+`examples/mneme-agent-hook.env.example` file remains available for manual
+profiles. Runtime values resolve as CLI flags, then environment variables, then
+profile values, then command defaults.
 
 `scripts/mneme-agent-hook.sh doctor` runs an isolated temporary-store smoke test
 covering hook doctor, begin, and end.

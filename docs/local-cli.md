@@ -11,11 +11,13 @@ Inspect available commands:
 ```sh
 ./scripts/install-local.sh
 mneme help
+mneme init --help
 mneme help begin
 mneme begin --help
 ```
 
 ```sh
+mneme init
 mneme doctor
 mneme ingest "remember: user prefers local-first tools"
 mneme remember "user prefers local-first tools"
@@ -36,7 +38,15 @@ mneme compact
 ```
 
 The default store is `.mneme/mneme-v1.json` under the current working
-directory. `.mneme/` is ignored by git.
+directory. `mneme init` creates that store and the default
+`.mneme/mneme-agent-hook.env` runtime profile. `.mneme/` is ignored by git.
+
+Use `init --force` only when you intentionally want to refresh the generated
+store/profile files:
+
+```sh
+mneme init --force
+```
 
 Use `--store <path>` to isolate experiments:
 

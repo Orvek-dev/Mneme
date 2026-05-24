@@ -124,3 +124,8 @@ quality-gate checks that safe artifacts do not expose secret-like claim text.
 Phase 19 shipped the **Local Install & First-Run UX MVP** in `v0.25.0`, adding
 `scripts/install-local.sh`, installed-binary first-run smoke checks, and docs
 centered on `mneme` as the local CLI entry point.
+
+Phase 20 shipped the **First-Run Bootstrap & Installed Agent Hook MVP** in
+`v0.26.0`, adding `mneme init`, generated local store/profile bootstrap, and
+quality-gate checks that an installed `mneme` binary can initialize a temporary
+workspace and drive the agent hook wrapper through that profile.

@@ -30,6 +30,8 @@ Mneme is pre-1.0. The useful surface today is local development and evaluation:
 - local JSON stores include schema metadata, write locks, atomic writes,
   backups, repair, import/export, and compaction;
 - the local CLI can be installed as `mneme` for first-run personal workflows;
+- `mneme init` creates a local store and agent hook profile for a new
+  workspace;
 - agents can open and close task sessions with scoped context and post-task
   memory writes;
 - agent hooks expose a stable JSON envelope for doctor/begin/end automation;
@@ -61,6 +63,7 @@ Install Rust, then install the local CLI:
 ```sh
 ./scripts/install-local.sh
 mneme doctor
+mneme init
 mneme help
 cargo run -p mneme-eval -- doctor
 cargo run -p mneme-eval -- help
@@ -91,8 +94,7 @@ scripts/mneme-agent-hook.sh doctor
 Use a local ignored runtime profile when wiring an agent:
 
 ```sh
-mkdir -p .mneme
-cp examples/mneme-agent-hook.env.example .mneme/mneme-agent-hook.env
+mneme init
 scripts/mneme-agent-hook.sh doctor
 ```
 

@@ -24,6 +24,7 @@ surface:
 ```sh
 ./scripts/install-local.sh
 mneme doctor
+mneme init
 mneme help
 cargo run -p mneme-eval -- doctor
 cargo run -p mneme-eval -- help
@@ -48,8 +49,9 @@ mneme context "project launch" --scope project-alpha --max-items 3 --store "$STO
 mneme validate --store "$STORE"
 ```
 
-The default store is `.mneme/mneme-v1.json` in the current directory. `.mneme/`
-is ignored by git.
+`mneme init` creates the default `.mneme/mneme-v1.json` store and
+`.mneme/mneme-agent-hook.env` runtime profile in the current directory.
+`.mneme/` is ignored by git.
 
 ## Agent Session Flow
 
@@ -78,12 +80,11 @@ mneme end session-001 \
   --json
 ```
 
-For repeated local use, copy the public profile example to the ignored runtime
-directory:
+For repeated local use, initialize the ignored runtime directory and let the
+wrapper load the generated profile:
 
 ```sh
-mkdir -p .mneme
-cp examples/mneme-agent-hook.env.example .mneme/mneme-agent-hook.env
+mneme init
 scripts/mneme-agent-hook.sh doctor
 ```
 

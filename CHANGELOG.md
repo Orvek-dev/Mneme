@@ -4,6 +4,18 @@ This project follows the spirit of Keep a Changelog.
 
 ## Unreleased
 
+## [0.26.0] - 2026-05-24
+
+### Added
+
+- Added `mneme init` to create a valid local v1 store and agent hook runtime
+  profile for a new workspace.
+- Added generated profile support for `MNEME_BIN`, `MNEME_STORE`,
+  `MNEME_AGENT_ID`, `MNEME_SCOPE`, and `MNEME_MAX_ITEMS` values.
+- Added installed-binary quality-gate checks for workspace bootstrap and
+  generated-profile wrapper doctor/begin/end flows.
+- Added first-run bootstrap documentation and the Phase 20 feature spec.
+
 ## [0.25.0] - 2026-05-24
 
 ### Added
