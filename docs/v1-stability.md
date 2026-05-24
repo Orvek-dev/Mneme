@@ -53,6 +53,8 @@ eval update land in the same PR.
   `baseline`, `baseline-gate`, and command-specific help.
 - Eval reports include `report_schema_version`, target metadata, counts, and
   per-scenario results.
+- The opt-in `model` suite covers command-backed extraction quality for durable
+  preferences, no-claim cases, secret blocking, and lifecycle correction.
 - The `core`, `runtime`, and `agent` suites must pass for `fake` and
   `mneme-v1`.
 - `mneme-cli` supports `init`, `doctor`, `remember`, `correct`, `forget`,

@@ -29,6 +29,10 @@ The engine, not the extractor, owns:
 This keeps future model-backed adapters replaceable without letting them bypass
 core safety and provenance rules.
 
+Extractor adapters should still be conservative. Events that are small talk,
+one-off task instructions, answer-local instructions, quoted sample data, test
+fixtures, or third-party preferences should normally return `Ok(None)`.
+
 ## Default Adapter
 
 `RuleBasedExtractor` parses explicit markers:

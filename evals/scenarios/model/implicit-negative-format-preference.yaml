@@ -1,0 +1,40 @@
+id: model-implicit-negative-format-preference
+tags:
+  - model
+  - command-extractor
+  - recall
+  - category-recall
+  - category-preference
+  - category-format
+budget:
+  daily_cloud_tokens: 100
+events:
+  - speaker_id: user
+    actor_agent_id: codex
+    scope: private
+    trust_level: trusted_user
+    text: "Please don't use tables for tradeoff summaries; bullets are easier for me."
+expected:
+  event_append:
+    count: 1
+  claims:
+    - subject: user
+      predicate: prefers
+      object: bullets for tradeoff summaries
+      status: active
+      scope: private
+    - subject: user
+      predicate: prefers
+      object: tables for tradeoff summaries
+      must_not_exist: true
+  context_pack:
+    query: "tradeoff summaries"
+    must_include:
+      - bullets
+    must_not_include:
+      - tables for tradeoff summaries
+    citation_required: true
+  budget:
+    hard_cap_violations: 0
+  audit:
+    read_write_events_required: true

@@ -48,7 +48,7 @@ Mneme is pre-1.0. The useful surface today is local development and evaluation:
   settings out of each invocation;
 - extraction and storage are behind adapter boundaries;
 - model-backed extraction experiments can use a provider-neutral command
-  adapter without adding API keys to the repo;
+  adapter and expanded model eval suite without adding API keys to the repo;
 - a public OpenAI wrapper example can run through the same command protocol,
   with CI using deterministic dry-run mode;
 - workspace crates are package-checked locally but marked `publish = false`

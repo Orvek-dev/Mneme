@@ -4,6 +4,25 @@ This project follows the spirit of Keep a Changelog.
 
 ## Unreleased
 
+## [0.32.0] - 2026-05-24
+
+### Added
+
+- Expanded the opt-in model eval suite from 8 to 13 scenarios covering durable
+  communication preferences, negative format preferences, project-scoped
+  format preferences, quoted sample no-claim handling, and answer-local
+  instruction no-claim handling.
+- Expanded the deterministic command extractor fixture for the new model suite
+  coverage.
+- Strengthened the OpenAI wrapper prompt and dry-run behavior so provider
+  experiments reject transient instructions, quoted sample data, and rejected
+  format/tool preferences more consistently.
+- Added wrapper post-processing guardrails that suppress model claims for
+  transient instructions, sample/test text, and rejected alternatives.
+- Updated the release quality gate to require the expanded 13-scenario model
+  baseline.
+- Added the Phase 26 provider extraction quality feature spec.
+
 ## [0.31.0] - 2026-05-24
 
 ### Added

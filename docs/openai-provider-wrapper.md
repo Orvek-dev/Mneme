@@ -13,6 +13,12 @@ The wrapper uses the OpenAI Responses API with Structured Outputs. It defaults
 to `gpt-5.4-mini`, which is a lower-cost mini model that supports the
 `/v1/responses` endpoint and structured outputs.
 
+The wrapper keeps provider-specific quality guardrails outside `mneme-core`.
+It prefilters obvious secret-like values locally, prompts the model to extract
+only durable memory, and suppresses model claims for transient answer/task
+instructions, quoted sample or test data, and rejected alternatives when the
+user stated a preferred alternative.
+
 ## Dry-Run Verification
 
 CI and release verification must not require provider credentials. Use dry-run
@@ -82,5 +88,7 @@ and [Live Provider Baseline Runbook](live-provider-baseline-runbook.md).
 - Obvious secret-like values are prefiltered locally by the wrapper before any
   provider request, then Mneme marks those claims as blocked from active
   context.
+- Transient instructions and quoted sample/test data should return `claim:
+  null`, not durable memory.
 - Keep the default core suite provider-free; provider wrappers belong behind
   the opt-in `mneme-v1-command` target.

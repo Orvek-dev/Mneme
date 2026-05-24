@@ -15,9 +15,12 @@ credentials, or prompts into `mneme-core`.
   dry-run mode that requires no network or provider credentials.
 - [REQ-OPENAI-WRAP-004][Privacy] Obvious secret-like events shall be handled
   locally before a provider request is made.
-- [REQ-OPENAI-WRAP-005][Documentation] Public usage docs shall explain dry-run,
+- [REQ-OPENAI-WRAP-005][Quality] The wrapper shall suppress transient
+  answer/task instructions, quoted sample data, and rejected alternatives when
+  the user stated a preferred alternative.
+- [REQ-OPENAI-WRAP-006][Documentation] Public usage docs shall explain dry-run,
   live local use, and safety rules.
-- [REQ-OPENAI-WRAP-006][Release] CI and release verification shall exercise the
+- [REQ-OPENAI-WRAP-007][Release] CI and release verification shall exercise the
   wrapper dry-run through the opt-in model eval suite.
 
 ## Verification Map
@@ -28,5 +31,6 @@ credentials, or prompts into `mneme-core`.
 | REQ-OPENAI-WRAP-002 | `.env.example` placeholders and env-only wrapper config | verified |
 | REQ-OPENAI-WRAP-003 | `MNEME_OPENAI_DRY_RUN=1` model suite run | verified |
 | REQ-OPENAI-WRAP-004 | local secret prefilter in wrapper | verified |
-| REQ-OPENAI-WRAP-005 | `docs/openai-provider-wrapper.md` | verified |
-| REQ-OPENAI-WRAP-006 | CI and release workflow dry-run steps | verified |
+| REQ-OPENAI-WRAP-005 | wrapper dry-run rules and model no-claim scenarios | verified |
+| REQ-OPENAI-WRAP-006 | `docs/openai-provider-wrapper.md` | verified |
+| REQ-OPENAI-WRAP-007 | CI and release workflow dry-run steps | verified |
