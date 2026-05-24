@@ -43,6 +43,6 @@ expected:
     read_write_events_required: true
     claim_update_required: true
   store:
-    schema_version: 1
+    schema_version: 2
     valid: true
     compacted: true

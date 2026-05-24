@@ -31,7 +31,7 @@ expected:
   audit:
     read_write_events_required: true
   store:
-    schema_version: 1
+    schema_version: 2
     valid: true
     backup_required: true
     repair_performed: true

@@ -3,14 +3,15 @@ use std::time::{SystemTime, UNIX_EPOCH};
 
 use mneme_core::{
     CommandExtractor, EventInput, JsonFileStore, MnemeConfig, MnemeEngine, MnemeStore,
-    StoreFileStatus,
+    SessionBeginInput, SessionEndInput, StoreFileStatus,
 };
 
 use crate::error::EvalError;
 use crate::scenario::Scenario;
 use crate::target::{
     ActualState, AuditEvent, BudgetActual, Claim, ContextItem, ContextPack, EvalTarget,
-    EvalTargetMetadata, FaultMode, OmittedItem, RecordedEvent, StoreActual, TargetRunOptions,
+    EvalTargetMetadata, FaultMode, OmittedItem, RecordedEvent, SessionActual, StoreActual,
+    TargetRunOptions,
 };
 
 pub(crate) struct MnemeV1EvalTarget;
@@ -185,6 +186,29 @@ fn run_with_optional_persistence(
         })?;
     }
 
+    if let Some(agent_flow) = &scenario.agent_flow {
+        let begin = engine.begin_session(SessionBeginInput {
+            task: agent_flow.begin.task.clone(),
+            actor_agent_id: agent_flow.begin.actor_agent_id.clone(),
+            query: agent_flow.begin.query.clone(),
+        });
+        if let Some(end) = &agent_flow.end {
+            engine
+                .end_session(SessionEndInput {
+                    session_id: begin.session.id,
+                    actor_agent_id: agent_flow.begin.actor_agent_id.clone(),
+                    summary: end.summary.clone(),
+                    remember: end.remember.clone(),
+                })
+                .map_err(|source| {
+                    EvalError::scenario(format!(
+                        "scenario {} failed to end agent session: {source}",
+                        scenario.id
+                    ))
+                })?;
+        }
+    }
+
     let context_pack = scenario
         .expected
         .context_pack
@@ -220,6 +244,19 @@ fn run_with_optional_persistence(
                 status: claim.status.as_str().to_owned(),
                 scope: claim.scope,
                 source_event_ids: claim.source_event_ids,
+            })
+            .collect(),
+        sessions: snapshot
+            .sessions
+            .into_iter()
+            .map(|session| SessionActual {
+                id: session.id,
+                task: session.task,
+                actor_agent_id: session.actor_agent_id,
+                status: session.status.as_str().to_owned(),
+                context_claim_ids: session.context_claim_ids,
+                summary: session.summary,
+                memory_event_ids: session.memory_event_ids,
             })
             .collect(),
         context_pack: context_pack.map(|pack| ContextPack {

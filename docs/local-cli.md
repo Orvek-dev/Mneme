@@ -14,6 +14,8 @@ cargo run -p mneme-cli -- correct "user prefers local-first tools" "user prefers
 cargo run -p mneme-cli -- forget "user prefers desktop IDE"
 cargo run -p mneme-cli -- context "desktop IDE"
 cargo run -p mneme-cli -- snapshot --json
+cargo run -p mneme-cli -- begin "Draft setup plan" --query "local-first" --agent codex --json
+cargo run -p mneme-cli -- end session-001 --summary "Prepared a concise setup plan" --remember "user prefers concise setup plans" --json
 cargo run -p mneme-cli -- validate --json
 cargo run -p mneme-cli -- compact
 ```
@@ -56,6 +58,28 @@ Repair a corrupted current store from `<store>.bak`:
 
 ```sh
 cargo run -p mneme-cli -- repair --store /tmp/mneme.json --json
+```
+
+## Agent Sessions
+
+`begin` retrieves context and records a session:
+
+```sh
+cargo run -p mneme-cli -- begin "Draft setup plan" \
+  --query "local-first" \
+  --agent codex \
+  --store /tmp/mneme.json \
+  --json
+```
+
+`end` closes the session and can write explicit memory claims:
+
+```sh
+cargo run -p mneme-cli -- end session-001 \
+  --summary "Prepared a concise setup plan" \
+  --remember "user prefers concise setup plans" \
+  --store /tmp/mneme.json \
+  --json
 ```
 
 ## Event Options

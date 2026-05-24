@@ -5,7 +5,8 @@ maintenance surface for single-user development.
 
 ## Store Format
 
-The default local store is `.mneme/mneme-v1.json`. The JSON state includes:
+The default local store is `.mneme/mneme-v1.json`. The JSON state schema is
+currently `2` and includes:
 
 - `schema_version`
 - `metadata.store_id`
@@ -14,7 +15,7 @@ The default local store is `.mneme/mneme-v1.json`. The JSON state includes:
 - `metadata.updated_at_unix_seconds`
 - `metadata.engine_version`
 - `metadata.migration_history`
-- `budget`, `events`, `claims`, and `audit`
+- `budget`, `events`, `claims`, `sessions`, and `audit`
 
 Missing schema metadata from older stores is treated as legacy state and is
 normalized on the next successful save.

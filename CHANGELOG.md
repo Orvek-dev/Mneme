@@ -4,6 +4,24 @@ This project follows the spirit of Keep a Changelog.
 
 ## Unreleased
 
+## [0.10.0] - 2026-05-24
+
+### Added
+
+- Added agent session records to v1 state and bumped the local store schema to
+  version 2.
+- Added `mneme begin` and `mneme end` for task-scoped context retrieval and
+  post-task memory writes.
+- Added session begin/end audit events and session validation coverage.
+- Added the public `agent` eval suite covering begin/end recall, session
+  context, remembered claims, and secret blocking from agent summaries.
+- Added Agent Integration MVP documentation and spec.
+
+### Changed
+
+- Extended the local quality gate with CLI begin/end smoke checks and agent
+  suite validation, replay, and acceptance checks.
+
 ## [0.9.0] - 2026-05-24
 
 ### Added

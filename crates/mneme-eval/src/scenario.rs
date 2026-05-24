@@ -17,6 +17,8 @@ pub(crate) struct Scenario {
     pub(crate) persistence: Option<Persistence>,
     #[serde(default)]
     pub(crate) maintenance: Maintenance,
+    #[serde(default)]
+    pub(crate) agent_flow: Option<AgentFlow>,
     pub(crate) events: Vec<InputEvent>,
     pub(crate) expected: Expected,
 }
@@ -51,6 +53,31 @@ pub(crate) struct Maintenance {
 
 #[derive(Debug, Clone, Deserialize)]
 #[serde(deny_unknown_fields)]
+pub(crate) struct AgentFlow {
+    pub(crate) begin: AgentBegin,
+    #[serde(default)]
+    pub(crate) end: Option<AgentEnd>,
+}
+
+#[derive(Debug, Clone, Deserialize)]
+#[serde(deny_unknown_fields)]
+pub(crate) struct AgentBegin {
+    pub(crate) task: String,
+    #[serde(default)]
+    pub(crate) actor_agent_id: Option<String>,
+    #[serde(default)]
+    pub(crate) query: Option<String>,
+}
+
+#[derive(Debug, Clone, Default, Deserialize)]
+#[serde(default, deny_unknown_fields)]
+pub(crate) struct AgentEnd {
+    pub(crate) summary: Option<String>,
+    pub(crate) remember: Vec<String>,
+}
+
+#[derive(Debug, Clone, Deserialize)]
+#[serde(deny_unknown_fields)]
 pub(crate) struct InputEvent {
     pub(crate) speaker_id: String,
     #[serde(default)]
@@ -71,6 +98,7 @@ pub(crate) struct Expected {
     pub(crate) budget: Option<BudgetExpected>,
     pub(crate) audit: Option<AuditExpected>,
     pub(crate) store: Option<StoreExpected>,
+    pub(crate) session: Option<SessionExpected>,
 }
 
 impl Expected {
@@ -81,6 +109,7 @@ impl Expected {
             && self.budget.is_none()
             && self.audit.is_none()
             && self.store.is_none()
+            && self.session.is_none()
     }
 }
 
@@ -121,6 +150,7 @@ pub(crate) struct BudgetExpected {
 pub(crate) struct AuditExpected {
     pub(crate) read_write_events_required: bool,
     pub(crate) claim_update_required: bool,
+    pub(crate) session_events_required: bool,
 }
 
 #[derive(Debug, Clone, Default, Deserialize)]
@@ -132,6 +162,17 @@ pub(crate) struct StoreExpected {
     pub(crate) repair_performed: bool,
     pub(crate) compacted: bool,
     pub(crate) imported: bool,
+}
+
+#[derive(Debug, Clone, Default, Deserialize)]
+#[serde(default, deny_unknown_fields)]
+pub(crate) struct SessionExpected {
+    pub(crate) status: Option<String>,
+    pub(crate) task: Option<String>,
+    pub(crate) actor_agent_id: Option<String>,
+    pub(crate) context_must_include: Vec<String>,
+    pub(crate) memory_event_count: Option<usize>,
+    pub(crate) summary_contains: Option<String>,
 }
 
 pub(crate) fn load_scenario(path: &Path) -> Result<Scenario, EvalError> {
@@ -173,6 +214,43 @@ fn validate_scenario(scenario: &Scenario, path: &Path) -> Result<(), EvalError> 
                 "scenario {} persistence restart_after_event exceeds event count",
                 scenario.id
             )));
+        }
+    }
+    if let Some(agent_flow) = &scenario.agent_flow {
+        if agent_flow.begin.task.trim().is_empty() {
+            return Err(EvalError::scenario(format!(
+                "scenario {} agent_flow begin task must not be empty",
+                scenario.id
+            )));
+        }
+        if agent_flow
+            .begin
+            .query
+            .as_ref()
+            .is_some_and(|query| query.trim().is_empty())
+        {
+            return Err(EvalError::scenario(format!(
+                "scenario {} agent_flow begin query must not be empty",
+                scenario.id
+            )));
+        }
+        if let Some(end) = &agent_flow.end {
+            if end
+                .summary
+                .as_ref()
+                .is_some_and(|summary| summary.trim().is_empty())
+            {
+                return Err(EvalError::scenario(format!(
+                    "scenario {} agent_flow end summary must not be empty",
+                    scenario.id
+                )));
+            }
+            if end.remember.iter().any(|claim| claim.trim().is_empty()) {
+                return Err(EvalError::scenario(format!(
+                    "scenario {} agent_flow end remember entries must not be empty",
+                    scenario.id
+                )));
+            }
         }
     }
     for (idx, event) in scenario.events.iter().enumerate() {

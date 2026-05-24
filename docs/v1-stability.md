@@ -17,6 +17,7 @@ eval update land in the same PR.
 - JSON file persistence round-trips events, claims, budget, and audit state.
 - JSON stores include `schema_version`, metadata, generation, engine version,
   timestamps, and migration history.
+- JSON store schema version `2` includes agent session records.
 - JSON store saves are atomic and create `<store>.bak` before replacing an
   existing store.
 - Store validation detects unsupported schema versions, duplicate IDs, missing
@@ -25,6 +26,8 @@ eval update land in the same PR.
 - Store repair can restore an invalid current store from a valid backup.
 - Compaction removes inactive claims while preserving active claim recall and
   citations.
+- Agent sessions can begin with scoped context and end with explicit remembered
+  claims.
 - Extraction adapters propose claims; the engine owns IDs, provenance, safety,
   audit, and lifecycle state.
 
@@ -34,10 +37,11 @@ eval update land in the same PR.
   and `baseline`.
 - Eval reports include `report_schema_version`, target metadata, counts, and
   per-scenario results.
-- The `core` and `runtime` suites must pass for `fake` and `mneme-v1`.
+- The `core`, `runtime`, and `agent` suites must pass for `fake` and
+  `mneme-v1`.
 - `mneme-cli` supports `doctor`, `remember`, `correct`, `forget`, `context`,
-  `snapshot`, `validate`, `export`, `import`, `compact`, `repair`, and
-  `version`.
+  `snapshot`, `begin`, `end`, `validate`, `export`, `import`, `compact`,
+  `repair`, and `version`.
 - `mneme-cli --store <path>` isolates local state.
 - `scripts/quality-gate.sh` is the local and release verification entry point.
 - `scripts/public-safety-check.sh` guards against known private/public-safety

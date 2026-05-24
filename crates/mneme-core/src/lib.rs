@@ -10,10 +10,11 @@ pub use v1::{
     CommandExtractor, CompactionReport, ContextItem, ContextPack, EngineSnapshot, EventInput,
     EventRecord, ExtractedClaim, ExtractorCommandRequest, ExtractorCommandResponse, ExtractorError,
     InMemoryStore, JsonFileStore, MigrationRecord, MnemeConfig, MnemeEngine, MnemeExtractor,
-    MnemeState, MnemeStore, OmittedContextItem, RuleBasedExtractor, StateMetadata,
-    StateValidationIssue, StateValidationReport, StoreError, StoreFileInspection, StoreFileStatus,
-    StoreInspection, StoreRepairReport, ValidationSeverity, EXTRACTOR_COMMAND_SCHEMA_VERSION,
-    MNEME_STATE_SCHEMA_VERSION,
+    MnemeState, MnemeStore, OmittedContextItem, RuleBasedExtractor, SessionBeginInput,
+    SessionBeginReport, SessionEndInput, SessionEndReport, SessionError, SessionRecord,
+    SessionStatus, StateMetadata, StateValidationIssue, StateValidationReport, StoreError,
+    StoreFileInspection, StoreFileStatus, StoreInspection, StoreRepairReport, ValidationSeverity,
+    EXTRACTOR_COMMAND_SCHEMA_VERSION, MNEME_STATE_SCHEMA_VERSION,
 };
 
 /// Public product name.
