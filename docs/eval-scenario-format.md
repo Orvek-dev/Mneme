@@ -171,6 +171,8 @@ Current `mneme-v1` lifecycle markers are deterministic:
 - `correct: <old claim> -> <new claim>` or `수정: <old claim> -> <new claim>`
   supersedes an active claim and writes the replacement.
 - `forget: <claim>` or `잊어줘: <claim>` marks an active claim as forgotten.
+- `correct-id: <claim-id> -> <new claim>` and `forget-id: <claim-id>` target
+  one active claim by ID.
 
 Each expected claim requires:
 

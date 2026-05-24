@@ -21,6 +21,7 @@ cargo run -p mneme-cli -- remember "user prefers local-first tools"
 cargo run -p mneme-cli -- remember "user prefers project launch reviews" --scope project-alpha
 cargo run -p mneme-cli -- correct "user prefers local-first tools" "user prefers desktop IDE"
 cargo run -p mneme-cli -- forget "user prefers desktop IDE"
+cargo run -p mneme-cli -- claims --status active --json
 cargo run -p mneme-cli -- context "desktop IDE"
 cargo run -p mneme-cli -- context "project launch" --scope project-alpha --max-items 3
 cargo run -p mneme-cli -- snapshot --json
@@ -38,6 +39,7 @@ Use `--store <path>` to isolate experiments:
 
 ```sh
 cargo run -p mneme-cli -- remember "user prefers local-first tools" --store /tmp/mneme.json
+cargo run -p mneme-cli -- claims --status active --store /tmp/mneme.json --json
 cargo run -p mneme-cli -- context "local-first" --store /tmp/mneme.json --json
 ```
 
@@ -56,6 +58,25 @@ cargo run -p mneme-cli -- context "project launch" \
   --store /tmp/mneme.json \
   --json
 ```
+
+## Claim Review
+
+Use `claims` to inspect stored memory before changing it:
+
+```sh
+cargo run -p mneme-cli -- claims --store /tmp/mneme.json --json
+cargo run -p mneme-cli -- claims --status active --scope private --store /tmp/mneme.json --json
+```
+
+The report includes claim IDs, lifecycle status, scope, and source event IDs.
+When duplicate claim text exists, prefer ID-based lifecycle commands:
+
+```sh
+cargo run -p mneme-cli -- forget --claim-id claim-001 --store /tmp/mneme.json
+cargo run -p mneme-cli -- correct --claim-id claim-002 "user prefers terminal workflows" --store /tmp/mneme.json
+```
+
+Unknown or inactive claim IDs fail before writing a lifecycle event.
 
 ## Store Maintenance
 
@@ -149,6 +170,10 @@ The CLI intentionally keeps the v1 deterministic lifecycle markers visible:
 - `correct <old-claim> <new-claim>` writes
   `correct: <old-claim> -> <new-claim>`.
 - `forget <claim>` writes `forget: <claim>`.
+- `correct --claim-id <id> <new-claim>` writes
+  `correct-id: <id> -> <new-claim>` after checking the claim is active.
+- `forget --claim-id <id>` writes `forget-id: <id>` after checking the claim is
+  active.
 
 ## Command Extractor
 

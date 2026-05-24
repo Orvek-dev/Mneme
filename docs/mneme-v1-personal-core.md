@@ -14,6 +14,8 @@ The v1 core supports:
 - explicit memory extraction from `remember:` and `기억해줘:` markers;
 - explicit memory correction from `correct:` and `수정:` markers;
 - explicit memory removal from `forget:` and `잊어줘:` markers;
+- claim-ID based correction and removal through `correct-id:` and `forget-id:`
+  markers used by CLI policy controls;
 - claim status tracking for active, blocked-secret, superseded, and forgotten
   claims;
 - scoped, ranked, budget-capped context-pack retrieval over active claims;

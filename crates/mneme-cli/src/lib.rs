@@ -11,12 +11,12 @@ use std::io::{self, Write};
 use std::path::{Path, PathBuf};
 
 use mneme_core::{
-    validate_state, BuildStage, ClaimRecord, CommandExtractor, CompactionReport, ContextPack,
-    ContextQuery, EngineSnapshot, EventInput, ExtractorError, JsonFileStore, MnemeConfig,
-    MnemeEngine, MnemeExtractor, MnemeState, MnemeStore, RuleBasedExtractor, SessionBeginInput,
-    SessionBeginReport, SessionEndInput, SessionEndReport, SessionError, StateValidationReport,
-    StoreError, StoreErrorKind, StoreFileStatus, StoreInspection, StoreRepairReport,
-    DEFAULT_CONTEXT_MAX_ITEMS, PRODUCT_NAME,
+    validate_state, BuildStage, ClaimRecord, ClaimStatus, CommandExtractor, CompactionReport,
+    ContextPack, ContextQuery, EngineSnapshot, EventInput, ExtractorError, JsonFileStore,
+    MnemeConfig, MnemeEngine, MnemeExtractor, MnemeState, MnemeStore, RuleBasedExtractor,
+    SessionBeginInput, SessionBeginReport, SessionEndInput, SessionEndReport, SessionError,
+    StateValidationReport, StoreError, StoreErrorKind, StoreFileStatus, StoreInspection,
+    StoreRepairReport, DEFAULT_CONTEXT_MAX_ITEMS, PRODUCT_NAME,
 };
 use serde::Serialize;
 
@@ -107,6 +107,16 @@ impl CliError {
         }
     }
 
+    fn lifecycle(message: impl Into<String>) -> Self {
+        Self {
+            message: message.into(),
+            exit_code: 1,
+            kind: CliErrorKind::Lifecycle,
+            recoverable: false,
+            print_message: true,
+        }
+    }
+
     fn session(source: SessionError) -> Self {
         Self {
             message: format!("agent session: {source}"),
@@ -148,6 +158,7 @@ enum CliErrorKind {
     StoreLock,
     Json,
     Extractor,
+    Lifecycle,
     Session,
     Reported,
 }
@@ -161,6 +172,7 @@ impl CliErrorKind {
             Self::StoreLock => "store_lock",
             Self::Json => "json",
             Self::Extractor => "extractor",
+            Self::Lifecycle => "lifecycle",
             Self::Session => "session",
             Self::Reported => "reported",
         }
@@ -214,6 +226,7 @@ fn run_cli_with_writer(
         "remember" => run_command_or_help("remember", raw_args, writer, run_remember),
         "correct" => run_command_or_help("correct", raw_args, writer, run_correct),
         "forget" => run_command_or_help("forget", raw_args, writer, run_forget),
+        "claims" => run_command_or_help("claims", raw_args, writer, run_claims),
         "context" => run_command_or_help("context", raw_args, writer, run_context),
         "snapshot" => run_command_or_help("snapshot", raw_args, writer, run_snapshot),
         "begin" => run_command_or_help("begin", raw_args, writer, run_begin),
@@ -225,7 +238,7 @@ fn run_cli_with_writer(
         "compact" => run_command_or_help("compact", raw_args, writer, run_compact),
         "repair" => run_command_or_help("repair", raw_args, writer, run_repair),
         _ => Err(CliError::invalid_cli(format!(
-            "unknown mneme command: {command}\navailable commands: doctor, version, ingest, remember, correct, forget, context, snapshot, begin, end, validate, export, import, compact, repair"
+            "unknown mneme command: {command}\navailable commands: doctor, version, ingest, remember, correct, forget, claims, context, snapshot, begin, end, hook, validate, export, import, compact, repair"
         ))),
     }
 }
@@ -274,7 +287,7 @@ fn print_help(command: Option<&str>, writer: &mut impl Write) -> Result<(), CliE
         None => MNEME_HELP,
         Some(command) => command_help(command).ok_or_else(|| {
             CliError::invalid_cli(format!(
-                "unknown mneme help topic: {command}\navailable help topics: doctor, version, ingest, remember, correct, forget, context, snapshot, begin, end, hook, validate, export, import, compact, repair"
+                "unknown mneme help topic: {command}\navailable help topics: doctor, version, ingest, remember, correct, forget, claims, context, snapshot, begin, end, hook, validate, export, import, compact, repair"
             ))
         })?,
     };
@@ -290,6 +303,7 @@ fn command_help(command: &str) -> Option<&'static str> {
         "remember" => Some(MNEME_REMEMBER_HELP),
         "correct" => Some(MNEME_CORRECT_HELP),
         "forget" => Some(MNEME_FORGET_HELP),
+        "claims" => Some(MNEME_CLAIMS_HELP),
         "context" => Some(MNEME_CONTEXT_HELP),
         "snapshot" => Some(MNEME_SNAPSHOT_HELP),
         "begin" => Some(MNEME_BEGIN_HELP),
@@ -317,6 +331,7 @@ Commands:
   remember    Save an explicit memory claim.
   correct     Supersede one claim with another claim.
   forget      Mark a claim as forgotten.
+  claims      Review stored memory claims.
   context     Build a cited context pack for a query.
   snapshot    Print the current store snapshot.
   begin       Start an agent task session and retrieve context.
@@ -334,6 +349,7 @@ Common options:
 
 Examples:
   mneme remember "user prefers local-first tools" --store /tmp/mneme.json
+  mneme claims --status active --store /tmp/mneme.json --json
   mneme context "local-first" --store /tmp/mneme.json --json
   mneme hook begin "Draft setup plan" --query "local-first" --store /tmp/mneme.json
   mneme help begin"#;
@@ -361,19 +377,33 @@ Save an explicit durable memory claim.
 Example:
   mneme remember "user prefers local-first tools" --store /tmp/mneme.json"#;
 
-const MNEME_CORRECT_HELP: &str = r#"Usage: mneme correct <old-claim> <new-claim> [--store <path>] [--speaker <id>] [--agent <id>] [--scope <scope>] [--trust <trust>] [--json]
+const MNEME_CORRECT_HELP: &str = r#"Usage:
+  mneme correct <old-claim> <new-claim> [--store <path>] [--speaker <id>] [--agent <id>] [--scope <scope>] [--trust <trust>] [--json]
+  mneme correct --claim-id <id> <new-claim> [--store <path>] [--speaker <id>] [--agent <id>] [--scope <scope>] [--trust <trust>] [--json]
 
 Supersede an existing claim with a replacement claim.
 
 Example:
-  mneme correct "user prefers local-first tools" "user prefers desktop IDE" --store /tmp/mneme.json"#;
+  mneme correct "user prefers local-first tools" "user prefers desktop IDE" --store /tmp/mneme.json
+  mneme correct --claim-id claim-001 "user prefers terminal workflows" --store /tmp/mneme.json"#;
 
-const MNEME_FORGET_HELP: &str = r#"Usage: mneme forget <claim> [--store <path>] [--speaker <id>] [--agent <id>] [--scope <scope>] [--trust <trust>] [--json]
+const MNEME_FORGET_HELP: &str = r#"Usage:
+  mneme forget <claim> [--store <path>] [--speaker <id>] [--agent <id>] [--scope <scope>] [--trust <trust>] [--json]
+  mneme forget --claim-id <id> [--store <path>] [--speaker <id>] [--agent <id>] [--scope <scope>] [--trust <trust>] [--json]
 
 Mark matching active claims as forgotten.
 
 Example:
-  mneme forget "user prefers desktop IDE" --store /tmp/mneme.json"#;
+  mneme forget "user prefers desktop IDE" --store /tmp/mneme.json
+  mneme forget --claim-id claim-001 --store /tmp/mneme.json"#;
+
+const MNEME_CLAIMS_HELP: &str = r#"Usage: mneme claims [--status <status>]... [--scope <scope>]... [--store <path>] [--json]
+
+Review stored memory claims. Defaults to all statuses and scopes. Supported
+statuses: active, blocked_secret, superseded, forgotten.
+
+Example:
+  mneme claims --status active --store /tmp/mneme.json --json"#;
 
 const MNEME_CONTEXT_HELP: &str = r#"Usage: mneme context <query> [--scope <scope>]... [--max-items <n>] [--store <path>] [--json]
 
@@ -510,6 +540,13 @@ struct RetrievalOptions {
 }
 
 #[derive(Debug, Clone, Default)]
+struct ClaimsOptions {
+    common: CommonOptions,
+    statuses: Vec<ClaimStatus>,
+    scopes: Vec<String>,
+}
+
+#[derive(Debug, Clone, Default)]
 struct EndOptions {
     common: CommonOptions,
     actor_agent_id: Option<String>,
@@ -576,6 +613,21 @@ struct ContextReport {
     item_count: usize,
     omitted_count: usize,
     context_pack: ContextPack,
+}
+
+#[derive(Debug, Serialize)]
+struct ClaimsReport {
+    store: String,
+    total_count: usize,
+    claim_count: usize,
+    filters: ClaimsFilterReport,
+    claims: Vec<ClaimSummary>,
+}
+
+#[derive(Debug, Serialize)]
+struct ClaimsFilterReport {
+    statuses: Vec<String>,
+    scopes: Vec<String>,
 }
 
 #[derive(Debug, Serialize)]
@@ -681,6 +733,22 @@ struct RepairCliReport {
     repair: StoreRepairReport,
 }
 
+enum CorrectTarget {
+    Text {
+        old_claim: String,
+        new_claim: String,
+    },
+    ClaimId {
+        claim_id: String,
+        new_claim: String,
+    },
+}
+
+enum ForgetTarget {
+    Text(String),
+    ClaimId(String),
+}
+
 fn run_ingest(raw_args: Vec<String>, writer: &mut impl Write) -> Result<(), CliError> {
     let (text, options) = parse_ingest_args(raw_args)?;
     run_event_command("ingest", text, options, writer)
@@ -695,21 +763,75 @@ fn run_remember(raw_args: Vec<String>, writer: &mut impl Write) -> Result<(), Cl
 }
 
 fn run_correct(raw_args: Vec<String>, writer: &mut impl Write) -> Result<(), CliError> {
-    let (claims, options) = parse_correct_args(raw_args)?;
-    run_event_command(
-        "correct",
-        format!("correct: {} -> {}", claims.0, claims.1),
-        options,
-        writer,
-    )
+    let (target, options) = parse_correct_args(raw_args)?;
+    match target {
+        CorrectTarget::Text {
+            old_claim,
+            new_claim,
+        } => run_event_command(
+            "correct",
+            format!("correct: {old_claim} -> {new_claim}"),
+            options,
+            writer,
+        ),
+        CorrectTarget::ClaimId {
+            claim_id,
+            new_claim,
+        } => run_claim_id_event_command(
+            "correct",
+            claim_id.clone(),
+            format!("correct-id: {claim_id} -> {new_claim}"),
+            options,
+            writer,
+        ),
+    }
 }
 
 fn run_forget(raw_args: Vec<String>, writer: &mut impl Write) -> Result<(), CliError> {
-    let (claim, options) = parse_event_args(
-        raw_args,
-        "usage: mneme forget <claim> [--store <path>] [--speaker <id>] [--agent <id>] [--scope <scope>] [--trust <trust>] [--json]",
-    )?;
-    run_event_command("forget", format!("forget: {claim}"), options, writer)
+    let (target, options) = parse_forget_args(raw_args)?;
+    match target {
+        ForgetTarget::Text(claim) => {
+            run_event_command("forget", format!("forget: {claim}"), options, writer)
+        }
+        ForgetTarget::ClaimId(claim_id) => run_claim_id_event_command(
+            "forget",
+            claim_id.clone(),
+            format!("forget-id: {claim_id}"),
+            options,
+            writer,
+        ),
+    }
+}
+
+fn run_claims(raw_args: Vec<String>, writer: &mut impl Write) -> Result<(), CliError> {
+    let options = parse_claims_args(raw_args)?;
+    let store_path = resolve_store_path(&options.common)?;
+    let engine = load_engine(&store_path)?;
+    let snapshot = engine.snapshot();
+    let claims = snapshot
+        .claims
+        .iter()
+        .filter(|claim| {
+            (options.statuses.is_empty() || options.statuses.contains(&claim.status))
+                && (options.scopes.is_empty() || options.scopes.contains(&claim.scope))
+        })
+        .map(ClaimSummary::from)
+        .collect::<Vec<_>>();
+    let report = ClaimsReport {
+        store: store_path.display().to_string(),
+        total_count: snapshot.claims.len(),
+        claim_count: claims.len(),
+        filters: ClaimsFilterReport {
+            statuses: options
+                .statuses
+                .iter()
+                .map(|status| status.as_str().to_owned())
+                .collect(),
+            scopes: options.scopes,
+        },
+        claims,
+    };
+    emit_claims_report(&report, options.common.json, writer)
 }
 
 fn run_event_command(
@@ -740,6 +862,38 @@ fn run_event_command(
         command: command.to_owned(),
         store: store_path.display().to_string(),
         extractor: extractor_name,
+        event_count: snapshot.events.len(),
+        claim_count: snapshot.claims.len(),
+        latest_claim: snapshot.claims.last().map(ClaimSummary::from),
+    };
+    emit_event_report(&report, options.common.json, writer)
+}
+
+fn run_claim_id_event_command(
+    command: &str,
+    claim_id: String,
+    event_text: String,
+    options: EventOptions,
+    writer: &mut impl Write,
+) -> Result<(), CliError> {
+    let store_path = resolve_store_path(&options.common)?;
+    let mut engine = load_engine(&store_path)?;
+    require_active_claim_id(&engine, &claim_id)?;
+    engine
+        .ingest_event(EventInput {
+            speaker_id: options.speaker_id,
+            actor_agent_id: options.actor_agent_id,
+            text: event_text,
+            scope: options.scope,
+            trust_level: options.trust_level,
+        })
+        .map_err(CliError::extractor)?;
+    persist_engine(&store_path, &engine)?;
+    let snapshot = engine.snapshot();
+    let report = EventCommandReport {
+        command: command.to_owned(),
+        store: store_path.display().to_string(),
+        extractor: "rule".to_owned(),
         event_count: snapshot.events.len(),
         claim_count: snapshot.claims.len(),
         latest_claim: snapshot.claims.last().map(ClaimSummary::from),
@@ -1183,9 +1337,10 @@ fn push_command_arg(options: &mut ExtractorOptions, arg: String) {
     }
 }
 
-fn parse_correct_args(raw_args: Vec<String>) -> Result<((String, String), EventOptions), CliError> {
+fn parse_correct_args(raw_args: Vec<String>) -> Result<(CorrectTarget, EventOptions), CliError> {
     let mut options = EventOptions::default();
     let mut positionals = Vec::new();
+    let mut claim_id = None;
     let mut idx = 0;
     while idx < raw_args.len() {
         if parse_common_option(&raw_args, &mut idx, &mut options.common)? {
@@ -1209,6 +1364,13 @@ fn parse_correct_args(raw_args: Vec<String>) -> Result<((String, String), EventO
                 idx += 1;
                 options.trust_level = required_arg(&raw_args, idx, "--trust")?;
             }
+            "--claim-id" => {
+                idx += 1;
+                claim_id = Some(require_nonempty(
+                    required_arg(&raw_args, idx, "--claim-id")?,
+                    "claim id",
+                )?);
+            }
             value if value.starts_with('-') => {
                 return Err(CliError::invalid_cli(format!(
                     "unknown correct option: {value}"
@@ -1218,6 +1380,21 @@ fn parse_correct_args(raw_args: Vec<String>) -> Result<((String, String), EventO
         }
         idx += 1;
     }
+    if let Some(claim_id) = claim_id {
+        if positionals.len() != 1 {
+            return Err(CliError::invalid_cli(
+                "usage: mneme correct --claim-id <id> <new-claim> [--store <path>] [--speaker <id>] [--agent <id>] [--scope <scope>] [--trust <trust>] [--json]",
+            ));
+        }
+        let new_claim = require_nonempty(positionals.remove(0), "new claim")?;
+        return Ok((
+            CorrectTarget::ClaimId {
+                claim_id,
+                new_claim,
+            },
+            options,
+        ));
+    }
     if positionals.len() != 2 {
         return Err(CliError::invalid_cli(
             "usage: mneme correct <old-claim> <new-claim> [--store <path>] [--speaker <id>] [--agent <id>] [--scope <scope>] [--trust <trust>] [--json]",
@@ -1225,7 +1402,112 @@ fn parse_correct_args(raw_args: Vec<String>) -> Result<((String, String), EventO
     }
     let old_claim = require_nonempty(positionals.remove(0), "old claim")?;
     let new_claim = require_nonempty(positionals.remove(0), "new claim")?;
-    Ok(((old_claim, new_claim), options))
+    Ok((
+        CorrectTarget::Text {
+            old_claim,
+            new_claim,
+        },
+        options,
+    ))
+}
+
+fn parse_forget_args(raw_args: Vec<String>) -> Result<(ForgetTarget, EventOptions), CliError> {
+    let mut options = EventOptions::default();
+    let mut positionals = Vec::new();
+    let mut claim_id = None;
+    let mut idx = 0;
+    while idx < raw_args.len() {
+        if parse_common_option(&raw_args, &mut idx, &mut options.common)? {
+            idx += 1;
+            continue;
+        }
+        match raw_args[idx].as_str() {
+            "--speaker" => {
+                idx += 1;
+                options.speaker_id = required_arg(&raw_args, idx, "--speaker")?;
+            }
+            "--agent" => {
+                idx += 1;
+                options.actor_agent_id = Some(required_arg(&raw_args, idx, "--agent")?);
+            }
+            "--scope" => {
+                idx += 1;
+                options.scope = required_arg(&raw_args, idx, "--scope")?;
+            }
+            "--trust" => {
+                idx += 1;
+                options.trust_level = required_arg(&raw_args, idx, "--trust")?;
+            }
+            "--claim-id" => {
+                idx += 1;
+                claim_id = Some(require_nonempty(
+                    required_arg(&raw_args, idx, "--claim-id")?,
+                    "claim id",
+                )?);
+            }
+            value if value.starts_with('-') => {
+                return Err(CliError::invalid_cli(format!(
+                    "unknown forget option: {value}"
+                )));
+            }
+            value => positionals.push(value.to_owned()),
+        }
+        idx += 1;
+    }
+    if let Some(claim_id) = claim_id {
+        if !positionals.is_empty() {
+            return Err(CliError::invalid_cli(
+                "usage: mneme forget --claim-id <id> [--store <path>] [--speaker <id>] [--agent <id>] [--scope <scope>] [--trust <trust>] [--json]",
+            ));
+        }
+        return Ok((ForgetTarget::ClaimId(claim_id), options));
+    }
+    if positionals.len() != 1 {
+        return Err(CliError::invalid_cli(
+            "usage: mneme forget <claim> [--store <path>] [--speaker <id>] [--agent <id>] [--scope <scope>] [--trust <trust>] [--json]",
+        ));
+    }
+    Ok((
+        ForgetTarget::Text(require_nonempty(positionals.remove(0), "claim")?),
+        options,
+    ))
+}
+
+fn parse_claims_args(raw_args: Vec<String>) -> Result<ClaimsOptions, CliError> {
+    let mut options = ClaimsOptions::default();
+    let mut idx = 0;
+    while idx < raw_args.len() {
+        if parse_common_option(&raw_args, &mut idx, &mut options.common)? {
+            idx += 1;
+            continue;
+        }
+        match raw_args[idx].as_str() {
+            "--status" => {
+                idx += 1;
+                options.statuses.push(parse_claim_status(required_arg(
+                    &raw_args, idx, "--status",
+                )?)?);
+            }
+            "--scope" => {
+                idx += 1;
+                options
+                    .scopes
+                    .push(required_arg(&raw_args, idx, "--scope")?);
+            }
+            value if value.starts_with('-') => {
+                return Err(CliError::invalid_cli(format!(
+                    "unknown claims option: {value}"
+                )));
+            }
+            value => {
+                return Err(CliError::invalid_cli(format!(
+                    "unexpected claims argument: {value}"
+                )));
+            }
+        }
+        idx += 1;
+    }
+    Ok(options)
 }
 
 fn parse_query_args(raw_args: Vec<String>) -> Result<(String, RetrievalOptions), CliError> {
@@ -1351,6 +1633,18 @@ fn parse_max_items(value: String) -> Result<usize, CliError> {
     value.parse::<usize>().map_err(|source| {
         CliError::invalid_cli(format!("invalid --max-items value {value}: {source}"))
     })
+}
+
+fn parse_claim_status(value: String) -> Result<ClaimStatus, CliError> {
+    match value.as_str() {
+        "active" => Ok(ClaimStatus::Active),
+        "blocked_secret" => Ok(ClaimStatus::BlockedSecret),
+        "superseded" => Ok(ClaimStatus::Superseded),
+        "forgotten" => Ok(ClaimStatus::Forgotten),
+        _ => Err(CliError::invalid_cli(format!(
+            "unknown claim status: {value}\navailable statuses: active, blocked_secret, superseded, forgotten"
+        ))),
+    }
 }
 
 fn parse_end_args(raw_args: Vec<String>) -> Result<(String, EndOptions), CliError> {
@@ -1530,6 +1824,23 @@ fn persist_engine(path: &Path, engine: &MnemeEngine) -> Result<(), CliError> {
         .map_err(|source| CliError::store_error("save store", path, source))
 }
 
+fn require_active_claim_id(engine: &MnemeEngine, claim_id: &str) -> Result<(), CliError> {
+    let claim_id = claim_id.trim();
+    let snapshot = engine.snapshot();
+    let claim = snapshot
+        .claims
+        .iter()
+        .find(|claim| claim.id == claim_id)
+        .ok_or_else(|| CliError::lifecycle(format!("unknown claim id: {claim_id}")))?;
+    if claim.status != ClaimStatus::Active {
+        return Err(CliError::lifecycle(format!(
+            "claim id {claim_id} is {}; only active claims can be changed by id",
+            claim.status.as_str()
+        )));
+    }
+    Ok(())
+}
+
 fn write_state_json(path: &Path, state: &MnemeState) -> Result<(), CliError> {
     if let Some(parent) = path
         .parent()
@@ -1580,6 +1891,37 @@ fn emit_context_report(
             item.score,
             item.match_reason,
             item.source_event_ids.join(",")
+        )
+        .map_err(|source| CliError::io("write", Path::new("<stdout>"), source))?;
+    }
+    Ok(())
+}
+
+fn emit_claims_report(
+    report: &ClaimsReport,
+    json: bool,
+    writer: &mut impl Write,
+) -> Result<(), CliError> {
+    if json {
+        return write_json(writer, report);
+    }
+    writeln!(
+        writer,
+        "mneme: claims from {} (shown={}, total={})",
+        report.store, report.claim_count, report.total_count
+    )
+    .map_err(|source| CliError::io("write", Path::new("<stdout>"), source))?;
+    for claim in &report.claims {
+        writeln!(
+            writer,
+            "- {} {} {}: {} {} {} [{}]",
+            claim.id,
+            claim.status,
+            claim.scope,
+            claim.subject,
+            claim.predicate,
+            claim.object,
+            claim.source_event_ids.join(",")
         )
         .map_err(|source| CliError::io("write", Path::new("<stdout>"), source))?;
     }
@@ -1776,6 +2118,7 @@ mod tests {
         assert!(text.contains("Usage:"));
         assert!(text.contains("mneme help begin"));
         assert!(text.contains("hook"));
+        assert!(text.contains("claims"));
 
         let mut command_output = Vec::new();
         run_cli_with_writer(
@@ -1999,6 +2342,118 @@ mod tests {
         assert!(text.contains("\"status\": \"superseded\""));
         assert!(text.contains("\"status\": \"forgotten\""));
         assert!(text.contains("desktop IDE"));
+
+        let _ = std::fs::remove_file(&path);
+        Ok(())
+    }
+
+    #[test]
+    fn claims_review_and_id_lifecycle_controls() -> Result<(), Box<dyn std::error::Error>> {
+        let path = temp_store_path("claims-review-id-lifecycle");
+        let _ = std::fs::remove_file(&path);
+
+        for _ in 0..2 {
+            run_cli_with_writer(
+                vec![
+                    "mneme".to_owned(),
+                    "remember".to_owned(),
+                    "user prefers local-first tools".to_owned(),
+                    "--store".to_owned(),
+                    path.display().to_string(),
+                ],
+                &mut Vec::new(),
+            )?;
+        }
+
+        let mut claims_output = Vec::new();
+        run_cli_with_writer(
+            vec![
+                "mneme".to_owned(),
+                "claims".to_owned(),
+                "--store".to_owned(),
+                path.display().to_string(),
+                "--json".to_owned(),
+            ],
+            &mut claims_output,
+        )?;
+        let claims_text = String::from_utf8(claims_output)?;
+        assert!(claims_text.contains("\"claim_count\": 2"));
+        assert!(claims_text.contains("\"id\": \"claim-001\""));
+        assert!(claims_text.contains("\"id\": \"claim-002\""));
+
+        run_cli_with_writer(
+            vec![
+                "mneme".to_owned(),
+                "forget".to_owned(),
+                "--claim-id".to_owned(),
+                "claim-001".to_owned(),
+                "--store".to_owned(),
+                path.display().to_string(),
+            ],
+            &mut Vec::new(),
+        )?;
+
+        let mut active_output = Vec::new();
+        run_cli_with_writer(
+            vec![
+                "mneme".to_owned(),
+                "claims".to_owned(),
+                "--status".to_owned(),
+                "active".to_owned(),
+                "--store".to_owned(),
+                path.display().to_string(),
+                "--json".to_owned(),
+            ],
+            &mut active_output,
+        )?;
+        let active_text = String::from_utf8(active_output)?;
+        assert!(active_text.contains("\"claim_count\": 1"));
+        assert!(!active_text.contains("\"id\": \"claim-001\""));
+        assert!(active_text.contains("\"id\": \"claim-002\""));
+
+        run_cli_with_writer(
+            vec![
+                "mneme".to_owned(),
+                "correct".to_owned(),
+                "--claim-id".to_owned(),
+                "claim-002".to_owned(),
+                "user prefers terminal workflows".to_owned(),
+                "--store".to_owned(),
+                path.display().to_string(),
+            ],
+            &mut Vec::new(),
+        )?;
+
+        let mut context_output = Vec::new();
+        run_cli_with_writer(
+            vec![
+                "mneme".to_owned(),
+                "context".to_owned(),
+                "terminal workflows".to_owned(),
+                "--store".to_owned(),
+                path.display().to_string(),
+                "--json".to_owned(),
+            ],
+            &mut context_output,
+        )?;
+        let context_text = String::from_utf8(context_output)?;
+        assert!(context_text.contains("terminal workflows"));
+        assert!(context_text.contains("\"claim_id\": \"claim-003\""));
+
+        let result = run_cli_with_writer(
+            vec![
+                "mneme".to_owned(),
+                "forget".to_owned(),
+                "--claim-id".to_owned(),
+                "claim-001".to_owned(),
+                "--store".to_owned(),
+                path.display().to_string(),
+            ],
+            &mut Vec::new(),
+        );
+        let error = result.expect_err("inactive claim id should fail");
+        assert_eq!(error.exit_code(), 1);
+        assert!(error.to_string().contains("only active claims"));
 
         let _ = std::fs::remove_file(&path);
         Ok(())

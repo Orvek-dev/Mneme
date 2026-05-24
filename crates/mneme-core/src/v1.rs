@@ -140,6 +140,14 @@ impl MnemeEngine {
     }
 
     fn apply_lifecycle_event(&mut self, event: &EventRecord) -> bool {
+        if let Some(target_id) = find_forget_id_marker(&event.text) {
+            self.forget_claim_by_id(target_id);
+            return true;
+        }
+        if let Some((target_id, new_text)) = find_correct_id_marker(&event.text) {
+            self.correct_claim_by_id(event, target_id, new_text);
+            return true;
+        }
         if let Some(target) = find_forget_marker(&event.text) {
             self.forget_claims(target);
             return true;
@@ -149,6 +157,20 @@ impl MnemeEngine {
             return true;
         }
         false
+    }
+
+    fn forget_claim_by_id(&mut self, target_id: &str) {
+        let target_id = target_id.trim();
+        for claim in &mut self.claims {
+            if claim.status == ClaimStatus::Active && claim.id == target_id {
+                claim.status = ClaimStatus::Forgotten;
+                self.audit.push(AuditRecord {
+                    kind: AuditKind::ClaimUpdate,
+                    target_id: claim.id.clone(),
+                });
+                break;
+            }
+        }
     }
 
     fn forget_claims(&mut self, target: &str) {
@@ -161,6 +183,36 @@ impl MnemeEngine {
                 });
             }
         }
+    }
+
+    fn correct_claim_by_id(&mut self, event: &EventRecord, target_id: &str, new_text: &str) {
+        let target_id = target_id.trim();
+        let mut source_event_ids = Vec::new();
+        for claim in &mut self.claims {
+            if claim.status == ClaimStatus::Active && claim.id == target_id {
+                claim.status = ClaimStatus::Superseded;
+                source_event_ids.extend(claim.source_event_ids.clone());
+                self.audit.push(AuditRecord {
+                    kind: AuditKind::ClaimUpdate,
+                    target_id: claim.id.clone(),
+                });
+                break;
+            }
+        }
+
+        if source_event_ids.is_empty() {
+            return;
+        }
+        source_event_ids.push(event.id.clone());
+        dedupe_ids(&mut source_event_ids);
+
+        let extracted = extracted_claim_from_text(event, new_text);
+        let claim = claim_from_extracted(event, self.claims.len() + 1, extracted, source_event_ids);
+        self.audit.push(AuditRecord {
+            kind: AuditKind::ClaimWrite,
+            target_id: claim.id.clone(),
+        });
+        self.claims.push(claim);
     }
 
     fn correct_claims(&mut self, event: &EventRecord, old_text: &str, new_text: &str) {
@@ -1932,6 +1984,16 @@ fn find_forget_marker(text: &str) -> Option<&str> {
     None
 }
 
+fn find_forget_id_marker(text: &str) -> Option<&str> {
+    if let Some((_, rest)) = text.split_once("forget-id:") {
+        let trimmed = rest.trim();
+        if !trimmed.is_empty() {
+            return Some(trimmed);
+        }
+    }
+    None
+}
+
 fn find_correct_marker(text: &str) -> Option<(&str, &str)> {
     for marker in ["correct:", "수정:"] {
         if let Some((_, rest)) = text.split_once(marker) {
@@ -1941,6 +2003,18 @@ fn find_correct_marker(text: &str) -> Option<(&str, &str)> {
             if !old_text.is_empty() && !new_text.is_empty() {
                 return Some((old_text, new_text));
             }
+        }
+    }
+    None
+}
+
+fn find_correct_id_marker(text: &str) -> Option<(&str, &str)> {
+    if let Some((_, rest)) = text.split_once("correct-id:") {
+        let (target_id, new_text) = rest.split_once("->")?;
+        let target_id = target_id.trim();
+        let new_text = new_text.trim();
+        if !target_id.is_empty() && !new_text.is_empty() {
+            return Some((target_id, new_text));
         }
     }
     None
@@ -2422,6 +2496,88 @@ mod tests {
         assert_eq!(snapshot.claims[0].status, ClaimStatus::Forgotten);
         assert!(context.items.is_empty());
         assert_eq!(context.omitted[0].reason, "forgotten");
+        Ok(())
+    }
+
+    #[test]
+    fn id_lifecycle_targets_only_one_matching_claim() -> Result<(), Box<dyn std::error::Error>> {
+        let mut engine = MnemeEngine::new(MnemeConfig {
+            daily_cloud_tokens: 100,
+        });
+        for text in [
+            "remember: user prefers local-first tools",
+            "remember: user prefers local-first tools",
+        ] {
+            engine.ingest_event(EventInput {
+                speaker_id: "user".to_owned(),
+                actor_agent_id: None,
+                text: text.to_owned(),
+                scope: "private".to_owned(),
+                trust_level: "trusted_user".to_owned(),
+            })?;
+        }
+        engine.ingest_event(EventInput {
+            speaker_id: "user".to_owned(),
+            actor_agent_id: None,
+            text: "forget-id: claim-001".to_owned(),
+            scope: "private".to_owned(),
+            trust_level: "trusted_user".to_owned(),
+        })?;
+
+        let context = engine.build_context_pack("local-first");
+        let snapshot = engine.snapshot();
+
+        assert_eq!(snapshot.claims.len(), 2);
+        assert_eq!(snapshot.claims[0].status, ClaimStatus::Forgotten);
+        assert_eq!(snapshot.claims[1].status, ClaimStatus::Active);
+        assert_eq!(context.items.len(), 1);
+        assert_eq!(context.items[0].claim_id, "claim-002");
+        Ok(())
+    }
+
+    #[test]
+    fn id_correction_targets_one_claim_and_writes_replacement(
+    ) -> Result<(), Box<dyn std::error::Error>> {
+        let mut engine = MnemeEngine::new(MnemeConfig {
+            daily_cloud_tokens: 100,
+        });
+        for text in [
+            "remember: user prefers local-first tools",
+            "remember: user prefers local-first tools",
+        ] {
+            engine.ingest_event(EventInput {
+                speaker_id: "user".to_owned(),
+                actor_agent_id: Some("codex".to_owned()),
+                text: text.to_owned(),
+                scope: "private".to_owned(),
+                trust_level: "trusted_user".to_owned(),
+            })?;
+        }
+        engine.ingest_event(EventInput {
+            speaker_id: "user".to_owned(),
+            actor_agent_id: Some("codex".to_owned()),
+            text: "correct-id: claim-001 -> user prefers terminal workflows".to_owned(),
+            scope: "private".to_owned(),
+            trust_level: "trusted_user".to_owned(),
+        })?;
+
+        let snapshot = engine.snapshot();
+        let context = engine.build_context_pack("terminal workflows");
+
+        assert_eq!(snapshot.claims.len(), 3);
+        assert_eq!(snapshot.claims[0].status, ClaimStatus::Superseded);
+        assert_eq!(snapshot.claims[1].status, ClaimStatus::Active);
+        assert_eq!(snapshot.claims[2].status, ClaimStatus::Active);
+        assert_eq!(snapshot.claims[2].id, "claim-003");
+        assert_eq!(
+            snapshot.claims[2].source_event_ids,
+            vec!["event-001", "event-003"]
+        );
+        assert_eq!(context.items.len(), 1);
+        assert_eq!(
+            context.items[0].claim_text,
+            "user prefers terminal workflows"
+        );
         Ok(())
     }
 

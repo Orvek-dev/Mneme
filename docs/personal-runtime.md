@@ -36,6 +36,13 @@ explicitly rejected instead of racing the JSON file.
 
 ## Maintenance Commands
 
+Review stored claims before changing them:
+
+```sh
+cargo run -p mneme-cli -- claims --status active --store /tmp/mneme.json --json
+cargo run -p mneme-cli -- forget --claim-id claim-001 --store /tmp/mneme.json
+```
+
 Validate the current store:
 
 ```sh

@@ -27,8 +27,9 @@ Primary runtime flow:
 2. Append raw user or agent events with `EventInput`.
 3. Retrieve cited, ranked, budget-capped context with `build_context_pack` or
    an explicit `ContextQuery`.
-4. Persist and reload state through a `MnemeStore` implementation.
-5. Use `begin_session` and `end_session` when an agent needs task-scoped
+4. Inspect claim IDs and lifecycle status with `snapshot`.
+5. Persist and reload state through a `MnemeStore` implementation.
+6. Use `begin_session` and `end_session` when an agent needs task-scoped
    context and explicit post-task memory writes.
 
 Supported extension points:
@@ -39,6 +40,10 @@ Supported extension points:
 - `StoreErrorKind` for stable store and lock conflict classification.
 - `CommandExtractor` and the `mneme.extractor.command.v1` JSON protocol for
   provider-wrapper experiments.
+
+CLI-bound integrations can use `mneme claims`, `mneme forget --claim-id`, and
+`mneme correct --claim-id` when they need an inspectable user-control surface
+without linking directly to Rust APIs.
 
 Stable behavior remains defined by `docs/v1-stability.md`, public feature
 specs, eval scenarios, and the release quality gate.

@@ -23,6 +23,7 @@ Mneme is pre-1.0. The useful surface today is local development and evaluation:
 - budget checks happen before extraction;
 - secret-like data is blocked from active context;
 - corrections and forgets are auditable lifecycle transitions;
+- stored claims can be reviewed and changed by stable claim ID;
 - local JSON stores include schema metadata, write locks, atomic writes,
   backups, repair, import/export, and compaction;
 - agents can open and close task sessions with scoped context and post-task
@@ -61,6 +62,7 @@ Try the local CLI with an isolated store:
 ```sh
 STORE=/tmp/mneme.json
 cargo run -p mneme-cli -- remember "user prefers local-first tools" --store "$STORE"
+cargo run -p mneme-cli -- claims --status active --store "$STORE" --json
 cargo run -p mneme-cli -- context "local-first" --store "$STORE" --json
 cargo run -p mneme-cli -- remember "user prefers project launch reviews" --scope project-alpha --store "$STORE"
 cargo run -p mneme-cli -- context "project launch" --scope project-alpha --max-items 3 --store "$STORE" --json
