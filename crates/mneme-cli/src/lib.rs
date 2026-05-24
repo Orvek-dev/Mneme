@@ -208,6 +208,7 @@ fn run_cli_with_writer(
     match command.as_str() {
         "help" => run_help(raw_args, writer),
         "--help" | "-h" => print_help(None, writer),
+        "init" => run_command_or_help("init", raw_args, writer, run_init),
         "doctor" => {
             if wants_command_help(&raw_args) {
                 print_help(Some("doctor"), writer)
@@ -240,7 +241,7 @@ fn run_cli_with_writer(
         "compact" => run_command_or_help("compact", raw_args, writer, run_compact),
         "repair" => run_command_or_help("repair", raw_args, writer, run_repair),
         _ => Err(CliError::invalid_cli(format!(
-            "unknown mneme command: {command}\navailable commands: doctor, version, ingest, remember, correct, forget, claims, context, snapshot, begin, end, hook, validate, export, review, import, compact, repair"
+            "unknown mneme command: {command}\navailable commands: init, doctor, version, ingest, remember, correct, forget, claims, context, snapshot, begin, end, hook, validate, export, review, import, compact, repair"
         ))),
     }
 }
@@ -289,7 +290,7 @@ fn print_help(command: Option<&str>, writer: &mut impl Write) -> Result<(), CliE
         None => MNEME_HELP,
         Some(command) => command_help(command).ok_or_else(|| {
             CliError::invalid_cli(format!(
-                "unknown mneme help topic: {command}\navailable help topics: doctor, version, ingest, remember, correct, forget, claims, context, snapshot, begin, end, hook, validate, export, review, import, compact, repair"
+                "unknown mneme help topic: {command}\navailable help topics: init, doctor, version, ingest, remember, correct, forget, claims, context, snapshot, begin, end, hook, validate, export, review, import, compact, repair"
             ))
         })?,
     };
@@ -299,6 +300,7 @@ fn print_help(command: Option<&str>, writer: &mut impl Write) -> Result<(), CliE
 
 fn command_help(command: &str) -> Option<&'static str> {
     match command {
+        "init" => Some(MNEME_INIT_HELP),
         "doctor" => Some(MNEME_DOCTOR_HELP),
         "version" | "--version" => Some(MNEME_VERSION_HELP),
         "ingest" => Some(MNEME_INGEST_HELP),
@@ -328,6 +330,7 @@ Usage:
   mneme help [command]
 
 Commands:
+  init        Initialize a local .mneme store and agent hook profile.
   doctor      Show local CLI and default store information.
   version     Print the CLI version.
   ingest      Ingest one event, optionally through a command extractor.
@@ -352,11 +355,23 @@ Common options:
   --json          Print JSON output.
 
 Examples:
+  mneme init
   mneme remember "user prefers local-first tools" --store /tmp/mneme.json
   mneme claims --status active --store /tmp/mneme.json --json
   mneme context "local-first" --store /tmp/mneme.json --json
   mneme hook begin "Draft setup plan" --query "local-first" --store /tmp/mneme.json
   mneme help begin"#;
+
+const MNEME_INIT_HELP: &str = r#"Usage: mneme init [--store <path>] [--config <path>] [--agent <id>] [--scope <scope>] [--max-items <n>] [--bin <path>] [--no-bin] [--force] [--json]
+
+Initialize a local workspace by creating a valid v1 store and an agent hook
+runtime profile. Defaults to .mneme/mneme-v1.json and
+.mneme/mneme-agent-hook.env in the current directory.
+
+Examples:
+  mneme init
+  mneme init --agent codex --scope private --max-items 3
+  mneme init --store /tmp/mneme.json --config /tmp/mneme-agent-hook.env --bin /usr/local/bin/mneme --json"#;
 
 const MNEME_DOCTOR_HELP: &str = r#"Usage: mneme doctor
 
@@ -518,6 +533,33 @@ struct CommonOptions {
 }
 
 #[derive(Debug, Clone)]
+struct InitOptions {
+    common: CommonOptions,
+    config_path: Option<PathBuf>,
+    agent_id: String,
+    scope: String,
+    max_items: usize,
+    bin_path: Option<PathBuf>,
+    include_bin: bool,
+    force: bool,
+}
+
+impl Default for InitOptions {
+    fn default() -> Self {
+        Self {
+            common: CommonOptions::default(),
+            config_path: None,
+            agent_id: "codex".to_owned(),
+            scope: "private".to_owned(),
+            max_items: 3,
+            bin_path: None,
+            include_bin: true,
+            force: false,
+        }
+    }
+}
+
+#[derive(Debug, Clone)]
 struct EventOptions {
     common: CommonOptions,
     speaker_id: String,
@@ -629,6 +671,23 @@ struct EventCommandReport {
     event_count: usize,
     claim_count: usize,
     latest_claim: Option<ClaimSummary>,
+}
+
+#[derive(Debug, Serialize)]
+struct InitReport {
+    command: &'static str,
+    workspace: String,
+    store: String,
+    config: String,
+    store_created: bool,
+    store_overwritten: bool,
+    config_written: bool,
+    config_overwritten: bool,
+    agent_id: String,
+    scope: String,
+    max_items: usize,
+    bin: Option<String>,
+    next_commands: Vec<String>,
 }
 
 #[derive(Debug, Serialize)]
@@ -890,6 +949,74 @@ enum CorrectTarget {
 enum ForgetTarget {
     Text(String),
     ClaimId(String),
+}
+
+fn run_init(raw_args: Vec<String>, writer: &mut impl Write) -> Result<(), CliError> {
+    let options = parse_init_args(raw_args)?;
+    let store_path = resolve_store_path(&options.common)?;
+    let config_path = options
+        .config_path
+        .clone()
+        .unwrap_or_else(|| default_init_config_path(&store_path));
+    let workspace = env::current_dir()
+        .map_err(|source| CliError::io("read current dir", Path::new("."), source))?;
+    let bin_path = resolve_init_bin_path(&options)?;
+
+    let store_exists = store_path.exists();
+    let store = JsonFileStore::new(store_path.clone());
+    let inspection = store.inspect();
+    if store_exists && !options.force && inspection.current.status != StoreFileStatus::Valid {
+        return Err(CliError::store(
+            "init store",
+            &store_path,
+            "store exists but is not valid; run mneme repair or mneme init --force",
+        ));
+    }
+
+    let store_created = !store_exists;
+    let store_overwritten = store_exists && options.force;
+    if store_created || store_overwritten {
+        let engine = MnemeEngine::new(MnemeConfig::default());
+        let mut store = JsonFileStore::new(store_path.clone());
+        engine
+            .persist(&mut store)
+            .map_err(|source| CliError::store_error("init store", &store_path, source))?;
+    }
+
+    let config_exists = config_path.exists();
+    let config_written = !config_exists || options.force;
+    let config_overwritten = config_exists && options.force;
+    if config_written {
+        write_agent_hook_profile(
+            &config_path,
+            &store_path,
+            &options.agent_id,
+            &options.scope,
+            options.max_items,
+            bin_path.as_deref(),
+        )?;
+    }
+
+    let report = InitReport {
+        command: "init",
+        workspace: workspace.display().to_string(),
+        store: store_path.display().to_string(),
+        config: config_path.display().to_string(),
+        store_created,
+        store_overwritten,
+        config_written,
+        config_overwritten,
+        agent_id: options.agent_id,
+        scope: options.scope,
+        max_items: options.max_items,
+        bin: bin_path.map(|path| path.display().to_string()),
+        next_commands: vec![
+            "mneme doctor".to_owned(),
+            format!("mneme validate --store \"{}\"", store_path.display()),
+            "scripts/mneme-agent-hook.sh doctor".to_owned(),
+        ],
+    };
+    emit_init_report(&report, options.common.json, writer)
 }
 
 fn run_ingest(raw_args: Vec<String>, writer: &mut impl Write) -> Result<(), CliError> {
@@ -1371,6 +1498,62 @@ fn run_repair(raw_args: Vec<String>, writer: &mut impl Write) -> Result<(), CliE
             "store could not be repaired",
         ))
     }
+}
+
+fn parse_init_args(raw_args: Vec<String>) -> Result<InitOptions, CliError> {
+    let mut options = InitOptions::default();
+    let mut idx = 0;
+    while idx < raw_args.len() {
+        if parse_common_option(&raw_args, &mut idx, &mut options.common)? {
+            idx += 1;
+            continue;
+        }
+        match raw_args[idx].as_str() {
+            "--config" => {
+                idx += 1;
+                options.config_path =
+                    Some(PathBuf::from(required_arg(&raw_args, idx, "--config")?));
+            }
+            "--agent" => {
+                idx += 1;
+                options.agent_id =
+                    require_nonempty(required_arg(&raw_args, idx, "--agent")?, "agent id")?;
+            }
+            "--scope" => {
+                idx += 1;
+                options.scope =
+                    require_nonempty(required_arg(&raw_args, idx, "--scope")?, "scope")?;
+            }
+            "--max-items" => {
+                idx += 1;
+                options.max_items = parse_max_items(required_arg(&raw_args, idx, "--max-items")?)?;
+            }
+            "--bin" => {
+                idx += 1;
+                options.bin_path = Some(PathBuf::from(required_arg(&raw_args, idx, "--bin")?));
+                options.include_bin = true;
+            }
+            "--no-bin" => {
+                options.include_bin = false;
+                options.bin_path = None;
+            }
+            "--force" => {
+                options.force = true;
+            }
+            value if value.starts_with('-') => {
+                return Err(CliError::invalid_cli(format!(
+                    "unknown init option: {value}"
+                )));
+            }
+            value => {
+                return Err(CliError::invalid_cli(format!(
+                    "unexpected init argument: {value}"
+                )));
+            }
+        }
+        idx += 1;
+    }
+    Ok(options)
 }
 
 fn parse_event_args(
@@ -2035,6 +2218,85 @@ fn default_store_path() -> Result<PathBuf, CliError> {
         .map_err(|source| CliError::io("read current dir", Path::new("."), source))
 }
 
+fn default_init_config_path(store_path: &Path) -> PathBuf {
+    store_path
+        .parent()
+        .filter(|path| !path.as_os_str().is_empty())
+        .unwrap_or_else(|| Path::new("."))
+        .join("mneme-agent-hook.env")
+}
+
+fn resolve_init_bin_path(options: &InitOptions) -> Result<Option<PathBuf>, CliError> {
+    if !options.include_bin {
+        return Ok(None);
+    }
+    match &options.bin_path {
+        Some(path) => Ok(Some(path.clone())),
+        None => env::current_exe().map(Some).map_err(|source| {
+            CliError::io(
+                "read current executable",
+                Path::new("<current_exe>"),
+                source,
+            )
+        }),
+    }
+}
+
+fn write_agent_hook_profile(
+    path: &Path,
+    store_path: &Path,
+    agent_id: &str,
+    scope: &str,
+    max_items: usize,
+    bin_path: Option<&Path>,
+) -> Result<(), CliError> {
+    if let Some(parent) = path
+        .parent()
+        .filter(|parent| !parent.as_os_str().is_empty())
+    {
+        std::fs::create_dir_all(parent)
+            .map_err(|source| CliError::io("create dir", parent, source))?;
+    }
+    let profile = render_agent_hook_profile(store_path, agent_id, scope, max_items, bin_path)?;
+    std::fs::write(path, profile).map_err(|source| CliError::io("write", path, source))
+}
+
+fn render_agent_hook_profile(
+    store_path: &Path,
+    agent_id: &str,
+    scope: &str,
+    max_items: usize,
+    bin_path: Option<&Path>,
+) -> Result<String, CliError> {
+    let store_value = single_line_value(store_path.display().to_string(), "store path")?;
+    let agent_value = single_line_value(agent_id.to_owned(), "agent id")?;
+    let scope_value = single_line_value(scope.to_owned(), "scope")?;
+    let mut profile = String::new();
+    profile.push_str("# Generated by `mneme init`.\n");
+    profile.push_str(
+        "# The wrapper reads KEY=VALUE lines directly and does not execute this file.\n\n",
+    );
+    if let Some(path) = bin_path {
+        let bin_value = single_line_value(path.display().to_string(), "binary path")?;
+        profile.push_str(&format!("MNEME_BIN={bin_value}\n"));
+    }
+    profile.push_str(&format!("MNEME_STORE={store_value}\n"));
+    profile.push_str(&format!("MNEME_AGENT_ID={agent_value}\n"));
+    profile.push_str(&format!("MNEME_SCOPE={scope_value}\n"));
+    profile.push_str(&format!("MNEME_MAX_ITEMS={max_items}\n"));
+    Ok(profile)
+}
+
+fn single_line_value(value: String, label: &str) -> Result<String, CliError> {
+    if value.contains('\n') || value.contains('\r') {
+        Err(CliError::invalid_cli(format!(
+            "{label} must not contain newlines"
+        )))
+    } else {
+        Ok(value)
+    }
+}
+
 fn load_engine(path: &Path) -> Result<MnemeEngine, CliError> {
     let store = JsonFileStore::new(path.to_path_buf());
     MnemeEngine::from_store(MnemeConfig::default(), &store)
@@ -2360,6 +2622,48 @@ fn escape_markdown_cell(value: &str) -> String {
         .replace('\n', " ")
 }
 
+fn emit_init_report(
+    report: &InitReport,
+    json: bool,
+    writer: &mut impl Write,
+) -> Result<(), CliError> {
+    if json {
+        return write_json(writer, report);
+    }
+    writeln!(writer, "mneme: initialized workspace {}", report.workspace)
+        .map_err(|source| CliError::io("write", Path::new("<stdout>"), source))?;
+    writeln!(
+        writer,
+        "mneme: store {} ({})",
+        report.store,
+        init_file_action(report.store_created, report.store_overwritten)
+    )
+    .map_err(|source| CliError::io("write", Path::new("<stdout>"), source))?;
+    writeln!(
+        writer,
+        "mneme: agent hook profile {} ({})",
+        report.config,
+        init_file_action(report.config_written, report.config_overwritten)
+    )
+    .map_err(|source| CliError::io("write", Path::new("<stdout>"), source))?;
+    writeln!(
+        writer,
+        "mneme: verify with MNEME_AGENT_HOOK_CONFIG=\"{}\" scripts/mneme-agent-hook.sh doctor",
+        report.config
+    )
+    .map_err(|source| CliError::io("write", Path::new("<stdout>"), source))
+}
+
+fn init_file_action(written: bool, overwritten: bool) -> &'static str {
+    if overwritten {
+        "overwritten"
+    } else if written {
+        "created"
+    } else {
+        "existing"
+    }
+}
+
 fn emit_event_report(
     report: &EventCommandReport,
     json: bool,
@@ -2645,9 +2949,20 @@ mod tests {
         let text = String::from_utf8(output)?;
         assert!(text.contains("Usage:"));
         assert!(text.contains("mneme help begin"));
+        assert!(text.contains("init"));
         assert!(text.contains("hook"));
         assert!(text.contains("claims"));
         assert!(text.contains("review"));
+
+        let mut init_output = Vec::new();
+        run_cli_with_writer(
+            vec!["mneme".to_owned(), "init".to_owned(), "--help".to_owned()],
+            &mut init_output,
+        )?;
+        let init_text = String::from_utf8(init_output)?;
+        assert!(init_text.contains("Usage: mneme init"));
+        assert!(init_text.contains("--config <path>"));
+        assert!(init_text.contains("--force"));
 
         let mut command_output = Vec::new();
         run_cli_with_writer(
@@ -2690,6 +3005,88 @@ mod tests {
         let error = result.expect_err("unknown command should fail");
         assert_eq!(error.exit_code(), 2);
         assert!(error.to_string().contains("mneme help"));
+    }
+
+    #[test]
+    fn init_creates_store_and_agent_hook_profile() -> Result<(), Box<dyn std::error::Error>> {
+        let store = temp_store_path("init-store");
+        let config = temp_store_path("init-profile").with_extension("env");
+        for path in [&store, &config] {
+            let _ = std::fs::remove_file(path);
+            let _ = std::fs::remove_file(format!("{}.bak", path.display()));
+            let _ = std::fs::remove_file(format!("{}.lock", path.display()));
+        }
+
+        let mut output = Vec::new();
+        run_cli_with_writer(
+            vec![
+                "mneme".to_owned(),
+                "init".to_owned(),
+                "--store".to_owned(),
+                store.display().to_string(),
+                "--config".to_owned(),
+                config.display().to_string(),
+                "--agent".to_owned(),
+                "codex".to_owned(),
+                "--scope".to_owned(),
+                "private".to_owned(),
+                "--max-items".to_owned(),
+                "2".to_owned(),
+                "--bin".to_owned(),
+                "/tmp/mneme".to_owned(),
+                "--json".to_owned(),
+            ],
+            &mut output,
+        )?;
+        let text = String::from_utf8(output)?;
+        assert!(text.contains("\"command\": \"init\""));
+        assert!(text.contains("\"store_created\": true"));
+        assert!(text.contains("\"config_written\": true"));
+        assert!(store.exists());
+        assert!(config.exists());
+
+        let profile = std::fs::read_to_string(&config)?;
+        assert!(profile.contains("MNEME_BIN=/tmp/mneme"));
+        assert!(profile.contains(&format!("MNEME_STORE={}", store.display())));
+        assert!(profile.contains("MNEME_AGENT_ID=codex"));
+        assert!(profile.contains("MNEME_SCOPE=private"));
+        assert!(profile.contains("MNEME_MAX_ITEMS=2"));
+
+        run_cli_with_writer(
+            vec![
+                "mneme".to_owned(),
+                "validate".to_owned(),
+                "--store".to_owned(),
+                store.display().to_string(),
+            ],
+            &mut Vec::new(),
+        )?;
+
+        let mut second_output = Vec::new();
+        run_cli_with_writer(
+            vec![
+                "mneme".to_owned(),
+                "init".to_owned(),
+                "--store".to_owned(),
+                store.display().to_string(),
+                "--config".to_owned(),
+                config.display().to_string(),
+                "--bin".to_owned(),
+                "/tmp/mneme".to_owned(),
+                "--json".to_owned(),
+            ],
+            &mut second_output,
+        )?;
+        let second_text = String::from_utf8(second_output)?;
+        assert!(second_text.contains("\"store_created\": false"));
+        assert!(second_text.contains("\"config_written\": false"));
+
+        for path in [&store, &config] {
+            let _ = std::fs::remove_file(path);
+            let _ = std::fs::remove_file(format!("{}.bak", path.display()));
+            let _ = std::fs::remove_file(format!("{}.lock", path.display()));
+        }
+        Ok(())
     }
 
     #[test]

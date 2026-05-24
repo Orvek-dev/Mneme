@@ -50,9 +50,12 @@ eval update land in the same PR.
   per-scenario results.
 - The `core`, `runtime`, and `agent` suites must pass for `fake` and
   `mneme-v1`.
-- `mneme-cli` supports `doctor`, `remember`, `correct`, `forget`, `claims`,
-  `context`, `snapshot`, `begin`, `end`, `validate`, `export`, `review`,
-  `import`, `compact`, `repair`, `version`, and command-specific help.
+- `mneme-cli` supports `init`, `doctor`, `remember`, `correct`, `forget`,
+  `claims`, `context`, `snapshot`, `begin`, `end`, `validate`, `export`,
+  `review`, `import`, `compact`, `repair`, `version`, and command-specific
+  help.
+- `mneme init` creates a valid local v1 store and an agent hook runtime profile
+  without tracking `.mneme/` in git.
 - `mneme hook doctor/begin/end` emit the `mneme.agent_hook.v1` JSON envelope for
   success and failure, with non-zero process exits on failure.
 - `scripts/mneme-agent-hook.sh` provides the repository-local wrapper for agent
@@ -63,7 +66,7 @@ eval update land in the same PR.
 - `mneme-cli --store <path>` isolates local state.
 - `scripts/install-local.sh` installs the local `mneme` CLI with
   `cargo install --path crates/mneme-cli --locked` and smokes doctor/help/review
-  commands.
+  commands plus installed first-workspace bootstrap.
 - `scripts/quality-gate.sh` is the local and release verification entry point.
 - `RUSTDOCFLAGS="-D warnings" cargo doc --workspace --no-deps` must pass before
   release.

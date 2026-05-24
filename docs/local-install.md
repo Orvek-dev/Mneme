@@ -25,6 +25,7 @@ Then verify:
 ```sh
 mneme --version
 mneme doctor
+mneme init
 mneme help
 mneme review --help
 ```
@@ -51,7 +52,40 @@ Skip automatic reinstall or smoke checks:
 ./scripts/install-local.sh --skip-smoke
 ```
 
-## First Store
+## First Workspace
+
+Initialize the current directory before wiring an agent:
+
+```sh
+mneme init
+```
+
+This creates:
+
+- `.mneme/mneme-v1.json`: a valid empty v1 store.
+- `.mneme/mneme-agent-hook.env`: a runtime profile for
+  `scripts/mneme-agent-hook.sh`.
+
+The profile includes the current `mneme` binary path by default, plus
+`MNEME_STORE`, `MNEME_AGENT_ID`, `MNEME_SCOPE`, and `MNEME_MAX_ITEMS`.
+
+Refresh the generated files intentionally:
+
+```sh
+mneme init --force
+```
+
+Use explicit paths for automation tests or custom workspaces:
+
+```sh
+mneme init \
+  --store /tmp/mneme.json \
+  --config /tmp/mneme-agent-hook.env \
+  --bin "$(command -v mneme)" \
+  --json
+```
+
+## Isolated Store
 
 Use an isolated store while testing:
 
