@@ -2,8 +2,8 @@ use std::path::{Path, PathBuf};
 use std::time::{SystemTime, UNIX_EPOCH};
 
 use mneme_core::{
-    CommandExtractor, EventInput, JsonFileStore, MnemeConfig, MnemeEngine, MnemeStore,
-    SessionBeginInput, SessionEndInput, StoreFileStatus,
+    CommandExtractor, ContextQuery, EventInput, JsonFileStore, MnemeConfig, MnemeEngine,
+    MnemeStore, SessionBeginInput, SessionEndInput, StoreFileStatus,
 };
 
 use crate::error::EvalError;
@@ -191,6 +191,7 @@ fn run_with_optional_persistence(
             task: agent_flow.begin.task.clone(),
             actor_agent_id: agent_flow.begin.actor_agent_id.clone(),
             query: agent_flow.begin.query.clone(),
+            allowed_scopes: effective_allowed_scopes(&agent_flow.begin.allowed_scopes),
         });
         if let Some(end) = &agent_flow.end {
             engine
@@ -209,11 +210,12 @@ fn run_with_optional_persistence(
         }
     }
 
-    let context_pack = scenario
-        .expected
-        .context_pack
-        .as_ref()
-        .map(|expected| engine.build_context_pack(expected.query.clone()));
+    let context_pack = scenario.expected.context_pack.as_ref().map(|expected| {
+        engine.build_context_pack_with(ContextQuery::with_allowed_scopes(
+            expected.query.clone(),
+            effective_allowed_scopes(&expected.allowed_scopes),
+        ))
+    });
     if needs_store(scenario) {
         if let Some(path) = persistence_path {
             persist_to_store(&engine, path, &scenario.id)?;
@@ -378,6 +380,14 @@ fn needs_store(scenario: &Scenario) -> bool {
         || scenario.maintenance.compact_after_events
         || scenario.maintenance.repair_from_backup
         || scenario.expected.store.is_some()
+}
+
+fn effective_allowed_scopes(scopes: &[String]) -> Vec<String> {
+    if scopes.is_empty() {
+        vec!["private".to_owned()]
+    } else {
+        scopes.iter().map(|scope| scope.trim().to_owned()).collect()
+    }
 }
 
 fn backup_path_for(path: &Path) -> PathBuf {

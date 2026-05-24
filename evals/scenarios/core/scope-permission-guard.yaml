@@ -1,0 +1,60 @@
+id: scope-permission-guard
+tags:
+  - scope
+  - permission
+  - context-pack
+  - category-scope
+budget:
+  daily_cloud_tokens: 100
+events:
+  - speaker_id: user
+    actor_agent_id: codex
+    scope: private
+    trust_level: trusted_user
+    text: "remember: user prefers private setup notes"
+  - speaker_id: user
+    actor_agent_id: codex
+    scope: project-alpha
+    trust_level: trusted_user
+    text: "remember: user prefers project launch reviews"
+agent_flow:
+  begin:
+    task: "Draft launch plan"
+    actor_agent_id: codex
+    query: "project launch"
+    allowed_scopes:
+      - project-alpha
+expected:
+  event_append:
+    count: 2
+  claims:
+    - subject: user
+      predicate: prefers
+      object: private setup notes
+      status: active
+      scope: private
+    - subject: user
+      predicate: prefers
+      object: project launch reviews
+      status: active
+      scope: project-alpha
+  session:
+    status: active
+    task: "Draft launch plan"
+    actor_agent_id: codex
+    context_must_include:
+      - project launch reviews
+    memory_event_count: 0
+  context_pack:
+    query: "project launch"
+    allowed_scopes:
+      - private
+    must_not_include:
+      - project launch reviews
+    omitted_reason_contains:
+      - scope_denied:project-alpha
+  budget:
+    hard_cap_violations: 0
+  audit:
+    read_write_events_required: true
+    session_events_required: false

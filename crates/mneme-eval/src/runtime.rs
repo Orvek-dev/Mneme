@@ -158,6 +158,22 @@ fn check_context_pack(expected: &ContextPackExpected, actual: &ActualState) -> V
             ));
         }
     }
+    for value in &expected.omitted_reason_contains {
+        if omitted_summary.contains(value) {
+            checks.push(CheckReport::pass(
+                format!("context_pack.omitted_reason_contains.{value}"),
+                "present",
+                "present",
+            ));
+        } else {
+            checks.push(CheckReport::fail(
+                format!("context_pack.omitted_reason_contains.{value}"),
+                "present",
+                "missing",
+                format!("actual.context_pack.omitted={omitted_summary}"),
+            ));
+        }
+    }
     if expected.citation_required {
         let missing = context
             .items
@@ -531,8 +547,10 @@ mod tests {
                 }],
                 context_pack: Some(ContextPackExpected {
                     query: "preferences".to_owned(),
+                    allowed_scopes: Vec::new(),
                     must_include: vec!["local-first".to_owned()],
                     must_not_include: Vec::new(),
+                    omitted_reason_contains: Vec::new(),
                     citation_required: true,
                 }),
                 budget: Some(BudgetExpected {

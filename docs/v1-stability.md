@@ -12,7 +12,8 @@ eval update land in the same PR.
 - Secret-like claims are marked `blocked_secret` and omitted from context.
 - Corrections mark active claims as `superseded` and write replacement claims.
 - Forgets mark active claims as `forgotten`.
-- Context packs include active claims only.
+- Context packs include active claims only when their scope is allowed by the
+  retrieval query.
 - Read/write operations emit audit records.
 - JSON file persistence round-trips events, claims, budget, and audit state.
 - JSON stores include `schema_version`, metadata, generation, engine version,

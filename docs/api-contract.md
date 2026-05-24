@@ -23,7 +23,8 @@ Primary runtime flow:
 
 1. Create `MnemeEngine` with `MnemeConfig`.
 2. Append raw user or agent events with `EventInput`.
-3. Retrieve cited context with `build_context_pack`.
+3. Retrieve cited context with `build_context_pack` or an explicit
+   `ContextQuery`.
 4. Persist and reload state through a `MnemeStore` implementation.
 5. Use `begin_session` and `end_session` when an agent needs task-scoped
    context and explicit post-task memory writes.
@@ -32,6 +33,7 @@ Supported extension points:
 
 - `MnemeStore` for storage adapters.
 - `MnemeExtractor` for extraction adapters.
+- `ContextQuery` for scoped retrieval boundaries.
 - `CommandExtractor` and the `mneme.extractor.command.v1` JSON protocol for
   provider-wrapper experiments.
 

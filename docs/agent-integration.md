@@ -9,6 +9,7 @@ Use `begin` to retrieve task-scoped context and create a session record:
 ```sh
 cargo run -p mneme-cli -- begin "Draft a setup plan" \
   --query "local-first" \
+  --scope private \
   --agent codex \
   --store /tmp/mneme.json \
   --json
@@ -21,6 +22,8 @@ The JSON output includes:
 - `report.context_pack.items`
 
 The agent should keep the returned `session.id` for the end call.
+`begin` defaults to the `private` scope. Pass repeated `--scope <scope>` values
+when the agent is authorized to retrieve another scope for the task.
 
 ## End A Task
 

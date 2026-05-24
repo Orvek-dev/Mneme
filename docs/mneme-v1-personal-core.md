@@ -16,7 +16,7 @@ The v1 core supports:
 - explicit memory removal from `forget:` and `잊어줘:` markers;
 - claim status tracking for active, blocked-secret, superseded, and forgotten
   claims;
-- context-pack retrieval over active claims;
+- scoped context-pack retrieval over active claims;
 - source event citations on context items;
 - read/write audit records;
 - serializable state snapshots;
