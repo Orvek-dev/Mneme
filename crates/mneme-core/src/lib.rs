@@ -6,8 +6,9 @@
 //!
 //! The primary public entry point is [`MnemeEngine`]. Most integrations should
 //! construct an engine with [`MnemeConfig`], append [`EventInput`] records,
-//! retrieve a [`ContextPack`], and persist state through a [`MnemeStore`]
-//! implementation such as [`JsonFileStore`] or [`InMemoryStore`].
+//! retrieve a [`ContextPack`] through a scoped [`ContextQuery`], and persist
+//! state through a [`MnemeStore`] implementation such as [`JsonFileStore`] or
+//! [`InMemoryStore`].
 //!
 //! Mneme is pre-1.0, so Rust type names can still change. The intended current
 //! extension points are [`MnemeStore`] for persistence and [`MnemeExtractor`] for
@@ -39,14 +40,14 @@ mod v1;
 
 pub use v1::{
     validate_state, AuditKind, AuditRecord, BudgetState, ClaimRecord, ClaimStatus,
-    CommandExtractor, CompactionReport, ContextItem, ContextPack, EngineSnapshot, EventInput,
-    EventRecord, ExtractedClaim, ExtractorCommandRequest, ExtractorCommandResponse, ExtractorError,
-    InMemoryStore, JsonFileStore, MigrationRecord, MnemeConfig, MnemeEngine, MnemeExtractor,
-    MnemeState, MnemeStore, OmittedContextItem, RuleBasedExtractor, SessionBeginInput,
-    SessionBeginReport, SessionEndInput, SessionEndReport, SessionError, SessionRecord,
-    SessionStatus, StateMetadata, StateValidationIssue, StateValidationReport, StoreError,
-    StoreFileInspection, StoreFileStatus, StoreInspection, StoreRepairReport, ValidationSeverity,
-    EXTRACTOR_COMMAND_SCHEMA_VERSION, MNEME_STATE_SCHEMA_VERSION,
+    CommandExtractor, CompactionReport, ContextItem, ContextPack, ContextQuery, EngineSnapshot,
+    EventInput, EventRecord, ExtractedClaim, ExtractorCommandRequest, ExtractorCommandResponse,
+    ExtractorError, InMemoryStore, JsonFileStore, MigrationRecord, MnemeConfig, MnemeEngine,
+    MnemeExtractor, MnemeState, MnemeStore, OmittedContextItem, RuleBasedExtractor,
+    SessionBeginInput, SessionBeginReport, SessionEndInput, SessionEndReport, SessionError,
+    SessionRecord, SessionStatus, StateMetadata, StateValidationIssue, StateValidationReport,
+    StoreError, StoreFileInspection, StoreFileStatus, StoreInspection, StoreRepairReport,
+    ValidationSeverity, EXTRACTOR_COMMAND_SCHEMA_VERSION, MNEME_STATE_SCHEMA_VERSION,
 };
 
 /// Public product name.

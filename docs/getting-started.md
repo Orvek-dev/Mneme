@@ -40,6 +40,8 @@ STORE=/tmp/mneme-getting-started.json
 rm -f "$STORE"
 cargo run -p mneme-cli -- remember "user prefers local-first tools" --store "$STORE"
 cargo run -p mneme-cli -- context "local-first" --store "$STORE" --json
+cargo run -p mneme-cli -- remember "user prefers project launch reviews" --scope project-alpha --store "$STORE"
+cargo run -p mneme-cli -- context "project launch" --scope project-alpha --store "$STORE" --json
 cargo run -p mneme-cli -- validate --store "$STORE"
 ```
 
@@ -56,6 +58,7 @@ rm -f "$STORE"
 cargo run -p mneme-cli -- remember "user prefers local-first tools" --store "$STORE"
 cargo run -p mneme-cli -- begin "Draft setup plan" \
   --query "local-first" \
+  --scope private \
   --agent codex \
   --store "$STORE" \
   --json

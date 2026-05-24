@@ -130,7 +130,12 @@ fn apply_agent_flow(actual: &mut ActualState, agent_flow: &AgentFlow, options: T
         .query
         .clone()
         .unwrap_or_else(|| agent_flow.begin.task.clone());
-    let context = build_context_pack_for_query(&actual.claims, &query, options.clone());
+    let context = build_context_pack_for_query(
+        &actual.claims,
+        &query,
+        &agent_flow.begin.allowed_scopes,
+        options.clone(),
+    );
     let mut session = SessionActual {
         id: format!("session-{:03}", actual.sessions.len() + 1),
         task: agent_flow.begin.task.clone(),
@@ -388,6 +393,7 @@ fn build_context_pack(
         .split_whitespace()
         .map(|term| term.to_ascii_lowercase())
         .collect::<Vec<_>>();
+    let allowed_scopes = effective_allowed_scopes(&expected.allowed_scopes);
     let mut items = Vec::new();
     let mut omitted = Vec::new();
 
@@ -396,6 +402,13 @@ fn build_context_pack(
             omitted.push(OmittedItem {
                 claim_id: claim.id.clone(),
                 reason: claim.status.clone(),
+            });
+            continue;
+        }
+        if !allowed_scopes.contains(&claim.scope) {
+            omitted.push(OmittedItem {
+                claim_id: claim.id.clone(),
+                reason: format!("scope_denied:{}", claim.scope),
             });
             continue;
         }
@@ -430,16 +443,27 @@ fn build_context_pack(
 fn build_context_pack_for_query(
     claims: &[Claim],
     query: &str,
+    allowed_scopes: &[String],
     options: TargetRunOptions,
 ) -> ContextPack {
     build_context_pack(
         claims,
         &ContextPackExpected {
             query: query.to_owned(),
+            allowed_scopes: allowed_scopes.to_vec(),
             must_include: Vec::new(),
             must_not_include: Vec::new(),
+            omitted_reason_contains: Vec::new(),
             citation_required: false,
         },
         options,
     )
+}
+
+fn effective_allowed_scopes(scopes: &[String]) -> Vec<String> {
+    if scopes.is_empty() {
+        vec!["private".to_owned()]
+    } else {
+        scopes.iter().map(|scope| scope.trim().to_owned()).collect()
+    }
 }

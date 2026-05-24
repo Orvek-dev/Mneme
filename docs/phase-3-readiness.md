@@ -84,3 +84,7 @@ building Rustdoc with warnings denied in the quality gate.
 Phase 9 shipped the **License & Distribution Policy MVP** in `v0.15.0`,
 documenting the pending owner license decision, keeping registry publication
 disabled, and adding a distribution policy check to package verification.
+
+Phase 10 shipped the **Scope & Permission Guard MVP** in `v0.16.0`, adding
+scoped `ContextQuery` retrieval, CLI allowed-scope options for `context` and
+`begin`, and eval/quality-gate checks for denied and allowed retrieval paths.

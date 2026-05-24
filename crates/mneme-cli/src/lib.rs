@@ -12,8 +12,8 @@ use std::path::{Path, PathBuf};
 
 use mneme_core::{
     validate_state, BuildStage, ClaimRecord, CommandExtractor, CompactionReport, ContextPack,
-    EngineSnapshot, EventInput, ExtractorError, JsonFileStore, MnemeConfig, MnemeEngine,
-    MnemeExtractor, MnemeState, MnemeStore, RuleBasedExtractor, SessionBeginInput,
+    ContextQuery, EngineSnapshot, EventInput, ExtractorError, JsonFileStore, MnemeConfig,
+    MnemeEngine, MnemeExtractor, MnemeState, MnemeStore, RuleBasedExtractor, SessionBeginInput,
     SessionBeginReport, SessionEndInput, SessionEndReport, SessionError, StateValidationReport,
     StoreFileStatus, StoreInspection, StoreRepairReport, PRODUCT_NAME,
 };
@@ -287,12 +287,13 @@ Mark matching active claims as forgotten.
 Example:
   mneme forget "user prefers desktop IDE" --store /tmp/mneme.json"#;
 
-const MNEME_CONTEXT_HELP: &str = r#"Usage: mneme context <query> [--store <path>] [--json]
+const MNEME_CONTEXT_HELP: &str = r#"Usage: mneme context <query> [--scope <scope>]... [--store <path>] [--json]
 
-Build a cited context pack for a query.
+Build a cited context pack for a query. Defaults to the private scope unless
+one or more --scope values are provided.
 
 Example:
-  mneme context "local-first" --store /tmp/mneme.json --json"#;
+  mneme context "local-first" --scope private --store /tmp/mneme.json --json"#;
 
 const MNEME_SNAPSHOT_HELP: &str = r#"Usage: mneme snapshot [--store <path>] [--json]
 
@@ -301,12 +302,13 @@ Print the current store snapshot.
 Example:
   mneme snapshot --store /tmp/mneme.json --json"#;
 
-const MNEME_BEGIN_HELP: &str = r#"Usage: mneme begin <task> [--query <query>] [--agent <id>] [--store <path>] [--json]
+const MNEME_BEGIN_HELP: &str = r#"Usage: mneme begin <task> [--query <query>] [--scope <scope>]... [--agent <id>] [--store <path>] [--json]
 
-Start an agent task session and retrieve task-scoped context.
+Start an agent task session and retrieve task-scoped context. Defaults to the
+private scope unless one or more --scope values are provided.
 
 Example:
-  mneme begin "Draft setup plan" --query "local-first" --agent codex --store /tmp/mneme.json --json"#;
+  mneme begin "Draft setup plan" --query "local-first" --scope private --agent codex --store /tmp/mneme.json --json"#;
 
 const MNEME_END_HELP: &str = r#"Usage: mneme end <session-id> [--summary <text>] [--remember <claim>]... [--agent <id>] [--store <path>] [--json]
 
@@ -395,6 +397,13 @@ struct BeginOptions {
     common: CommonOptions,
     actor_agent_id: Option<String>,
     query: Option<String>,
+    allowed_scopes: Vec<String>,
+}
+
+#[derive(Debug, Clone, Default)]
+struct RetrievalOptions {
+    common: CommonOptions,
+    allowed_scopes: Vec<String>,
 }
 
 #[derive(Debug, Clone, Default)]
@@ -592,9 +601,12 @@ fn run_event_command(
 
 fn run_context(raw_args: Vec<String>, writer: &mut impl Write) -> Result<(), CliError> {
     let (query, options) = parse_query_args(raw_args)?;
-    let store_path = resolve_store_path(&options)?;
+    let store_path = resolve_store_path(&options.common)?;
     let mut engine = load_engine(&store_path)?;
-    let context_pack = engine.build_context_pack(query);
+    let context_pack = engine.build_context_pack_with(ContextQuery::with_allowed_scopes(
+        query,
+        effective_allowed_scopes(options.allowed_scopes),
+    ));
     persist_engine(&store_path, &engine)?;
     let report = ContextReport {
         store: store_path.display().to_string(),
@@ -602,7 +614,7 @@ fn run_context(raw_args: Vec<String>, writer: &mut impl Write) -> Result<(), Cli
         omitted_count: context_pack.omitted.len(),
         context_pack,
     };
-    emit_context_report(&report, options.json, writer)
+    emit_context_report(&report, options.common.json, writer)
 }
 
 fn run_snapshot(raw_args: Vec<String>, writer: &mut impl Write) -> Result<(), CliError> {
@@ -624,6 +636,7 @@ fn run_begin(raw_args: Vec<String>, writer: &mut impl Write) -> Result<(), CliEr
         task,
         actor_agent_id: options.actor_agent_id,
         query: options.query,
+        allowed_scopes: effective_allowed_scopes(options.allowed_scopes),
     });
     persist_engine(&store_path, &engine)?;
     let cli_report = BeginCliReport {
@@ -974,16 +987,22 @@ fn parse_correct_args(raw_args: Vec<String>) -> Result<((String, String), EventO
     Ok(((old_claim, new_claim), options))
 }
 
-fn parse_query_args(raw_args: Vec<String>) -> Result<(String, CommonOptions), CliError> {
-    let mut options = CommonOptions::default();
+fn parse_query_args(raw_args: Vec<String>) -> Result<(String, RetrievalOptions), CliError> {
+    let mut options = RetrievalOptions::default();
     let mut positionals = Vec::new();
     let mut idx = 0;
     while idx < raw_args.len() {
-        if parse_common_option(&raw_args, &mut idx, &mut options)? {
+        if parse_common_option(&raw_args, &mut idx, &mut options.common)? {
             idx += 1;
             continue;
         }
         match raw_args[idx].as_str() {
+            "--scope" => {
+                idx += 1;
+                options
+                    .allowed_scopes
+                    .push(required_arg(&raw_args, idx, "--scope")?);
+            }
             value if value.starts_with('-') => {
                 return Err(CliError::invalid_cli(format!(
                     "unknown context option: {value}"
@@ -995,7 +1014,7 @@ fn parse_query_args(raw_args: Vec<String>) -> Result<(String, CommonOptions), Cl
     }
     if positionals.len() != 1 {
         return Err(CliError::invalid_cli(
-            "usage: mneme context <query> [--store <path>] [--json]",
+            "usage: mneme context <query> [--scope <scope>]... [--store <path>] [--json]",
         ));
     }
     let query = require_nonempty(positionals.remove(0), "query")?;
@@ -1036,6 +1055,12 @@ fn parse_begin_args(raw_args: Vec<String>) -> Result<(String, BeginOptions), Cli
                 idx += 1;
                 options.query = Some(required_arg(&raw_args, idx, "--query")?);
             }
+            "--scope" => {
+                idx += 1;
+                options
+                    .allowed_scopes
+                    .push(required_arg(&raw_args, idx, "--scope")?);
+            }
             value if value.starts_with('-') => {
                 return Err(CliError::invalid_cli(format!(
                     "unknown begin option: {value}"
@@ -1047,10 +1072,18 @@ fn parse_begin_args(raw_args: Vec<String>) -> Result<(String, BeginOptions), Cli
     }
     if positionals.len() != 1 {
         return Err(CliError::invalid_cli(
-            "usage: mneme begin <task> [--query <query>] [--agent <id>] [--store <path>] [--json]",
+            "usage: mneme begin <task> [--query <query>] [--scope <scope>]... [--agent <id>] [--store <path>] [--json]",
         ));
     }
     Ok((require_nonempty(positionals.remove(0), "task")?, options))
+}
+
+fn effective_allowed_scopes(scopes: Vec<String>) -> Vec<String> {
+    if scopes.is_empty() {
+        vec!["private".to_owned()]
+    } else {
+        scopes
+    }
 }
 
 fn parse_end_args(raw_args: Vec<String>) -> Result<(String, EndOptions), CliError> {
@@ -1508,6 +1541,62 @@ mod tests {
         let text = String::from_utf8(output)?;
         assert!(text.contains("local-first tools"));
         assert!(text.contains("event-001"));
+
+        let _ = std::fs::remove_file(&path);
+        Ok(())
+    }
+
+    #[test]
+    fn context_requires_allowed_scope() -> Result<(), Box<dyn std::error::Error>> {
+        let path = temp_store_path("context-scope");
+        let _ = std::fs::remove_file(&path);
+
+        run_cli_with_writer(
+            vec![
+                "mneme".to_owned(),
+                "remember".to_owned(),
+                "user prefers project launch reviews".to_owned(),
+                "--scope".to_owned(),
+                "project-alpha".to_owned(),
+                "--store".to_owned(),
+                path.display().to_string(),
+            ],
+            &mut Vec::new(),
+        )?;
+
+        let mut denied_output = Vec::new();
+        run_cli_with_writer(
+            vec![
+                "mneme".to_owned(),
+                "context".to_owned(),
+                "project launch".to_owned(),
+                "--store".to_owned(),
+                path.display().to_string(),
+                "--json".to_owned(),
+            ],
+            &mut denied_output,
+        )?;
+        let denied_text = String::from_utf8(denied_output)?;
+        assert!(denied_text.contains("\"item_count\": 0"));
+        assert!(denied_text.contains("scope_denied:project-alpha"));
+
+        let mut allowed_output = Vec::new();
+        run_cli_with_writer(
+            vec![
+                "mneme".to_owned(),
+                "context".to_owned(),
+                "project launch".to_owned(),
+                "--scope".to_owned(),
+                "project-alpha".to_owned(),
+                "--store".to_owned(),
+                path.display().to_string(),
+                "--json".to_owned(),
+            ],
+            &mut allowed_output,
+        )?;
+        let allowed_text = String::from_utf8(allowed_output)?;
+        assert!(allowed_text.contains("\"item_count\": 1"));
+        assert!(allowed_text.contains("project launch reviews"));
 
         let _ = std::fs::remove_file(&path);
         Ok(())

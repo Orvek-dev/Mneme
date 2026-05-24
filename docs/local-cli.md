@@ -18,11 +18,13 @@ cargo run -p mneme-cli -- begin --help
 cargo run -p mneme-cli -- doctor
 cargo run -p mneme-cli -- ingest "remember: user prefers local-first tools"
 cargo run -p mneme-cli -- remember "user prefers local-first tools"
+cargo run -p mneme-cli -- remember "user prefers project launch reviews" --scope project-alpha
 cargo run -p mneme-cli -- correct "user prefers local-first tools" "user prefers desktop IDE"
 cargo run -p mneme-cli -- forget "user prefers desktop IDE"
 cargo run -p mneme-cli -- context "desktop IDE"
+cargo run -p mneme-cli -- context "project launch" --scope project-alpha
 cargo run -p mneme-cli -- snapshot --json
-cargo run -p mneme-cli -- begin "Draft setup plan" --query "local-first" --agent codex --json
+cargo run -p mneme-cli -- begin "Draft setup plan" --query "local-first" --scope private --agent codex --json
 cargo run -p mneme-cli -- end session-001 --summary "Prepared a concise setup plan" --remember "user prefers concise setup plans" --json
 cargo run -p mneme-cli -- validate --json
 cargo run -p mneme-cli -- compact
@@ -36,6 +38,19 @@ Use `--store <path>` to isolate experiments:
 ```sh
 cargo run -p mneme-cli -- remember "user prefers local-first tools" --store /tmp/mneme.json
 cargo run -p mneme-cli -- context "local-first" --store /tmp/mneme.json --json
+```
+
+`context` defaults to the `private` scope. Pass one or more `--scope <scope>`
+values to retrieve claims from other authorized scopes:
+
+```sh
+cargo run -p mneme-cli -- remember "user prefers project launch reviews" \
+  --scope project-alpha \
+  --store /tmp/mneme.json
+cargo run -p mneme-cli -- context "project launch" \
+  --scope project-alpha \
+  --store /tmp/mneme.json \
+  --json
 ```
 
 ## Store Maintenance
@@ -75,10 +90,13 @@ cargo run -p mneme-cli -- repair --store /tmp/mneme.json --json
 ```sh
 cargo run -p mneme-cli -- begin "Draft setup plan" \
   --query "local-first" \
+  --scope private \
   --agent codex \
   --store /tmp/mneme.json \
   --json
 ```
+
+`begin` uses the same allowed-scope retrieval guard as `context`.
 
 `end` closes the session and can write explicit memory claims:
 
