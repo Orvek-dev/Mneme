@@ -11,8 +11,8 @@ claim lifecycle state, source citations, and agent sessions.
 
 - Review artifacts must be generated from the current `mneme-core` snapshot.
 - Review export must not mutate store state.
-- Artifacts can contain memory text and must be documented as private by
-  default.
+- Artifacts can contain non-secret memory text and must be documented as
+  private by default.
 
 ## Requirements
 
