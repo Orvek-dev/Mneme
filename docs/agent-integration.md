@@ -110,6 +110,8 @@ For persistent local configuration, run `mneme init` to create
 `examples/mneme-agent-hook.env.example` file remains available for manual
 profiles. Runtime values resolve as CLI flags, then environment variables, then
 profile values, then command defaults.
+Use `mneme init --extractor-command <program>` to install a session-end command
+extractor directly into that generated profile.
 
 Use `mneme doctor --json` when an agent installer needs a structured health
 report for the current workspace store and profile before enabling hooks.
