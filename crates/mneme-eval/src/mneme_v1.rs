@@ -142,6 +142,16 @@ fn run_with_optional_persistence(
     }
 
     let mut curation_actual = None;
+    if scenario.maintenance.restore_from_backup {
+        let Some(path) = persistence_path else {
+            return Err(EvalError::scenario(format!(
+                "scenario {} missing persistence path for restore",
+                scenario.id
+            )));
+        };
+        persist_to_store(&engine, path, &scenario.id)?;
+    }
+
     if let Some(curation) = &scenario.maintenance.curation {
         let actual = apply_engine_curation(
             &mut engine,
@@ -156,6 +166,36 @@ fn run_with_optional_persistence(
             ))
         })?;
         curation_actual = Some(actual);
+    }
+
+    if scenario.maintenance.restore_from_backup {
+        let Some(path) = persistence_path else {
+            return Err(EvalError::scenario(format!(
+                "scenario {} missing persistence path for restore",
+                scenario.id
+            )));
+        };
+        persist_to_store(&engine, path, &scenario.id)?;
+        let store = JsonFileStore::new(path.to_path_buf());
+        let restore = store.restore_from_backup().map_err(|source| {
+            EvalError::scenario(format!(
+                "scenario {} failed to restore store: {source}",
+                scenario.id
+            ))
+        })?;
+        if !restore.restored {
+            return Err(EvalError::scenario(format!(
+                "scenario {} restore did not restore from backup: {}",
+                scenario.id, restore.action
+            )));
+        }
+        store_run.restored = true;
+        engine = MnemeEngine::from_store(config, &store).map_err(|source| {
+            EvalError::scenario(format!(
+                "scenario {} failed to reload restored store: {source}",
+                scenario.id
+            ))
+        })?;
     }
 
     if scenario.maintenance.export_import_roundtrip {
@@ -451,6 +491,7 @@ fn store_actual(path: &Path, run: &StoreRunState) -> StoreActual {
         valid: inspection.current.status == StoreFileStatus::Valid,
         backup_present: inspection.backup.status != StoreFileStatus::Missing,
         repair_performed: run.repair_performed,
+        restored: run.restored,
         compacted: run.compacted,
         imported: run.imported,
         generation: inspection.current.generation,
@@ -463,6 +504,7 @@ struct StoreRunState {
     compacted: bool,
     imported: bool,
     repair_performed: bool,
+    restored: bool,
 }
 
 fn needs_store(scenario: &Scenario) -> bool {
@@ -471,6 +513,7 @@ fn needs_store(scenario: &Scenario) -> bool {
         || scenario.maintenance.compact_after_events
         || scenario.maintenance.repair_from_backup
         || scenario.maintenance.curation.is_some()
+        || scenario.maintenance.restore_from_backup
         || scenario.expected.store.is_some()
 }
 

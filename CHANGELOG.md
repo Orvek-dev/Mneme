@@ -4,6 +4,22 @@ This project follows the spirit of Keep a Changelog.
 
 ## Unreleased
 
+## [0.31.0] - 2026-05-24
+
+### Added
+
+- Added `mneme restore --check` for non-mutating backup rollback readiness
+  reports.
+- Added `mneme restore` to swap a valid `<store>.bak` into the current store
+  while preserving the pre-restore current file as the new backup.
+- Added restore follow-up commands to applied curation reports so cleanup can
+  be rolled back through the CLI.
+- Added eval harness restore expectations and a core curation rollback
+  scenario for `fake` and `mneme-v1` targets.
+- Added release quality-gate checks for restore help, readiness reports,
+  rollback after curation, and swap-back recovery.
+- Added the Phase 25 curation recovery and audit trail feature spec.
+
 ## [0.30.0] - 2026-05-24
 
 ### Added

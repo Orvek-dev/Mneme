@@ -49,7 +49,9 @@ CLI-bound review workflows can use `mneme quality` for read-only review queues,
 `mneme curate` for dry-run or explicitly applied cleanup, and
 `mneme review <path>` to write a Markdown or JSON artifact. Quality, curation,
 and review artifacts redact sensitive claim text by default; raw review export
-requires `--include-sensitive`.
+requires `--include-sensitive`. CLI-bound recovery workflows can use
+`mneme repair --check` for invalid or legacy stores and `mneme restore --check`
+for explicit rollback from a valid backup.
 
 CLI-bound first-run workflows can use `mneme init` to create the default local
 store and `.mneme/mneme-agent-hook.env` profile before wiring an agent runtime.

@@ -47,6 +47,9 @@ The current `core` suite covers:
 - source event citation checks;
 - budget hard-cap blocking;
 - blocked secret handling;
+- memory quality review queues;
+- guided curation before/after quality checks;
+- explicit restore after applied curation and compaction;
 - correction lifecycle from superseded claim to active replacement;
 - forget lifecycle persisted across file-backed restart;
 - file-backed restart persistence for `mneme-v1`;

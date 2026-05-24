@@ -39,6 +39,7 @@ mneme hook doctor --json
 mneme hook begin "Draft setup plan" --query "local-first" --agent codex
 mneme validate --json
 mneme repair --check --json
+mneme restore --check --json
 mneme compact
 ```
 
@@ -129,7 +130,9 @@ cargo run -p mneme-cli -- curate --apply --compact --store /tmp/mneme.json --jso
 `curate` is a dry run unless `--apply` is present. Applied curation forgets
 redundant duplicate active claims by stable claim ID. `--compact` is separate
 because it removes non-active records, including blocked-secret, superseded, and
-forgotten claims, after the normal store backup path has run.
+forgotten claims, after the normal store backup path has run. Applied reports
+include `mneme restore --check` and `mneme restore` follow-up commands when the
+store changed.
 
 ## Store Maintenance
 
@@ -172,6 +175,20 @@ backup:
 
 ```sh
 cargo run -p mneme-cli -- repair --store /tmp/mneme.json --json
+```
+
+Check whether a valid backup can be restored even when the current store is
+also valid:
+
+```sh
+cargo run -p mneme-cli -- restore --check --store /tmp/mneme.json --json
+```
+
+Restore swaps `<store>.bak` into the current store and preserves the
+pre-restore current file as the new backup, so a second restore can swap back:
+
+```sh
+cargo run -p mneme-cli -- restore --store /tmp/mneme.json --json
 ```
 
 ## Agent Sessions

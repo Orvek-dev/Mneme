@@ -28,12 +28,12 @@ Mneme is pre-1.0. The useful surface today is local development and evaluation:
 - stored memory quality can be inspected as duplicate, blocked-secret, and
   inactive-history review queues;
 - stored memory can be curated through dry-run plans, explicit duplicate cleanup,
-  and explicit compaction of non-active records;
+  explicit compaction of non-active records, and backup-backed rollback;
 - stored memory can be exported as Markdown or JSON review artifacts with
   quality findings and sensitive claim text redacted by default;
 - local JSON stores include schema metadata, write locks, atomic writes,
-  backups, repair readiness checks, schema normalization, import/export, and
-  non-active record compaction;
+  backups, repair readiness checks, schema normalization, explicit backup
+  restore, import/export, and non-active record compaction;
 - the local CLI can be installed as `mneme` for first-run personal workflows;
 - `mneme init` creates a local store and agent hook profile for a new
   workspace;
@@ -94,6 +94,7 @@ mneme review /tmp/mneme-review.md --store "$STORE"
 mneme snapshot --store "$STORE" --json
 mneme validate --store "$STORE"
 mneme repair --check --store "$STORE" --json
+mneme restore --check --store "$STORE" --json
 mneme compact --store "$STORE"
 mneme begin "Draft setup plan" --query "local-first" --agent codex --store "$STORE" --json
 mneme end session-001 --summary "Prepared a concise setup plan" --remember "user prefers concise setup plans" --store "$STORE" --json

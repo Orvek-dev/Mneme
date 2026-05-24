@@ -50,6 +50,7 @@ mneme context "project launch" --scope project-alpha --max-items 3 --store "$STO
 mneme quality --store "$STORE" --json
 mneme curate --store "$STORE" --json
 mneme validate --store "$STORE"
+mneme restore --check --store "$STORE" --json
 ```
 
 `mneme init` creates the default `.mneme/mneme-v1.json` store and

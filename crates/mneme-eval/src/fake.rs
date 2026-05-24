@@ -89,10 +89,24 @@ fn run_fake_runtime(scenario: &Scenario, options: TargetRunOptions) -> ActualSta
         compacted = true;
     }
 
+    let restore_snapshot = scenario
+        .maintenance
+        .restore_from_backup
+        .then(|| actual.clone());
+
     if let Some(curation) = &scenario.maintenance.curation {
         let curation_actual = apply_curation(&mut actual, curation.apply, curation.compact);
         compacted |= curation_actual.compacted;
         actual.curation = Some(curation_actual);
+    }
+
+    let mut restored = false;
+    if scenario.maintenance.restore_from_backup {
+        if let Some(mut snapshot) = restore_snapshot {
+            snapshot.curation = actual.curation.clone();
+            actual = snapshot;
+            restored = true;
+        }
     }
 
     if let Some(agent_flow) = &scenario.agent_flow {
@@ -116,13 +130,16 @@ fn run_fake_runtime(scenario: &Scenario, options: TargetRunOptions) -> ActualSta
         || scenario.maintenance.compact_after_events
         || scenario.maintenance.repair_from_backup
         || scenario.maintenance.curation.is_some()
+        || scenario.maintenance.restore_from_backup
     {
         actual.store = Some(StoreActual {
             schema_version: Some(mneme_core::MNEME_STATE_SCHEMA_VERSION),
             valid: true,
             backup_present: scenario.maintenance.repair_from_backup
-                || scenario.maintenance.export_import_roundtrip,
+                || scenario.maintenance.export_import_roundtrip
+                || scenario.maintenance.restore_from_backup,
             repair_performed: scenario.maintenance.repair_from_backup,
+            restored,
             compacted,
             imported: scenario.maintenance.export_import_roundtrip,
             generation: Some(1),
