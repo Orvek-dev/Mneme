@@ -41,6 +41,8 @@ MNEME_OPENAI_DRY_RUN=1 cargo run -p mneme-eval -- baseline --suite model \
   --target mneme-v1-command \
   --extractor-command wrappers/openai_extractor.py \
   --iterations 2 \
+  --provider-label openai \
+  --model-label dry-run \
   --json
 ```
 
@@ -63,7 +65,8 @@ cargo run -p mneme-cli -- ingest "I work best with local-first tools." \
 ```
 
 For repeated live evals, use `mneme-eval baseline` and write the report under
-ignored `evals/reports/`. See [Live Provider Baseline](live-provider-baseline.md).
+ignored `evals/reports/`. See [Live Provider Baseline](live-provider-baseline.md)
+and [Live Provider Baseline Runbook](live-provider-baseline-runbook.md).
 
 ## Safety Rules
 

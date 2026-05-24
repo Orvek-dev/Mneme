@@ -20,6 +20,8 @@ adding live provider calls to public CI.
   live local baseline usage.
 - [REQ-LIVE-BASE-006][Release] CI and release verification shall exercise the
   baseline command without provider credentials.
+- [REQ-LIVE-BASE-007][Observability] Baseline reports shall include opt-in
+  provider, model, run label, and live-provider metadata.
 
 ## Verification Map
 
@@ -31,3 +33,4 @@ adding live provider calls to public CI.
 | REQ-LIVE-BASE-004 | CI uses `MNEME_OPENAI_DRY_RUN=1` | verified |
 | REQ-LIVE-BASE-005 | `docs/live-provider-baseline.md` | verified |
 | REQ-LIVE-BASE-006 | CI and release workflow baseline steps | verified |
+| REQ-LIVE-BASE-007 | `baseline_metadata` report fields | verified |

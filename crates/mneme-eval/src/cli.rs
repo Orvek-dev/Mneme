@@ -7,7 +7,7 @@ use serde::Serialize;
 
 use crate::error::EvalError;
 use crate::report::{
-    AcceptanceGateReport, AcceptanceReport, BaselineReport, BaselineRunReport,
+    AcceptanceGateReport, AcceptanceReport, BaselineMetadata, BaselineReport, BaselineRunReport,
     BaselineScenarioMetadata, EvalReport, ScenarioReport, ScenarioValidationReport,
     ValidationReport,
 };
@@ -65,6 +65,10 @@ struct CommandOptions {
     extractor_command: Option<String>,
     extractor_args: Vec<String>,
     iterations: usize,
+    live_provider: bool,
+    provider_label: Option<String>,
+    model_label: Option<String>,
+    run_label: Option<String>,
 }
 
 impl Default for CommandOptions {
@@ -77,6 +81,10 @@ impl Default for CommandOptions {
             extractor_command: None,
             extractor_args: Vec::new(),
             iterations: DEFAULT_BASELINE_ITERATIONS,
+            live_provider: false,
+            provider_label: None,
+            model_label: None,
+            run_label: None,
         }
     }
 }
@@ -354,6 +362,7 @@ fn baseline_report_for_paths(
         suite.to_owned(),
         target_name,
         target_metadata,
+        baseline_metadata(options),
         scenarios,
         runs,
     ))
@@ -412,6 +421,15 @@ fn command_extractor_options(options: &CommandOptions) -> Option<CommandExtracto
         program,
         args: options.extractor_args.clone(),
     })
+}
+
+fn baseline_metadata(options: &CommandOptions) -> BaselineMetadata {
+    BaselineMetadata::new(
+        options.live_provider,
+        options.provider_label.clone(),
+        options.model_label.clone(),
+        options.run_label.clone(),
+    )
 }
 
 fn parse_validate_args(
@@ -702,6 +720,28 @@ fn parse_baseline_args(raw_args: Vec<String>) -> Result<(String, CommandOptions)
                 };
                 options.iterations = parse_iterations(value)?;
             }
+            "--live-provider" => options.live_provider = true,
+            "--provider-label" => {
+                idx += 1;
+                let Some(value) = raw_args.get(idx) else {
+                    return Err(EvalError::invalid_cli("--provider-label requires a value"));
+                };
+                options.provider_label = Some(parse_label("--provider-label", value)?);
+            }
+            "--model-label" => {
+                idx += 1;
+                let Some(value) = raw_args.get(idx) else {
+                    return Err(EvalError::invalid_cli("--model-label requires a value"));
+                };
+                options.model_label = Some(parse_label("--model-label", value)?);
+            }
+            "--run-label" => {
+                idx += 1;
+                let Some(value) = raw_args.get(idx) else {
+                    return Err(EvalError::invalid_cli("--run-label requires a value"));
+                };
+                options.run_label = Some(parse_label("--run-label", value)?);
+            }
             value => {
                 return Err(EvalError::invalid_cli(format!(
                     "unknown baseline option: {value}"
@@ -723,6 +763,29 @@ fn parse_iterations(value: &str) -> Result<usize, EvalError> {
         )));
     }
     Ok(iterations)
+}
+
+fn parse_label(option: &str, value: &str) -> Result<String, EvalError> {
+    let trimmed = value.trim();
+    if trimmed.is_empty() {
+        return Err(EvalError::invalid_cli(format!(
+            "{option} must not be empty"
+        )));
+    }
+    if trimmed.len() > 80 {
+        return Err(EvalError::invalid_cli(format!(
+            "{option} must be 80 characters or fewer"
+        )));
+    }
+    if !trimmed
+        .chars()
+        .all(|ch| ch.is_ascii_alphanumeric() || matches!(ch, '-' | '_' | '.' | '/'))
+    {
+        return Err(EvalError::invalid_cli(format!(
+            "{option} may contain only ASCII letters, digits, '-', '_', '.', or '/'"
+        )));
+    }
+    Ok(trimmed.to_owned())
 }
 
 fn parse_target_kind(value: &str) -> Result<TargetKind, EvalError> {
@@ -1057,11 +1120,22 @@ mod tests {
             "wrappers/openai_extractor.py".to_owned(),
             "--iterations".to_owned(),
             "2".to_owned(),
+            "--provider-label".to_owned(),
+            "openai".to_owned(),
+            "--model-label".to_owned(),
+            "gpt-5.4-mini".to_owned(),
+            "--run-label".to_owned(),
+            "local-baseline".to_owned(),
+            "--live-provider".to_owned(),
             "--json".to_owned(),
         ])?;
         assert_eq!(suite, "model");
         assert_eq!(options.target_kind, TargetKind::MnemeV1Command);
         assert_eq!(options.iterations, 2);
+        assert!(options.live_provider);
+        assert_eq!(options.provider_label.as_deref(), Some("openai"));
+        assert_eq!(options.model_label.as_deref(), Some("gpt-5.4-mini"));
+        assert_eq!(options.run_label.as_deref(), Some("local-baseline"));
         assert!(options.json);
         assert_eq!(
             options.extractor_command.as_deref(),
@@ -1078,6 +1152,12 @@ mod tests {
             "--iterations".to_owned(),
             "0".to_owned(),
         ]);
+        assert!(result.is_err());
+    }
+
+    #[test]
+    fn parse_baseline_rejects_invalid_labels() {
+        let result = parse_baseline_args(vec!["--provider-label".to_owned(), "open ai".to_owned()]);
         assert!(result.is_err());
     }
 

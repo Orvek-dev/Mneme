@@ -13,12 +13,16 @@ MNEME_OPENAI_DRY_RUN=1 cargo run -p mneme-eval -- baseline --suite model \
   --target mneme-v1-command \
   --extractor-command wrappers/openai_extractor.py \
   --iterations 2 \
+  --provider-label openai \
+  --model-label dry-run \
   --json
 ```
 
 The JSON report includes:
 
 - `iterations`, `passed_iterations`, and `failed_iterations`
+- `baseline_metadata`, including live-provider status and optional provider,
+  model, and run labels
 - `total_scenario_runs`, `passed_scenario_runs`, and `failed_scenario_runs`
 - aggregate `pass_rate`
 - category pass rates from scenario tags that start with `category-`
@@ -43,6 +47,10 @@ cargo run -p mneme-eval -- baseline --suite model \
   --target mneme-v1-command \
   --extractor-command wrappers/openai_extractor.py \
   --iterations 3 \
+  --provider-label openai \
+  --model-label gpt-5.4-mini \
+  --run-label local-YYYYMMDD \
+  --live-provider \
   --report evals/reports/openai-live-baseline.json
 ```
 
@@ -61,3 +69,6 @@ For the current MVP, treat a provider baseline as acceptable only when:
 
 Later phases can relax this into explicit thresholds once the model suite has
 more scenarios and enough historical reports.
+
+See [Live Provider Baseline Runbook](live-provider-baseline-runbook.md) for the
+full live execution and redaction checklist.

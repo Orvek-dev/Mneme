@@ -114,8 +114,13 @@ jobs:
             --target mneme-v1-command \
             --extractor-command wrappers/openai_extractor.py \
             --iterations 2 \
+            --provider-label openai \
+            --model-label dry-run \
+            --run-label ci-dry-run \
             --json | tee "${RUNNER_TEMP}/mneme-openai-wrapper-baseline.json"
           grep -q '"iterations": 2' "${RUNNER_TEMP}/mneme-openai-wrapper-baseline.json"
+          grep -q '"provider_label": "openai"' "${RUNNER_TEMP}/mneme-openai-wrapper-baseline.json"
+          grep -q '"model_label": "dry-run"' "${RUNNER_TEMP}/mneme-openai-wrapper-baseline.json"
           grep -q '"scenario_count": 8' "${RUNNER_TEMP}/mneme-openai-wrapper-baseline.json"
           grep -q '"category": "no-claim"' "${RUNNER_TEMP}/mneme-openai-wrapper-baseline.json"
           grep -q '"passed_iterations": 2' "${RUNNER_TEMP}/mneme-openai-wrapper-baseline.json"

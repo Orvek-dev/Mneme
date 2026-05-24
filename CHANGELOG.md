@@ -4,6 +4,15 @@ This project follows the spirit of Keep a Changelog.
 
 ## Unreleased
 
+## [0.7.0] - 2026-05-24
+
+### Added
+
+- Added opt-in baseline metadata labels for provider, model, run label, and
+  live-provider status.
+- Added a live provider baseline runbook and redaction checklist.
+- Added CI and release checks for baseline metadata in dry-run reports.
+
 ## [0.6.0] - 2026-05-24
 
 ### Added
