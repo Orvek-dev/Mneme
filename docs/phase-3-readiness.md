@@ -120,3 +120,7 @@ checks for persisted human-review output.
 Phase 18 shipped the **Safe Review Redaction MVP** in `v0.24.0`, adding default
 redaction for review artifacts, explicit `--include-sensitive` raw export, and
 quality-gate checks that safe artifacts do not expose secret-like claim text.
+
+Phase 19 shipped the **Local Install & First-Run UX MVP** in `v0.25.0`, adding
+`scripts/install-local.sh`, installed-binary first-run smoke checks, and docs
+centered on `mneme` as the local CLI entry point.

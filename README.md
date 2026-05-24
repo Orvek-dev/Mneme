@@ -9,6 +9,7 @@ Mneme currently provides:
 - `mneme-core`: the v1 personal-memory engine.
 - `mneme-cli`: a local CLI over the v1 engine and JSON file store.
 - `mneme-eval`: a scenario-based eval harness with acceptance gates.
+- `scripts/install-local.sh`: a local installer for the `mneme` CLI.
 - `scripts/quality-gate.sh`: the single local gate used before PRs and
   releases.
 
@@ -28,6 +29,7 @@ Mneme is pre-1.0. The useful surface today is local development and evaluation:
   sensitive claim text redacted by default;
 - local JSON stores include schema metadata, write locks, atomic writes,
   backups, repair, import/export, and compaction;
+- the local CLI can be installed as `mneme` for first-run personal workflows;
 - agents can open and close task sessions with scoped context and post-task
   memory writes;
 - agent hooks expose a stable JSON envelope for doctor/begin/end automation;
@@ -54,11 +56,12 @@ For a step-by-step first run, see [Getting Started](docs/getting-started.md).
 
 ## Quickstart
 
-Install Rust, then run:
+Install Rust, then install the local CLI:
 
 ```sh
-cargo run -p mneme-cli -- doctor
-cargo run -p mneme-cli -- help
+./scripts/install-local.sh
+mneme doctor
+mneme help
 cargo run -p mneme-eval -- doctor
 cargo run -p mneme-eval -- help
 ```
@@ -67,21 +70,21 @@ Try the local CLI with an isolated store:
 
 ```sh
 STORE=/tmp/mneme.json
-cargo run -p mneme-cli -- remember "user prefers local-first tools" --store "$STORE"
-cargo run -p mneme-cli -- claims --status active --store "$STORE" --json
-cargo run -p mneme-cli -- context "local-first" --store "$STORE" --json
-cargo run -p mneme-cli -- remember "user prefers project launch reviews" --scope project-alpha --store "$STORE"
-cargo run -p mneme-cli -- context "project launch" --scope project-alpha --max-items 3 --store "$STORE" --json
-cargo run -p mneme-cli -- correct "user prefers local-first tools" "user prefers desktop IDE" --store "$STORE"
-cargo run -p mneme-cli -- forget "user prefers desktop IDE" --store "$STORE"
-cargo run -p mneme-cli -- review /tmp/mneme-review.md --store "$STORE"
-cargo run -p mneme-cli -- snapshot --store "$STORE" --json
-cargo run -p mneme-cli -- validate --store "$STORE"
-cargo run -p mneme-cli -- compact --store "$STORE"
-cargo run -p mneme-cli -- begin "Draft setup plan" --query "local-first" --agent codex --store "$STORE" --json
-cargo run -p mneme-cli -- end session-001 --summary "Prepared a concise setup plan" --remember "user prefers concise setup plans" --store "$STORE" --json
-cargo run -p mneme-cli -- hook doctor --store "$STORE"
-cargo run -p mneme-cli -- hook begin "Draft setup plan" --query "local-first" --agent codex --store "$STORE"
+mneme remember "user prefers local-first tools" --store "$STORE"
+mneme claims --status active --store "$STORE" --json
+mneme context "local-first" --store "$STORE" --json
+mneme remember "user prefers project launch reviews" --scope project-alpha --store "$STORE"
+mneme context "project launch" --scope project-alpha --max-items 3 --store "$STORE" --json
+mneme correct "user prefers local-first tools" "user prefers desktop IDE" --store "$STORE"
+mneme forget "user prefers desktop IDE" --store "$STORE"
+mneme review /tmp/mneme-review.md --store "$STORE"
+mneme snapshot --store "$STORE" --json
+mneme validate --store "$STORE"
+mneme compact --store "$STORE"
+mneme begin "Draft setup plan" --query "local-first" --agent codex --store "$STORE" --json
+mneme end session-001 --summary "Prepared a concise setup plan" --remember "user prefers concise setup plans" --store "$STORE" --json
+mneme hook doctor --store "$STORE"
+mneme hook begin "Draft setup plan" --query "local-first" --agent codex --store "$STORE"
 scripts/mneme-agent-hook.sh doctor
 ```
 
@@ -229,6 +232,7 @@ spec/               feature specs and verification maps
 ## Documentation
 
 - [Local CLI](docs/local-cli.md)
+- [Local Install](docs/local-install.md)
 - [Getting Started](docs/getting-started.md)
 - [API Contract](docs/api-contract.md)
 - [Distribution Policy](docs/distribution-policy.md)

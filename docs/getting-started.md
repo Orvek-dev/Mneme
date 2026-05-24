@@ -18,11 +18,13 @@ The current distribution state is documented in
 
 ## First Run
 
-From the repository root:
+From the repository root, install the local CLI and inspect the command
+surface:
 
 ```sh
-cargo run -p mneme-cli -- doctor
-cargo run -p mneme-cli -- help
+./scripts/install-local.sh
+mneme doctor
+mneme help
 cargo run -p mneme-eval -- doctor
 cargo run -p mneme-eval -- help
 ```
@@ -31,19 +33,19 @@ Inspect command-specific usage, then use an isolated store for local
 experiments:
 
 ```sh
-cargo run -p mneme-cli -- help begin
+mneme help begin
 cargo run -p mneme-eval -- run --help
 ```
 
 ```sh
 STORE=/tmp/mneme-getting-started.json
 rm -f "$STORE"
-cargo run -p mneme-cli -- remember "user prefers local-first tools" --store "$STORE"
-cargo run -p mneme-cli -- claims --status active --store "$STORE" --json
-cargo run -p mneme-cli -- context "local-first" --store "$STORE" --json
-cargo run -p mneme-cli -- remember "user prefers project launch reviews" --scope project-alpha --store "$STORE"
-cargo run -p mneme-cli -- context "project launch" --scope project-alpha --max-items 3 --store "$STORE" --json
-cargo run -p mneme-cli -- validate --store "$STORE"
+mneme remember "user prefers local-first tools" --store "$STORE"
+mneme claims --status active --store "$STORE" --json
+mneme context "local-first" --store "$STORE" --json
+mneme remember "user prefers project launch reviews" --scope project-alpha --store "$STORE"
+mneme context "project launch" --scope project-alpha --max-items 3 --store "$STORE" --json
+mneme validate --store "$STORE"
 ```
 
 The default store is `.mneme/mneme-v1.json` in the current directory. `.mneme/`
@@ -56,20 +58,20 @@ Agents can retrieve task-scoped context and then write explicit post-task memory
 ```sh
 STORE=/tmp/mneme-agent-session.json
 rm -f "$STORE"
-cargo run -p mneme-cli -- remember "user prefers local-first tools" --store "$STORE"
-cargo run -p mneme-cli -- begin "Draft setup plan" \
+mneme remember "user prefers local-first tools" --store "$STORE"
+mneme begin "Draft setup plan" \
   --query "local-first" \
   --scope private \
   --max-items 3 \
   --agent codex \
   --store "$STORE" \
   --json
-cargo run -p mneme-cli -- hook begin "Draft setup plan" \
+mneme hook begin "Draft setup plan" \
   --query "local-first" \
   --agent codex \
   --store "$STORE"
 scripts/mneme-agent-hook.sh doctor
-cargo run -p mneme-cli -- end session-001 \
+mneme end session-001 \
   --summary "Prepared a concise setup plan" \
   --remember "user prefers concise setup plans" \
   --store "$STORE" \

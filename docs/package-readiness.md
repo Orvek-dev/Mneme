@@ -51,6 +51,19 @@ The full quality gate also runs this check:
 ./scripts/quality-gate.sh full
 ```
 
+## Local Install Check
+
+The local CLI installer is intentionally separate from registry publication.
+It builds from this repository and installs only the `mneme` binary:
+
+```sh
+./scripts/install-local.sh
+mneme doctor
+```
+
+The full quality gate installs into a temporary root with `--debug` and smokes
+the installed binary before release.
+
 ## Publication Policy
 
 Do not remove `publish = false` until all of the following are true:

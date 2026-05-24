@@ -9,29 +9,30 @@ through the JSON file store.
 Inspect available commands:
 
 ```sh
-cargo run -p mneme-cli -- help
-cargo run -p mneme-cli -- help begin
-cargo run -p mneme-cli -- begin --help
+./scripts/install-local.sh
+mneme help
+mneme help begin
+mneme begin --help
 ```
 
 ```sh
-cargo run -p mneme-cli -- doctor
-cargo run -p mneme-cli -- ingest "remember: user prefers local-first tools"
-cargo run -p mneme-cli -- remember "user prefers local-first tools"
-cargo run -p mneme-cli -- remember "user prefers project launch reviews" --scope project-alpha
-cargo run -p mneme-cli -- correct "user prefers local-first tools" "user prefers desktop IDE"
-cargo run -p mneme-cli -- forget "user prefers desktop IDE"
-cargo run -p mneme-cli -- claims --status active --json
-cargo run -p mneme-cli -- review /tmp/mneme-review.md
-cargo run -p mneme-cli -- context "desktop IDE"
-cargo run -p mneme-cli -- context "project launch" --scope project-alpha --max-items 3
-cargo run -p mneme-cli -- snapshot --json
-cargo run -p mneme-cli -- begin "Draft setup plan" --query "local-first" --scope private --max-items 3 --agent codex --json
-cargo run -p mneme-cli -- end session-001 --summary "Prepared a concise setup plan" --remember "user prefers concise setup plans" --json
-cargo run -p mneme-cli -- hook doctor --json
-cargo run -p mneme-cli -- hook begin "Draft setup plan" --query "local-first" --agent codex
-cargo run -p mneme-cli -- validate --json
-cargo run -p mneme-cli -- compact
+mneme doctor
+mneme ingest "remember: user prefers local-first tools"
+mneme remember "user prefers local-first tools"
+mneme remember "user prefers project launch reviews" --scope project-alpha
+mneme correct "user prefers local-first tools" "user prefers desktop IDE"
+mneme forget "user prefers desktop IDE"
+mneme claims --status active --json
+mneme review /tmp/mneme-review.md
+mneme context "desktop IDE"
+mneme context "project launch" --scope project-alpha --max-items 3
+mneme snapshot --json
+mneme begin "Draft setup plan" --query "local-first" --scope private --max-items 3 --agent codex --json
+mneme end session-001 --summary "Prepared a concise setup plan" --remember "user prefers concise setup plans" --json
+mneme hook doctor --json
+mneme hook begin "Draft setup plan" --query "local-first" --agent codex
+mneme validate --json
+mneme compact
 ```
 
 The default store is `.mneme/mneme-v1.json` under the current working
