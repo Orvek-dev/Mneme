@@ -4,6 +4,20 @@ This project follows the spirit of Keep a Changelog.
 
 ## Unreleased
 
+## [0.12.0] - 2026-05-24
+
+### Added
+
+- Added public getting-started and package-readiness documentation.
+- Added `scripts/package-check.sh` to verify Cargo package assembly and block
+  private or generated file patterns from package contents.
+
+### Changed
+
+- Added public package metadata to workspace crates and marked them
+  `publish = false` until license and distribution policy are finalized.
+- Extended the release quality gate with package assembly checks.
+
 ## [0.11.0] - 2026-05-24
 
 ### Added

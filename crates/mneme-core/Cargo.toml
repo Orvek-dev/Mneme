@@ -3,6 +3,10 @@ name = "mneme-core"
 version.workspace = true
 edition.workspace = true
 rust-version.workspace = true
+description = "Core personal-memory engine for Mneme."
+repository = "https://github.com/Orvek-dev/Mneme"
+readme = "../../README.md"
+publish = false
 
 [dependencies]
 serde = { version = "1.0", features = ["derive"] }
