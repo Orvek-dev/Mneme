@@ -92,3 +92,7 @@ scoped `ContextQuery` retrieval, CLI allowed-scope options for `context` and
 Phase 11 shipped the **Deterministic Context Ranking & Budget MVP** in
 `v0.17.0`, adding ranked context item metadata, retrieval item caps, budget
 omission reasons, and eval/quality-gate checks for ranked capped retrieval.
+
+Phase 12 shipped the **Agent Hook Contract MVP** in `v0.18.0`, adding
+`mneme hook begin/end`, the `mneme.agent_hook.v1` JSON envelope, hook error
+classification, and quality-gate checks for hook success and failure paths.

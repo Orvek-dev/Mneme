@@ -26,6 +26,7 @@ cargo run -p mneme-cli -- context "project launch" --scope project-alpha --max-i
 cargo run -p mneme-cli -- snapshot --json
 cargo run -p mneme-cli -- begin "Draft setup plan" --query "local-first" --scope private --max-items 3 --agent codex --json
 cargo run -p mneme-cli -- end session-001 --summary "Prepared a concise setup plan" --remember "user prefers concise setup plans" --json
+cargo run -p mneme-cli -- hook begin "Draft setup plan" --query "local-first" --agent codex
 cargo run -p mneme-cli -- validate --json
 cargo run -p mneme-cli -- compact
 ```
@@ -102,6 +103,22 @@ cargo run -p mneme-cli -- begin "Draft setup plan" \
 
 `begin` uses the same allowed-scope guard, deterministic ranking, and item cap
 as `context`.
+
+`hook begin` and `hook end` run the same session operations with the
+`mneme.agent_hook.v1` JSON envelope. They always write JSON to stdout and are
+intended for agents and local automations:
+
+```sh
+cargo run -p mneme-cli -- hook begin "Draft setup plan" \
+  --query "local-first" \
+  --agent codex \
+  --store /tmp/mneme.json
+
+cargo run -p mneme-cli -- hook end session-001 \
+  --summary "Prepared a concise setup plan" \
+  --remember "user prefers concise setup plans" \
+  --store /tmp/mneme.json
+```
 
 `end` closes the session and can write explicit memory claims:
 

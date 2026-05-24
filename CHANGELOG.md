@@ -4,6 +4,19 @@ This project follows the spirit of Keep a Changelog.
 
 ## Unreleased
 
+## [0.18.0] - 2026-05-24
+
+### Added
+
+- Added `mneme hook begin` and `mneme hook end` for agent automation.
+- Added the stable `mneme.agent_hook.v1` JSON envelope for hook success and
+  failure output.
+- Added hook error classification with non-zero exits and suppressed duplicate
+  stderr for JSON-reported hook failures.
+- Added CLI tests and quality-gate smoke checks for hook begin/end and hook
+  error output.
+- Added an agent hook contract document and Phase 12 feature spec.
+
 ## [0.17.0] - 2026-05-24
 
 ### Added
