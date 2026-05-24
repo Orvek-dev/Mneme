@@ -101,6 +101,7 @@ pub(crate) struct Expected {
     pub(crate) audit: Option<AuditExpected>,
     pub(crate) store: Option<StoreExpected>,
     pub(crate) session: Option<SessionExpected>,
+    pub(crate) quality: Option<QualityExpected>,
 }
 
 impl Expected {
@@ -112,6 +113,7 @@ impl Expected {
             && self.audit.is_none()
             && self.store.is_none()
             && self.session.is_none()
+            && self.quality.is_none()
     }
 }
 
@@ -180,6 +182,17 @@ pub(crate) struct SessionExpected {
     pub(crate) context_must_include: Vec<String>,
     pub(crate) memory_event_count: Option<usize>,
     pub(crate) summary_contains: Option<String>,
+}
+
+#[derive(Debug, Clone, Default, Deserialize)]
+#[serde(default, deny_unknown_fields)]
+pub(crate) struct QualityExpected {
+    pub(crate) duplicate_active_groups: Option<usize>,
+    pub(crate) duplicate_active_claims: Option<usize>,
+    pub(crate) blocked_secret_count: Option<usize>,
+    pub(crate) inactive_claim_count: Option<usize>,
+    pub(crate) review_item_count: Option<usize>,
+    pub(crate) finding_kinds: Vec<String>,
 }
 
 pub(crate) fn load_scenario(path: &Path) -> Result<Scenario, EvalError> {
@@ -386,6 +399,18 @@ fn validate_scenario(scenario: &Scenario, path: &Path) -> Result<(), EvalError> 
         {
             return Err(EvalError::scenario(format!(
                 "scenario {} context_pack has an empty omitted_reason_contains entry",
+                scenario.id
+            )));
+        }
+    }
+    if let Some(quality) = &scenario.expected.quality {
+        if quality
+            .finding_kinds
+            .iter()
+            .any(|kind| kind.trim().is_empty())
+        {
+            return Err(EvalError::scenario(format!(
+                "scenario {} quality has an empty finding_kinds entry",
                 scenario.id
             )));
         }

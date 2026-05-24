@@ -9,9 +9,9 @@ use mneme_core::{
 use crate::error::EvalError;
 use crate::scenario::Scenario;
 use crate::target::{
-    ActualState, AuditEvent, BudgetActual, Claim, ContextItem, ContextPack, EvalTarget,
-    EvalTargetMetadata, FaultMode, OmittedItem, RecordedEvent, SessionActual, StoreActual,
-    TargetRunOptions,
+    build_quality_actual, ActualState, AuditEvent, BudgetActual, Claim, ContextItem, ContextPack,
+    EvalTarget, EvalTargetMetadata, FaultMode, OmittedItem, RecordedEvent, SessionActual,
+    StoreActual, TargetRunOptions,
 };
 
 pub(crate) struct MnemeV1EvalTarget;
@@ -304,8 +304,12 @@ fn run_with_optional_persistence(
             })
             .collect(),
         store: persistence_path.map(|path| store_actual(path, &store_run)),
+        quality: None,
     };
     apply_seeded_fault(&mut actual, options.fault_mode);
+    if scenario.expected.quality.is_some() {
+        actual.quality = Some(build_quality_actual(&actual.claims));
+    }
     Ok(actual)
 }
 

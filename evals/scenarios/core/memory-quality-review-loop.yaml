@@ -1,0 +1,72 @@
+id: memory-quality-review-loop
+tags:
+  - review
+  - quality
+  - lifecycle
+budget:
+  daily_cloud_tokens: 100
+events:
+  - speaker_id: user
+    actor_agent_id: codex
+    scope: private
+    trust_level: trusted_user
+    text: "remember: user prefers quality loops"
+  - speaker_id: user
+    actor_agent_id: codex
+    scope: private
+    trust_level: trusted_user
+    text: "remember: user prefers quality loops"
+  - speaker_id: user
+    actor_agent_id: codex
+    scope: private
+    trust_level: trusted_user
+    text: "remember: user token API_KEY=FAKE_TEST_VALUE"
+  - speaker_id: user
+    actor_agent_id: codex
+    scope: private
+    trust_level: trusted_user
+    text: "remember: user prefers old review notes"
+  - speaker_id: user
+    actor_agent_id: codex
+    scope: private
+    trust_level: trusted_user
+    text: "correct-id: claim-004 -> user prefers current review notes"
+expected:
+  event_append:
+    count: 5
+  claims:
+    - subject: user
+      predicate: prefers
+      object: quality loops
+      status: active
+      scope: private
+    - subject: user
+      predicate: token
+      object: API_KEY=FAKE_TEST_VALUE
+      status: blocked_secret
+      scope: private
+    - subject: user
+      predicate: prefers
+      object: old review notes
+      status: superseded
+      scope: private
+    - subject: user
+      predicate: prefers
+      object: current review notes
+      status: active
+      scope: private
+  quality:
+    duplicate_active_groups: 1
+    duplicate_active_claims: 2
+    blocked_secret_count: 1
+    inactive_claim_count: 1
+    review_item_count: 3
+    finding_kinds:
+      - duplicate_active
+      - blocked_secret
+      - inactive_history
+  budget:
+    hard_cap_violations: 0
+  audit:
+    read_write_events_required: false
+    claim_update_required: true

@@ -127,6 +127,9 @@ cargo run -p mneme-cli -- review --help > "$MNEME_HELP"
 grep -q "Usage: mneme review" "$MNEME_HELP"
 grep -q -- "--format markdown|json" "$MNEME_HELP"
 grep -q -- "--include-sensitive" "$MNEME_HELP"
+cargo run -p mneme-cli -- quality --help > "$MNEME_HELP"
+grep -q "Usage: mneme quality" "$MNEME_HELP"
+grep -q "duplicate active claims" "$MNEME_HELP"
 cargo run -p mneme-eval -- help > "$MNEME_EVAL_HELP"
 grep -q "Usage:" "$MNEME_EVAL_HELP"
 grep -q "mneme-eval help baseline" "$MNEME_EVAL_HELP"
@@ -173,6 +176,36 @@ fi
 cargo run -p mneme-cli -- review "$REVIEW_RAW_JSON" --format json --include-sensitive --store "$REVIEW_STORE"
 grep -q '"policy": "include_sensitive"' "$REVIEW_RAW_JSON"
 grep -q 'API_KEY=FAKE_TEST_VALUE' "$REVIEW_RAW_JSON"
+QUALITY_STORE="${TMP_ROOT}/mneme-quality-gate-quality.json"
+QUALITY_REPORT="${TMP_ROOT}/mneme-quality-gate-quality-report.json"
+QUALITY_REVIEW="${TMP_ROOT}/mneme-quality-gate-quality-review.md"
+rm -f "$QUALITY_STORE" "$QUALITY_REPORT" "$QUALITY_REVIEW"
+cargo run -p mneme-cli -- remember "user prefers quality loops" --store "$QUALITY_STORE"
+cargo run -p mneme-cli -- remember "user prefers quality loops" --store "$QUALITY_STORE"
+cargo run -p mneme-cli -- remember "user token API_KEY=FAKE_TEST_VALUE" --store "$QUALITY_STORE"
+cargo run -p mneme-cli -- remember "user prefers old review notes" --store "$QUALITY_STORE"
+cargo run -p mneme-cli -- correct --claim-id claim-004 "user prefers current review notes" --store "$QUALITY_STORE"
+cargo run -p mneme-cli -- quality --store "$QUALITY_STORE" --json > "$QUALITY_REPORT"
+grep -q '"command": "quality"' "$QUALITY_REPORT"
+grep -q '"health": "attention_required"' "$QUALITY_REPORT"
+grep -q '"duplicate_active_group_count": 1' "$QUALITY_REPORT"
+grep -q '"blocked_secret_claim_count": 1' "$QUALITY_REPORT"
+grep -q '"inactive_claim_count": 1' "$QUALITY_REPORT"
+grep -q '"kind": "duplicate_active"' "$QUALITY_REPORT"
+grep -q '"kind": "blocked_secret"' "$QUALITY_REPORT"
+grep -q '"kind": "inactive_history"' "$QUALITY_REPORT"
+if grep -q 'API_KEY=FAKE_TEST_VALUE' "$QUALITY_REPORT"; then
+  echo "quality-gate: quality report leaked secret text" >&2
+  exit 1
+fi
+cargo run -p mneme-cli -- review "$QUALITY_REVIEW" --store "$QUALITY_STORE"
+grep -q '## Memory Quality' "$QUALITY_REVIEW"
+grep -q 'duplicate_active' "$QUALITY_REVIEW"
+grep -q 'inactive_history' "$QUALITY_REVIEW"
+if grep -q 'API_KEY=FAKE_TEST_VALUE' "$QUALITY_REVIEW"; then
+  echo "quality-gate: quality review artifact leaked secret text" >&2
+  exit 1
+fi
 SCOPE_STORE="${TMP_ROOT}/mneme-quality-gate-scope.json"
 SCOPE_DENIED="${TMP_ROOT}/mneme-quality-gate-scope-denied.json"
 SCOPE_ALLOWED="${TMP_ROOT}/mneme-quality-gate-scope-allowed.json"
