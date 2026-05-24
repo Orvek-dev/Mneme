@@ -4,6 +4,21 @@ This project follows the spirit of Keep a Changelog.
 
 ## Unreleased
 
+## [0.30.0] - 2026-05-24
+
+### Added
+
+- Added `mneme curate` for guided memory cleanup plans with safe dry-run output
+  by default.
+- Added `mneme curate --apply` to forget redundant duplicate active claims by
+  deterministic claim ID, and `--compact` to remove non-active records after
+  explicit review.
+- Added curation before/after quality checks to the eval harness and a core
+  guided-memory-curation scenario.
+- Added release quality-gate checks for curation help, dry-run redaction,
+  applied cleanup, backup creation, and post-curation quality health.
+- Added the Phase 24 guided memory curation feature spec.
+
 ## [0.29.0] - 2026-05-24
 
 ### Added

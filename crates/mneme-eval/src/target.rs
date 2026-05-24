@@ -212,6 +212,7 @@ pub(crate) struct ActualState {
     pub(crate) audit: Vec<AuditEvent>,
     pub(crate) store: Option<StoreActual>,
     pub(crate) quality: Option<QualityActual>,
+    pub(crate) curation: Option<CurationActual>,
 }
 
 #[derive(Debug, Clone)]
@@ -245,6 +246,24 @@ pub(crate) struct QualityActual {
     pub(crate) inactive_claim_count: usize,
     pub(crate) review_item_count: usize,
     pub(crate) finding_kinds: Vec<String>,
+}
+
+#[derive(Debug, Clone, Default)]
+pub(crate) struct CurationActual {
+    pub(crate) duplicate_forget_count: usize,
+    pub(crate) blocked_secret_review_count: usize,
+    pub(crate) compact_recommended: bool,
+    pub(crate) compacted: bool,
+    pub(crate) changed: bool,
+    pub(crate) before_quality: QualityActual,
+    pub(crate) after_quality: QualityActual,
+}
+
+#[derive(Debug, Clone, Default)]
+pub(crate) struct CurationPlanActual {
+    pub(crate) duplicate_forget_ids: Vec<String>,
+    pub(crate) blocked_secret_review_count: usize,
+    pub(crate) compact_recommended: bool,
 }
 
 pub(crate) fn build_quality_actual(claims: &[Claim]) -> QualityActual {
@@ -286,6 +305,65 @@ pub(crate) fn build_quality_actual(claims: &[Claim]) -> QualityActual {
         review_item_count,
         finding_kinds,
     }
+}
+
+pub(crate) fn build_curation_plan_actual(claims: &[Claim]) -> CurationPlanActual {
+    let mut active_groups = BTreeMap::<String, Vec<&Claim>>::new();
+    for claim in claims.iter().filter(|claim| claim.status == "active") {
+        active_groups
+            .entry(quality_claim_key(claim))
+            .or_default()
+            .push(claim);
+    }
+
+    let mut duplicate_forget_ids = Vec::new();
+    for group in active_groups.values().filter(|group| group.len() > 1) {
+        duplicate_forget_ids.extend(group.iter().skip(1).map(|claim| claim.id.clone()));
+    }
+
+    let mut compact_target_ids = duplicate_forget_ids.clone();
+    let mut blocked_secret_review_count = 0;
+    for claim in claims {
+        match claim.status.as_str() {
+            "blocked_secret" => {
+                blocked_secret_review_count += 1;
+                compact_target_ids.push(claim.id.clone());
+            }
+            "superseded" | "forgotten" => compact_target_ids.push(claim.id.clone()),
+            _ => {}
+        }
+    }
+    dedupe_strings(&mut compact_target_ids);
+    let compact_recommended = !compact_target_ids.is_empty();
+
+    CurationPlanActual {
+        duplicate_forget_ids,
+        blocked_secret_review_count,
+        compact_recommended,
+    }
+}
+
+pub(crate) fn build_curation_actual(
+    before_claims: &[Claim],
+    after_claims: &[Claim],
+    compacted: bool,
+    changed: bool,
+) -> CurationActual {
+    let plan = build_curation_plan_actual(before_claims);
+    CurationActual {
+        duplicate_forget_count: plan.duplicate_forget_ids.len(),
+        blocked_secret_review_count: plan.blocked_secret_review_count,
+        compact_recommended: plan.compact_recommended,
+        compacted,
+        changed,
+        before_quality: build_quality_actual(before_claims),
+        after_quality: build_quality_actual(after_claims),
+    }
+}
+
+fn dedupe_strings(values: &mut Vec<String>) {
+    let mut seen = std::collections::BTreeSet::new();
+    values.retain(|value| seen.insert(value.clone()));
 }
 
 fn quality_claim_key(claim: &Claim) -> String {

@@ -1,10 +1,10 @@
 use crate::error::EvalError;
 use crate::report::{CheckReport, ScenarioReport};
 use crate::scenario::{
-    AuditExpected, ClaimExpected, ContextPackExpected, Expected, QualityExpected, Scenario,
-    SessionExpected, StoreExpected,
+    AuditExpected, ClaimExpected, ContextPackExpected, CurationExpected, Expected, QualityExpected,
+    Scenario, SessionExpected, StoreExpected,
 };
-use crate::target::{ActualState, ContextPack, EvalTarget, TargetRunOptions};
+use crate::target::{ActualState, ContextPack, EvalTarget, QualityActual, TargetRunOptions};
 
 pub(crate) fn replay_scenario(
     scenario: &Scenario,
@@ -70,6 +70,9 @@ fn check_expected(scenario: &Scenario, actual: &ActualState) -> Vec<CheckReport>
     }
     if let Some(expected) = &scenario.expected.quality {
         checks.extend(check_quality(expected, actual));
+    }
+    if let Some(expected) = &scenario.expected.curation {
+        checks.extend(check_curation(expected, actual));
     }
     checks
 }
@@ -582,7 +585,6 @@ fn check_store_bool(name: &str, expected: bool, actual: bool) -> CheckReport {
 }
 
 fn check_quality(expected: &QualityExpected, actual: &ActualState) -> Vec<CheckReport> {
-    let mut checks = Vec::new();
     let Some(quality) = &actual.quality else {
         return vec![CheckReport::fail(
             "quality.present",
@@ -591,55 +593,70 @@ fn check_quality(expected: &QualityExpected, actual: &ActualState) -> Vec<CheckR
             "actual.quality",
         )];
     };
+    check_quality_actual("quality", expected, quality, "actual.quality")
+}
+
+fn check_quality_actual(
+    prefix: &str,
+    expected: &QualityExpected,
+    quality: &QualityActual,
+    artifact: &str,
+) -> Vec<CheckReport> {
+    let mut checks = Vec::new();
     if let Some(count) = expected.duplicate_active_groups {
         checks.push(check_quality_count(
-            "quality.duplicate_active_groups",
+            &format!("{prefix}.duplicate_active_groups"),
             count,
             quality.duplicate_active_groups,
+            artifact,
         ));
     }
     if let Some(count) = expected.duplicate_active_claims {
         checks.push(check_quality_count(
-            "quality.duplicate_active_claims",
+            &format!("{prefix}.duplicate_active_claims"),
             count,
             quality.duplicate_active_claims,
+            artifact,
         ));
     }
     if let Some(count) = expected.blocked_secret_count {
         checks.push(check_quality_count(
-            "quality.blocked_secret_count",
+            &format!("{prefix}.blocked_secret_count"),
             count,
             quality.blocked_secret_count,
+            artifact,
         ));
     }
     if let Some(count) = expected.inactive_claim_count {
         checks.push(check_quality_count(
-            "quality.inactive_claim_count",
+            &format!("{prefix}.inactive_claim_count"),
             count,
             quality.inactive_claim_count,
+            artifact,
         ));
     }
     if let Some(count) = expected.review_item_count {
         checks.push(check_quality_count(
-            "quality.review_item_count",
+            &format!("{prefix}.review_item_count"),
             count,
             quality.review_item_count,
+            artifact,
         ));
     }
     for kind in &expected.finding_kinds {
         if quality.finding_kinds.contains(kind) {
             checks.push(CheckReport::pass(
-                format!("quality.finding_kind.{kind}"),
+                format!("{prefix}.finding_kind.{kind}"),
                 "present",
                 "present",
             ));
         } else {
             checks.push(CheckReport::fail(
-                format!("quality.finding_kind.{kind}"),
+                format!("{prefix}.finding_kind.{kind}"),
                 "present",
                 "missing",
                 format!(
-                    "actual.quality.finding_kinds={}",
+                    "{artifact}.finding_kinds={}",
                     quality.finding_kinds.join(",")
                 ),
             ));
@@ -648,16 +665,88 @@ fn check_quality(expected: &QualityExpected, actual: &ActualState) -> Vec<CheckR
     checks
 }
 
-fn check_quality_count(name: &str, expected: usize, actual: usize) -> CheckReport {
+fn check_curation(expected: &CurationExpected, actual: &ActualState) -> Vec<CheckReport> {
+    let mut checks = Vec::new();
+    let Some(curation) = &actual.curation else {
+        return vec![CheckReport::fail(
+            "curation.present",
+            "present",
+            "missing",
+            "actual.curation",
+        )];
+    };
+    if let Some(count) = expected.duplicate_forget_count {
+        checks.push(check_quality_count(
+            "curation.duplicate_forget_count",
+            count,
+            curation.duplicate_forget_count,
+            "actual.curation",
+        ));
+    }
+    if let Some(count) = expected.blocked_secret_review_count {
+        checks.push(check_quality_count(
+            "curation.blocked_secret_review_count",
+            count,
+            curation.blocked_secret_review_count,
+            "actual.curation",
+        ));
+    }
+    if let Some(value) = expected.compact_recommended {
+        checks.push(check_bool(
+            "curation.compact_recommended",
+            value,
+            curation.compact_recommended,
+            "actual.curation",
+        ));
+    }
+    if let Some(value) = expected.compacted {
+        checks.push(check_bool(
+            "curation.compacted",
+            value,
+            curation.compacted,
+            "actual.curation",
+        ));
+    }
+    if let Some(value) = expected.changed {
+        checks.push(check_bool(
+            "curation.changed",
+            value,
+            curation.changed,
+            "actual.curation",
+        ));
+    }
+    if let Some(quality) = &expected.before_quality {
+        checks.extend(check_quality_actual(
+            "curation.before_quality",
+            quality,
+            &curation.before_quality,
+            "actual.curation.before_quality",
+        ));
+    }
+    if let Some(quality) = &expected.after_quality {
+        checks.extend(check_quality_actual(
+            "curation.after_quality",
+            quality,
+            &curation.after_quality,
+            "actual.curation.after_quality",
+        ));
+    }
+    checks
+}
+
+fn check_quality_count(name: &str, expected: usize, actual: usize, artifact: &str) -> CheckReport {
     if expected == actual {
         CheckReport::pass(name, expected.to_string(), actual.to_string())
     } else {
-        CheckReport::fail(
-            name,
-            expected.to_string(),
-            actual.to_string(),
-            "actual.quality",
-        )
+        CheckReport::fail(name, expected.to_string(), actual.to_string(), artifact)
+    }
+}
+
+fn check_bool(name: &str, expected: bool, actual: bool, artifact: &str) -> CheckReport {
+    if expected == actual {
+        CheckReport::pass(name, expected.to_string(), actual.to_string())
+    } else {
+        CheckReport::fail(name, expected.to_string(), actual.to_string(), artifact)
     }
 }
 
@@ -728,6 +817,7 @@ mod tests {
                 store: None,
                 session: None,
                 quality: None,
+                curation: None,
             },
         };
         let target = FakeEvalTarget;
@@ -773,6 +863,7 @@ mod tests {
                 store: None,
                 session: None,
                 quality: None,
+                curation: None,
             },
         };
         let target = FakeEvalTarget;

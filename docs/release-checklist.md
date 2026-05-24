@@ -27,18 +27,19 @@ Run a local CLI smoke check with an isolated store:
 
 ```sh
 STORE=/tmp/mneme-release-smoke.json
-rm -f "$STORE"
+rm -f "$STORE" "$STORE.bak"
 ./scripts/install-local.sh
 mneme init --force
 mneme doctor --json
 mneme remember "user prefers local-first tools" --store "$STORE"
 mneme context "local-first" --store "$STORE" --json
 mneme quality --store "$STORE" --json
+mneme curate --store "$STORE" --json
 mneme repair --check --store "$STORE" --json
 mneme hook doctor --store "$STORE"
 scripts/mneme-agent-hook.sh doctor
 MNEME_AGENT_HOOK_CONFIG=examples/mneme-agent-hook.env.example scripts/mneme-agent-hook.sh doctor
-rm -f "$STORE"
+rm -f "$STORE" "$STORE.bak"
 ```
 
 ## Public Safety

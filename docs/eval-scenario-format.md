@@ -92,6 +92,9 @@ maintenance:
   export_import_roundtrip: false
   compact_after_events: false
   repair_from_backup: false
+  curation:
+    apply: false
+    compact: false
 agent_flow:
   begin:
     task: "Draft setup plan"
@@ -159,6 +162,18 @@ expected:
     inactive_claim_count: 0
     review_item_count: 0
     finding_kinds: []
+  curation:
+    duplicate_forget_count: 0
+    blocked_secret_review_count: 0
+    compact_recommended: false
+    compacted: false
+    changed: false
+    before_quality:
+      duplicate_active_groups: 0
+      review_item_count: 0
+    after_quality:
+      duplicate_active_groups: 0
+      review_item_count: 0
 ```
 
 ## Required Fields
@@ -204,6 +219,10 @@ Each expected claim requires:
   inactive claims before context and store checks.
 - `maintenance.repair_from_backup`: asks compatible targets to corrupt the
   current store after backup creation, repair from backup, and reload.
+- `maintenance.curation.apply`: asks compatible targets to run guided memory
+  curation after events and before final checks.
+- `maintenance.curation.compact`: asks curation to compact non-active records
+  after applied duplicate cleanup. It requires `apply: true`.
 - `agent_flow.begin`: asks compatible targets to start an agent session with
   `task`, optional `actor_agent_id`, optional context `query`, and optional
   `allowed_scopes`.
@@ -261,6 +280,16 @@ Each expected claim requires:
 - `quality.review_item_count`: expected number of memory review queue items.
 - `quality.finding_kinds`: quality finding kinds that must be present, such as
   `duplicate_active`, `blocked_secret`, or `inactive_history`.
+- `curation.duplicate_forget_count`: expected number of duplicate active claims
+  selected for ID-based forget during curation.
+- `curation.blocked_secret_review_count`: expected number of blocked-secret
+  records surfaced for manual privacy review before compaction.
+- `curation.compact_recommended`: whether curation identified non-active
+  records that can be compacted after review.
+- `curation.compacted`: whether curation actually compacted the scenario state.
+- `curation.changed`: whether curation changed the scenario state.
+- `curation.before_quality`: quality expectations before curation.
+- `curation.after_quality`: quality expectations after curation.
 
 Unknown fields are rejected. This keeps public fixtures strict enough for long
 term compatibility.
