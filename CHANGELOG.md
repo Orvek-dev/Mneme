@@ -4,6 +4,20 @@ This project follows the spirit of Keep a Changelog.
 
 ## Unreleased
 
+## [0.28.0] - 2026-05-24
+
+### Added
+
+- Added `mneme repair --check` for non-mutating repair and normalization
+  readiness reports.
+- Expanded repair JSON/plain reports with command, mode, action, health status,
+  current/backup status, repair availability, and recommendations.
+- Added repair-driven normalization for compatible legacy schema metadata while
+  preserving the pre-normalized store as backup.
+- Added core, CLI, and quality-gate coverage for valid, repairable, and
+  legacy-normalization store lifecycle paths.
+- Added the Phase 22 personal runtime hardening feature spec.
+
 ## [0.27.0] - 2026-05-24
 
 ### Added

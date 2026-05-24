@@ -36,6 +36,7 @@ mneme end session-001 --summary "Prepared a concise setup plan" --remember "user
 mneme hook doctor --json
 mneme hook begin "Draft setup plan" --query "local-first" --agent codex
 mneme validate --json
+mneme repair --check --json
 mneme compact
 ```
 
@@ -133,7 +134,15 @@ Compact inactive lifecycle records:
 cargo run -p mneme-cli -- compact --store /tmp/mneme.json --json
 ```
 
-Repair a corrupted current store from `<store>.bak`:
+Check repair readiness before mutating files:
+
+```sh
+cargo run -p mneme-cli -- repair --check --store /tmp/mneme.json --json
+```
+
+Repair a corrupted current store from `<store>.bak`, or normalize a
+compatible legacy store schema while preserving the pre-normalized file as the
+backup:
 
 ```sh
 cargo run -p mneme-cli -- repair --store /tmp/mneme.json --json

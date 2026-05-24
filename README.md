@@ -28,7 +28,8 @@ Mneme is pre-1.0. The useful surface today is local development and evaluation:
 - stored memory can be exported as Markdown or JSON review artifacts with
   sensitive claim text redacted by default;
 - local JSON stores include schema metadata, write locks, atomic writes,
-  backups, repair, import/export, and compaction;
+  backups, repair readiness checks, schema normalization, import/export, and
+  compaction;
 - the local CLI can be installed as `mneme` for first-run personal workflows;
 - `mneme init` creates a local store and agent hook profile for a new
   workspace;
@@ -86,6 +87,7 @@ mneme forget "user prefers desktop IDE" --store "$STORE"
 mneme review /tmp/mneme-review.md --store "$STORE"
 mneme snapshot --store "$STORE" --json
 mneme validate --store "$STORE"
+mneme repair --check --store "$STORE" --json
 mneme compact --store "$STORE"
 mneme begin "Draft setup plan" --query "local-first" --agent codex --store "$STORE" --json
 mneme end session-001 --summary "Prepared a concise setup plan" --remember "user prefers concise setup plans" --store "$STORE" --json
