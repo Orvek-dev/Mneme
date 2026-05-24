@@ -44,6 +44,8 @@ eval update land in the same PR.
   `repair`, `version`, and command-specific help.
 - `mneme-cli --store <path>` isolates local state.
 - `scripts/quality-gate.sh` is the local and release verification entry point.
+- `RUSTDOCFLAGS="-D warnings" cargo doc --workspace --no-deps` must pass before
+  release.
 - `scripts/public-safety-check.sh` guards against known private/public-safety
   file and text patterns before release.
 - `scripts/package-check.sh` verifies workspace package assembly and blocks
@@ -51,7 +53,8 @@ eval update land in the same PR.
 
 ## Unstable Areas
 
-- Rust type names and module placement are not semver-stable before 1.0.
+- Rust type names and module placement are not semver-stable before 1.0; the
+  intended current API surface is documented in `docs/api-contract.md`.
 - JSON store schema migration is minimal and limited to v1 local state
   normalization.
 - Extraction is deterministic by default; production LLM extraction is not

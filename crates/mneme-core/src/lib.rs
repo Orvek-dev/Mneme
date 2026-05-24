@@ -1,7 +1,39 @@
-//! Shared core types and constants for Mneme.
+//! Core personal-memory engine for Mneme.
 //!
-//! This crate starts intentionally small. Eval Harness v0 should define the
-//! first executable contracts before product runtime behavior grows here.
+//! `mneme-core` is the product runtime crate. It owns raw event capture, memory
+//! claims, provenance, context-pack retrieval, budget checks, local store
+//! adapters, extraction adapter boundaries, and agent session records.
+//!
+//! The primary public entry point is [`MnemeEngine`]. Most integrations should
+//! construct an engine with [`MnemeConfig`], append [`EventInput`] records,
+//! retrieve a [`ContextPack`], and persist state through a [`MnemeStore`]
+//! implementation such as [`JsonFileStore`] or [`InMemoryStore`].
+//!
+//! Mneme is pre-1.0, so Rust type names can still change. The intended current
+//! extension points are [`MnemeStore`] for persistence and [`MnemeExtractor`] for
+//! claim extraction. Behavior changes should remain covered by specs, tests,
+//! eval scenarios, and the release quality gate.
+//!
+//! # Example
+//!
+//! ```
+//! use mneme_core::{EventInput, MnemeConfig, MnemeEngine};
+//!
+//! # fn main() -> Result<(), Box<dyn std::error::Error>> {
+//! let mut engine = MnemeEngine::new(MnemeConfig::default());
+//! engine.ingest_event(EventInput {
+//!     speaker_id: "user".to_owned(),
+//!     actor_agent_id: Some("codex".to_owned()),
+//!     text: "remember: user prefers local-first tools".to_owned(),
+//!     scope: "private".to_owned(),
+//!     trust_level: "explicit".to_owned(),
+//! })?;
+//!
+//! let context = engine.build_context_pack("local-first");
+//! assert_eq!(context.items[0].claim_text, "user prefers local-first tools");
+//! # Ok(())
+//! # }
+//! ```
 
 mod v1;
 

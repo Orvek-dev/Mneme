@@ -4,6 +4,18 @@ This project follows the spirit of Keep a Changelog.
 
 ## Unreleased
 
+## [0.14.0] - 2026-05-24
+
+### Added
+
+- Added crate-level API documentation for `mneme-core`, `mneme-cli`, and
+  `mneme-eval`.
+- Added a public API contract document for the current pre-1.0 Rust API
+  surface.
+- Added a compile-checked `mneme-core` personal-memory example.
+- Added Rustdoc verification with warnings denied to the local quality gate.
+- Added public onboarding and package-readiness guidance for API docs.
+
 ## [0.13.0] - 2026-05-24
 
 ### Added

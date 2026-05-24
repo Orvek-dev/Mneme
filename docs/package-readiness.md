@@ -14,6 +14,13 @@ distribution, and API policy.
 All package manifests include a public repository URL, a description, a README
 reference, and the shared workspace version.
 
+The current Rust API policy is documented in `docs/api-contract.md`. API docs
+must build with warnings denied before release:
+
+```sh
+RUSTDOCFLAGS="-D warnings" cargo doc --workspace --no-deps
+```
+
 ## Local Package Check
 
 Run:
@@ -46,6 +53,7 @@ Do not remove `publish = false` until all of the following are true:
 
 - a public license has been selected and committed;
 - the crate API surfaces have an explicit stability policy;
+- Rustdoc verification is part of CI or the release quality gate;
 - package contents are reviewed against `scripts/package-check.sh`;
 - `docs/release-checklist.md` includes registry publication steps;
 - CI verifies the exact package or publish dry-run command intended for release.
