@@ -116,3 +116,7 @@ quality-gate checks for config-driven wrapper doctor/begin/end flows.
 Phase 17 shipped the **Memory Review Artifact MVP** in `v0.23.0`, adding
 `mneme review`, Markdown and JSON review artifact export, and quality-gate
 checks for persisted human-review output.
+
+Phase 18 shipped the **Safe Review Redaction MVP** in `v0.24.0`, adding default
+redaction for review artifacts, explicit `--include-sensitive` raw export, and
+quality-gate checks that safe artifacts do not expose secret-like claim text.

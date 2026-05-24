@@ -4,6 +4,20 @@ This project follows the spirit of Keep a Changelog.
 
 ## Unreleased
 
+## [0.24.0] - 2026-05-24
+
+### Added
+
+- Added default safe redaction for `mneme review` artifacts and JSON stdout
+  reports.
+- Added `mneme review --include-sensitive` for explicit local-only raw review
+  export.
+- Added redaction metadata to review artifacts with policy and redacted field
+  counts.
+- Added CLI tests and quality-gate smoke checks that safe review artifacts do
+  not include secret-like claim text.
+- Added the Phase 18 safe review redaction feature spec and docs.
+
 ## [0.23.0] - 2026-05-24
 
 ### Added

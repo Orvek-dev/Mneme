@@ -31,6 +31,7 @@ grep -q "mneme hook doctor" "$MNEME_HELP"
 cargo run -p mneme-cli -- review --help > "$MNEME_HELP"
 grep -q "Usage: mneme review" "$MNEME_HELP"
 grep -q -- "--format markdown|json" "$MNEME_HELP"
+grep -q -- "--include-sensitive" "$MNEME_HELP"
 cargo run -p mneme-eval -- help > "$MNEME_EVAL_HELP"
 grep -q "Usage:" "$MNEME_EVAL_HELP"
 grep -q "mneme-eval help baseline" "$MNEME_EVAL_HELP"
@@ -49,18 +50,34 @@ cargo run -p mneme-cli -- context "local-first" --store "$STORE" --json | grep -
 REVIEW_STORE="${TMP_ROOT}/mneme-quality-gate-review.json"
 REVIEW_MD="${TMP_ROOT}/mneme-quality-gate-review.md"
 REVIEW_JSON="${TMP_ROOT}/mneme-quality-gate-review-artifact.json"
+REVIEW_RAW_JSON="${TMP_ROOT}/mneme-quality-gate-review-raw-artifact.json"
 REVIEW_STDOUT="${TMP_ROOT}/mneme-quality-gate-review-stdout.json"
-rm -f "$REVIEW_STORE" "$REVIEW_MD" "$REVIEW_JSON" "$REVIEW_STDOUT"
+rm -f "$REVIEW_STORE" "$REVIEW_MD" "$REVIEW_JSON" "$REVIEW_RAW_JSON" "$REVIEW_STDOUT"
 cargo run -p mneme-cli -- remember "user prefers review artifacts" --store "$REVIEW_STORE"
 cargo run -p mneme-cli -- remember "user note API_KEY=FAKE_TEST_VALUE" --store "$REVIEW_STORE"
 cargo run -p mneme-cli -- review "$REVIEW_MD" --store "$REVIEW_STORE" --json > "$REVIEW_STDOUT"
 grep -q '"command": "review"' "$REVIEW_STDOUT"
 grep -q '"format": "markdown"' "$REVIEW_STDOUT"
+grep -q '"policy": "default_safe"' "$REVIEW_STDOUT"
 grep -q '# Mneme Memory Review' "$REVIEW_MD"
 grep -q 'blocked_secret' "$REVIEW_MD"
+grep -q '\[redacted:blocked_secret\]' "$REVIEW_MD"
+if grep -q 'API_KEY=FAKE_TEST_VALUE' "$REVIEW_STDOUT" "$REVIEW_MD"; then
+  echo "quality-gate: safe review artifact leaked secret text" >&2
+  exit 1
+fi
 cargo run -p mneme-cli -- review "$REVIEW_JSON" --format json --store "$REVIEW_STORE"
 grep -q '"format": "json"' "$REVIEW_JSON"
+grep -q '"policy": "default_safe"' "$REVIEW_JSON"
 grep -q '"blocked_secret_claim_count": 1' "$REVIEW_JSON"
+grep -q '"object": "\[redacted:blocked_secret\]"' "$REVIEW_JSON"
+if grep -q 'API_KEY=FAKE_TEST_VALUE' "$REVIEW_JSON"; then
+  echo "quality-gate: safe JSON review artifact leaked secret text" >&2
+  exit 1
+fi
+cargo run -p mneme-cli -- review "$REVIEW_RAW_JSON" --format json --include-sensitive --store "$REVIEW_STORE"
+grep -q '"policy": "include_sensitive"' "$REVIEW_RAW_JSON"
+grep -q 'API_KEY=FAKE_TEST_VALUE' "$REVIEW_RAW_JSON"
 SCOPE_STORE="${TMP_ROOT}/mneme-quality-gate-scope.json"
 SCOPE_DENIED="${TMP_ROOT}/mneme-quality-gate-scope-denied.json"
 SCOPE_ALLOWED="${TMP_ROOT}/mneme-quality-gate-scope-allowed.json"

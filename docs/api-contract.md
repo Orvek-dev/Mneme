@@ -46,7 +46,8 @@ CLI-bound integrations can use `mneme claims`, `mneme forget --claim-id`, and
 without linking directly to Rust APIs.
 
 CLI-bound review workflows can use `mneme review <path>` to write a Markdown or
-JSON artifact without mutating the store.
+JSON artifact without mutating the store. Review artifacts redact sensitive
+claim text by default; raw export requires `--include-sensitive`.
 
 Agent runtimes can use `scripts/mneme-agent-hook.sh` as the repository-local
 installation wrapper. It delegates to an installed `MNEME_BIN`, otherwise runs

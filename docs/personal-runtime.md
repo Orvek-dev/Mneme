@@ -50,6 +50,9 @@ cargo run -p mneme-cli -- review /tmp/mneme-review.md --store /tmp/mneme.json
 cargo run -p mneme-cli -- review /tmp/mneme-review.json --format json --store /tmp/mneme.json
 ```
 
+Review artifacts redact sensitive claim text by default. Use
+`--include-sensitive` only for local private inspection.
+
 Validate the current store:
 
 ```sh
