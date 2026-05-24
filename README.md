@@ -108,6 +108,7 @@ Use a local ignored runtime profile when wiring an agent:
 
 ```sh
 mneme init
+mneme init --extractor-command ./mneme-extractor-wrapper
 mneme doctor
 scripts/mneme-agent-hook.sh doctor
 ```

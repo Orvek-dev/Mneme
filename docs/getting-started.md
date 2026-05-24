@@ -57,6 +57,8 @@ mneme restore --check --store "$STORE" --json
 `.mneme/mneme-agent-hook.env` runtime profile in the current directory.
 `mneme doctor` is the canonical health check for that store/profile pair.
 `.mneme/` is ignored by git.
+Use `mneme init --extractor-command ./mneme-extractor-wrapper` when wrapper
+`end` calls should use command extraction for session-end `--remember` notes.
 
 ## Agent Session Flow
 

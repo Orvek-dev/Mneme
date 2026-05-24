@@ -164,3 +164,8 @@ Phase 27 shipped the **Agent Memory Extraction Integration MVP** in `v0.33.0`,
 connecting `mneme end` and `mneme hook end` to the opt-in command extractor so
 session-end `--remember` notes can be evaluated and released through the same
 provider-neutral boundary as event ingestion.
+
+Phase 28 shipped the **Agent Runtime Extractor Installation MVP** in `v0.34.0`,
+adding `mneme init --extractor-command`, doctor/init visibility for installed
+extractor commands, and quality-gate coverage proving the hook wrapper can use
+only the generated profile for command-extracted session-end memory.

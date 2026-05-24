@@ -86,6 +86,8 @@ eval update land in the same PR.
   and env overrides profile values.
 - Hook runtime profiles may include `MNEME_EXTRACTOR_COMMAND` for session-end
   command extraction.
+- `mneme init --extractor-command <program>` writes an active
+  `MNEME_EXTRACTOR_COMMAND` into the generated hook profile.
 - `mneme-cli --store <path>` isolates local state.
 - `scripts/install-local.sh` installs the local `mneme` CLI with
   `cargo install --path crates/mneme-cli --locked` and smokes doctor/help/review

@@ -19,6 +19,7 @@ mneme begin --help
 
 ```sh
 mneme init
+mneme init --extractor-command ./mneme-extractor-wrapper
 mneme doctor
 mneme doctor --json
 mneme ingest "remember: user prefers local-first tools"
@@ -54,6 +55,13 @@ store/profile files:
 
 ```sh
 mneme init --force
+```
+
+Use `--extractor-command <program>` when the generated hook profile should
+enable command extraction for wrapper `end` calls:
+
+```sh
+mneme init --extractor-command ./mneme-extractor-wrapper
 ```
 
 Use `--store <path>` to isolate experiments:

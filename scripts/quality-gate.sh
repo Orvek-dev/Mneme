@@ -449,6 +449,34 @@ grep -q '"extractor": "command"' "$AGENT_COMMAND_END"
 grep -q '"remembered_claim_count": 1' "$AGENT_COMMAND_END"
 cargo run -p mneme-cli -- context "planning docs" --store "$AGENT_COMMAND_STORE" --json | grep -q "direct explanations"
 
+WRAPPER_COMMAND_STORE="${TMP_ROOT}/mneme-quality-gate-wrapper-command.json"
+WRAPPER_COMMAND_CONFIG="${TMP_ROOT}/mneme-quality-gate-wrapper-command.env"
+WRAPPER_COMMAND_DOCTOR="${TMP_ROOT}/mneme-quality-gate-wrapper-command-doctor.json"
+WRAPPER_COMMAND_END="${TMP_ROOT}/mneme-quality-gate-wrapper-command-end.json"
+rm -f "$WRAPPER_COMMAND_STORE" "$WRAPPER_COMMAND_CONFIG" "$WRAPPER_COMMAND_DOCTOR" "$WRAPPER_COMMAND_END"
+cargo run -p mneme-cli -- init \
+  --store "$WRAPPER_COMMAND_STORE" \
+  --config "$WRAPPER_COMMAND_CONFIG" \
+  --no-bin \
+  --extractor-command evals/fixtures/command-extractor.sh \
+  --force \
+  --json > /dev/null
+grep -q '^MNEME_EXTRACTOR_COMMAND=evals/fixtures/command-extractor.sh$' "$WRAPPER_COMMAND_CONFIG"
+cargo run -p mneme-cli -- doctor \
+  --store "$WRAPPER_COMMAND_STORE" \
+  --config "$WRAPPER_COMMAND_CONFIG" \
+  --json > "$WRAPPER_COMMAND_DOCTOR"
+grep -q '"mneme_extractor_command": "evals/fixtures/command-extractor.sh"' "$WRAPPER_COMMAND_DOCTOR"
+MNEME_AGENT_HOOK_CONFIG="$WRAPPER_COMMAND_CONFIG" scripts/mneme-agent-hook.sh begin "Draft planning docs" \
+  --query "planning docs" > /dev/null
+MNEME_AGENT_HOOK_CONFIG="$WRAPPER_COMMAND_CONFIG" scripts/mneme-agent-hook.sh end session-001 \
+  --summary "Prepared planning docs" \
+  --remember "For future planning docs, keep explanations direct and skip motivational language." \
+  > "$WRAPPER_COMMAND_END"
+grep -q '"extractor": "command"' "$WRAPPER_COMMAND_END"
+grep -q '"remembered_claim_count": 1' "$WRAPPER_COMMAND_END"
+cargo run -p mneme-cli -- context "planning docs" --store "$WRAPPER_COMMAND_STORE" --json | grep -q "direct explanations"
+
 cargo run -p mneme-eval -- validate --suite core
 cargo run -p mneme-eval -- validate --suite model
 cargo run -p mneme-eval -- validate --suite runtime
