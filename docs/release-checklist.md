@@ -28,9 +28,10 @@ Run a local CLI smoke check with an isolated store:
 ```sh
 STORE=/tmp/mneme-release-smoke.json
 rm -f "$STORE"
-cargo run -p mneme-cli -- remember "user prefers local-first tools" --store "$STORE"
-cargo run -p mneme-cli -- context "local-first" --store "$STORE" --json
-cargo run -p mneme-cli -- hook doctor --store "$STORE"
+./scripts/install-local.sh
+mneme remember "user prefers local-first tools" --store "$STORE"
+mneme context "local-first" --store "$STORE" --json
+mneme hook doctor --store "$STORE"
 scripts/mneme-agent-hook.sh doctor
 MNEME_AGENT_HOOK_CONFIG=examples/mneme-agent-hook.env.example scripts/mneme-agent-hook.sh doctor
 rm -f "$STORE"
@@ -48,6 +49,8 @@ Before pushing a release tag, confirm:
   release is intentionally being prepared;
 - no license metadata is added unless a matching committed license file and
   updated distribution policy are included in the same PR;
+- `scripts/install-local.sh` still installs and smokes the local `mneme`
+  binary;
 - `CHANGELOG.md` describes the release-relevant changes;
 - README commands still match the actual CLI and eval behavior.
 - Rustdoc builds cleanly when public API docs or examples changed.
