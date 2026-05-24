@@ -25,8 +25,8 @@ CI, eval acceptance, or the public core crate depend on a specific model API.
   persistence.
 - [REQ-MODEL-005][Security] Command execution shall not invoke a shell
   implicitly.
-- [REQ-MODEL-006][Testability] The local CLI shall expose an opt-in raw `ingest`
-  command with command extractor support.
+- [REQ-MODEL-006][Testability] The local CLI shall expose opt-in command
+  extractor support for raw `ingest` events and agent session-end memory notes.
 - [REQ-MODEL-007][Testability] Default CI and eval targets shall remain
   deterministic without model credentials.
 
@@ -39,5 +39,5 @@ CI, eval acceptance, or the public core crate depend on a specific model API.
 | REQ-MODEL-003 | `ExtractorCommandResponse::{from_claim,no_claim}` | verified |
 | REQ-MODEL-004 | empty claim field unit test | verified |
 | REQ-MODEL-005 | `Command::new(program).args(args)` implementation | verified |
-| REQ-MODEL-006 | `mneme ingest --extractor command` CLI test | verified |
+| REQ-MODEL-006 | `mneme ingest`, `mneme end`, and `mneme hook end` command extractor tests | verified |
 | REQ-MODEL-007 | existing `fake` and `mneme-v1` eval acceptance gates | verified |

@@ -1,5 +1,5 @@
 use crate::error::EvalError;
-use crate::scenario::{AgentFlow, ContextPackExpected, Scenario};
+use crate::scenario::{AgentEndExtractor, AgentFlow, ContextPackExpected, Scenario};
 use crate::target::{
     build_curation_actual, build_curation_plan_actual, build_quality_actual, ActualState,
     AuditEvent, Claim, ContextItem, ContextPack, EvalTarget, EvalTargetMetadata, FaultMode,
@@ -189,11 +189,15 @@ fn apply_agent_flow(actual: &mut ActualState, agent_flow: &AgentFlow, options: T
 
     if let Some(end) = &agent_flow.end {
         for remembered in &end.remember {
+            let event_text = match end.extractor {
+                AgentEndExtractor::Rule => format!("remember: {remembered}"),
+                AgentEndExtractor::Command => remembered.clone(),
+            };
             let event = RecordedEvent {
                 id: format!("event-{:03}", actual.events.len() + 1),
                 speaker_id: "agent".to_owned(),
                 actor_agent_id: agent_flow.begin.actor_agent_id.clone(),
-                text: format!("remember: {remembered}"),
+                text: event_text,
                 scope: "private".to_owned(),
                 trust_level: "agent_summary".to_owned(),
             };
@@ -207,7 +211,13 @@ fn apply_agent_flow(actual: &mut ActualState, agent_flow: &AgentFlow, options: T
                 ),
             });
             if options.fault_mode != FaultMode::SkipClaims {
-                if let Some(mut claim) = extract_claim(&event, actual.claims.len() + 1) {
+                let extracted = match end.extractor {
+                    AgentEndExtractor::Rule => extract_claim(&event, actual.claims.len() + 1),
+                    AgentEndExtractor::Command => {
+                        extract_command_fixture_claim(&event, actual.claims.len() + 1)
+                    }
+                };
+                if let Some(mut claim) = extracted {
                     if options.fault_mode == FaultMode::LeakSecrets
                         && claim.status == "blocked_secret"
                     {
@@ -405,6 +415,25 @@ fn extract_claim(event: &RecordedEvent, next_claim_number: usize) -> Option<Clai
     ))
 }
 
+fn extract_command_fixture_claim(event: &RecordedEvent, next_claim_number: usize) -> Option<Claim> {
+    if event.text.contains(
+        "For future planning docs, keep explanations direct and skip motivational language.",
+    ) || event
+        .text
+        .contains("For future planning docs, keep explanations direct.")
+    {
+        return Some(claim_from_parts(
+            event,
+            next_claim_number,
+            "user",
+            "prefers",
+            "direct explanations in future planning docs",
+            vec![event.id.clone()],
+        ));
+    }
+    None
+}
+
 fn claim_from_marker(
     event: &RecordedEvent,
     next_claim_number: usize,
@@ -433,6 +462,30 @@ fn claim_from_marker(
         subject,
         predicate,
         object,
+        status: status.to_owned(),
+        scope: event.scope.clone(),
+        source_event_ids,
+    }
+}
+
+fn claim_from_parts(
+    event: &RecordedEvent,
+    next_claim_number: usize,
+    subject: &str,
+    predicate: &str,
+    object: &str,
+    source_event_ids: Vec<String>,
+) -> Claim {
+    let status = if looks_like_secret(object) || looks_like_secret(&event.text) {
+        "blocked_secret"
+    } else {
+        "active"
+    };
+    Claim {
+        id: format!("claim-{:03}", next_claim_number),
+        subject: subject.to_owned(),
+        predicate: predicate.to_owned(),
+        object: object.to_owned(),
         status: status.to_owned(),
         scope: event.scope.clone(),
         source_event_ids,

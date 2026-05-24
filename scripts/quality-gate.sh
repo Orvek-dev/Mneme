@@ -433,6 +433,22 @@ cargo run -p mneme-cli -- ingest "the user likes model-backed extraction" \
   --store "$COMMAND_STORE"
 cargo run -p mneme-cli -- context "command-backed" --store "$COMMAND_STORE" --json | grep -q "command-backed extraction"
 
+AGENT_COMMAND_STORE="${TMP_ROOT}/mneme-quality-gate-agent-command.json"
+AGENT_COMMAND_END="${TMP_ROOT}/mneme-quality-gate-agent-command-end.json"
+rm -f "$AGENT_COMMAND_STORE" "$AGENT_COMMAND_END"
+cargo run -p mneme-cli -- hook begin "Draft planning docs" \
+  --agent codex \
+  --store "$AGENT_COMMAND_STORE" > /dev/null
+cargo run -p mneme-cli -- hook end session-001 \
+  --summary "Prepared planning docs" \
+  --remember "For future planning docs, keep explanations direct and skip motivational language." \
+  --extractor command \
+  --extractor-command evals/fixtures/command-extractor.sh \
+  --store "$AGENT_COMMAND_STORE" > "$AGENT_COMMAND_END"
+grep -q '"extractor": "command"' "$AGENT_COMMAND_END"
+grep -q '"remembered_claim_count": 1' "$AGENT_COMMAND_END"
+cargo run -p mneme-cli -- context "planning docs" --store "$AGENT_COMMAND_STORE" --json | grep -q "direct explanations"
+
 cargo run -p mneme-eval -- validate --suite core
 cargo run -p mneme-eval -- validate --suite model
 cargo run -p mneme-eval -- validate --suite runtime
@@ -487,7 +503,8 @@ MNEME_OPENAI_DRY_RUN=1 cargo run -p mneme-eval -- baseline --suite model \
   --json | tee "$BASELINE_REPORT"
 grep -q '"provider_label": "openai"' "$BASELINE_REPORT"
 grep -q '"model_label": "dry-run"' "$BASELINE_REPORT"
-grep -q '"scenario_count": 13' "$BASELINE_REPORT"
+grep -q '"scenario_count": 14' "$BASELINE_REPORT"
+grep -q '"category": "agent"' "$BASELINE_REPORT"
 grep -q '"category": "communication"' "$BASELINE_REPORT"
 grep -q '"category": "format"' "$BASELINE_REPORT"
 grep -q '"category": "project"' "$BASELINE_REPORT"

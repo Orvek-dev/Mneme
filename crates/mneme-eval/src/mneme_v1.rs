@@ -3,11 +3,11 @@ use std::time::{SystemTime, UNIX_EPOCH};
 
 use mneme_core::{
     CommandExtractor, ContextQuery, EventInput, JsonFileStore, MnemeConfig, MnemeEngine,
-    MnemeStore, SessionBeginInput, SessionEndInput, StoreFileStatus,
+    MnemeStore, SessionBeginInput, SessionEndInput, SessionMemoryInputMode, StoreFileStatus,
 };
 
 use crate::error::EvalError;
-use crate::scenario::Scenario;
+use crate::scenario::{AgentEndExtractor, Scenario};
 use crate::target::{
     build_curation_actual, build_curation_plan_actual, build_quality_actual, ActualState,
     AuditEvent, BudgetActual, Claim, ContextItem, ContextPack, EvalTarget, EvalTargetMetadata,
@@ -252,19 +252,34 @@ fn run_with_optional_persistence(
             max_items: mneme_core::DEFAULT_CONTEXT_MAX_ITEMS,
         });
         if let Some(end) = &agent_flow.end {
-            engine
-                .end_session(SessionEndInput {
-                    session_id: begin.session.id,
-                    actor_agent_id: agent_flow.begin.actor_agent_id.clone(),
-                    summary: end.summary.clone(),
-                    remember: end.remember.clone(),
-                })
-                .map_err(|source| {
-                    EvalError::scenario(format!(
-                        "scenario {} failed to end agent session: {source}",
-                        scenario.id
-                    ))
-                })?;
+            let input = SessionEndInput {
+                session_id: begin.session.id,
+                actor_agent_id: agent_flow.begin.actor_agent_id.clone(),
+                summary: end.summary.clone(),
+                remember: end.remember.clone(),
+            };
+            let result = match end.extractor {
+                AgentEndExtractor::Rule => engine.end_session(input),
+                AgentEndExtractor::Command => {
+                    let Some(extractor) = command_extractor.as_ref() else {
+                        return Err(EvalError::scenario(format!(
+                            "scenario {} agent end command extractor requires mneme-v1-command target with --extractor-command",
+                            scenario.id
+                        )));
+                    };
+                    engine.end_session_with_extractor(
+                        input,
+                        extractor,
+                        SessionMemoryInputMode::RawEvent,
+                    )
+                }
+            };
+            result.map(|_| ()).map_err(|source| {
+                EvalError::scenario(format!(
+                    "scenario {} failed to end agent session: {source}",
+                    scenario.id
+                ))
+            })?;
         }
     }
 

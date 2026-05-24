@@ -53,9 +53,22 @@ cargo run -p mneme-cli -- hook end session-001 \
   --store /tmp/mneme.json
 ```
 
-`--summary` is recorded on the session. Each `--remember` value is written as a
-normal v1 memory event through the rule extractor, so secret blocking, citation,
-budget, and audit behavior stay centralized in `mneme-core`.
+`--summary` is recorded on the session. By default, each `--remember` value is
+treated as an explicit v1 claim through the rule extractor. For model-backed
+memory extraction, opt into the command extractor and pass natural-language
+memory notes:
+
+```sh
+cargo run -p mneme-cli -- hook end session-001 \
+  --summary "Prepared a direct planning doc" \
+  --remember "For future planning docs, keep explanations direct and skip motivational language." \
+  --extractor command \
+  --extractor-command ./mneme-extractor-wrapper \
+  --store /tmp/mneme.json
+```
+
+Both paths write normal v1 memory events, so secret blocking, citation, budget,
+and audit behavior stay centralized in `mneme-core`.
 
 Hook failures write a JSON envelope to stdout and exit non-zero. Agents should
 read `ok`, `recoverable`, `error.kind`, `error.message`, and `error.exit_code`
@@ -89,6 +102,8 @@ Supported environment variables:
 - `MNEME_AGENT_ID`: agent ID appended when `--agent` is absent.
 - `MNEME_SCOPE`: begin scope appended when `--scope` is absent.
 - `MNEME_MAX_ITEMS`: begin item cap appended when `--max-items` is absent.
+- `MNEME_EXTRACTOR_COMMAND`: command extractor used by wrapper end calls when
+  `--extractor` is absent.
 
 For persistent local configuration, run `mneme init` to create
 `.mneme/mneme-agent-hook.env`. The
@@ -127,6 +142,7 @@ The `agent` suite checks:
 - end closes the session and writes remembered claims;
 - remembered claims are retrievable with citations;
 - secret-like remembered claims remain blocked from active context;
+- command-extracted session-end notes work through the model suite;
 - seeded faults still fail the suite.
 
 Run it locally:
@@ -135,4 +151,7 @@ Run it locally:
 cargo run -p mneme-eval -- validate --suite agent
 cargo run -p mneme-eval -- run --suite agent --target mneme-v1
 cargo run -p mneme-eval -- acceptance --suite agent --target mneme-v1
+cargo run -p mneme-eval -- acceptance --suite model \
+  --target mneme-v1-command \
+  --extractor-command evals/fixtures/command-extractor.sh
 ```

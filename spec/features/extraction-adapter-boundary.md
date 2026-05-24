@@ -29,6 +29,8 @@ audit, lifecycle, budget, or eval contracts.
   blocking or provenance rules.
 - [REQ-EXT-007][Testability] Custom extraction failures shall surface as typed
   errors instead of being silently ignored.
+- [REQ-EXT-008][Ports-and-adapters] Agent session-end memory writes shall be
+  able to use the same extraction adapter boundary.
 
 ## Verification Map
 
@@ -41,3 +43,4 @@ audit, lifecycle, budget, or eval contracts.
 | REQ-EXT-005 | custom extractor unit test | verified |
 | REQ-EXT-006 | extractor secret-blocking unit test | verified |
 | REQ-EXT-007 | `ExtractorError` return path on `MnemeExtractor` | verified |
+| REQ-EXT-008 | `end_session_with_extractor` and agent memory extraction test | verified |

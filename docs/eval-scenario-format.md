@@ -105,6 +105,7 @@ agent_flow:
       - private
   end:
     summary: "Prepared a concise setup plan"
+    extractor: rule
     remember:
       - "user prefers concise setup plans"
 events:
@@ -232,7 +233,9 @@ Each expected claim requires:
   `task`, optional `actor_agent_id`, optional context `query`, and optional
   `allowed_scopes`.
 - `agent_flow.end`: asks compatible targets to close that session with an
-  optional `summary` and zero or more explicit `remember` claims.
+  optional `summary`, optional `extractor` (`rule` or `command`), and zero or
+  more `remember` values. `rule` treats values as explicit claims; `command`
+  passes them as raw memory notes to the target command extractor.
 - `events[].actor_agent_id`: agent acting on behalf of the speaker.
 - `events[].scope`: memory scope. Defaults to `private`.
 - `events[].trust_level`: input trust level. Defaults to `trusted_user`.

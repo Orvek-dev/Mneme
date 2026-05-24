@@ -11,6 +11,12 @@ cargo run -p mneme-cli -- ingest "the user prefers local-first tools" \
   --extractor command \
   --extractor-command ./mneme-extractor-wrapper \
   --store /tmp/mneme.json
+
+cargo run -p mneme-cli -- hook end session-001 \
+  --remember "For future planning docs, keep explanations direct and skip motivational language." \
+  --extractor command \
+  --extractor-command ./mneme-extractor-wrapper \
+  --store /tmp/mneme.json
 ```
 
 The wrapper receives one JSON request on stdin and writes one JSON response to
@@ -77,9 +83,9 @@ with `--extractor-command`; extra wrapper arguments can be repeated with
 `--extractor-arg <arg>`.
 
 The public suite covers stable preferences, communication style, negative
-format preferences, project-scoped preferences, no-claim events, quoted sample
-data, third-party attribution, secret blocking, and explicit correction
-lifecycle behavior.
+format preferences, project-scoped preferences, agent session-end extraction,
+no-claim events, quoted sample data, third-party attribution, secret blocking,
+and explicit correction lifecycle behavior.
 
 ## OpenAI Wrapper Example
 

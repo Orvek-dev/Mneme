@@ -366,6 +366,20 @@ impl MnemeEngine {
         &mut self,
         input: SessionEndInput,
     ) -> Result<SessionEndReport, SessionError> {
+        self.end_session_with_extractor(
+            input,
+            &RuleBasedExtractor,
+            SessionMemoryInputMode::ExplicitClaim,
+        )
+    }
+
+    /// Ends an agent session and records remembered notes through an extractor.
+    pub fn end_session_with_extractor(
+        &mut self,
+        input: SessionEndInput,
+        extractor: &(impl MnemeExtractor + ?Sized),
+        memory_input_mode: SessionMemoryInputMode,
+    ) -> Result<SessionEndReport, SessionError> {
         let position = self
             .sessions
             .iter()
@@ -386,14 +400,21 @@ impl MnemeEngine {
         let mut remembered_claim_ids = Vec::new();
 
         for claim in input.remember {
+            let text = match memory_input_mode {
+                SessionMemoryInputMode::ExplicitClaim => format!("remember: {claim}"),
+                SessionMemoryInputMode::RawEvent => claim,
+            };
             let event_number = self.events.len() + 1;
-            self.ingest_event(EventInput {
-                speaker_id: "agent".to_owned(),
-                actor_agent_id: actor_agent_id.clone(),
-                text: format!("remember: {claim}"),
-                scope: "private".to_owned(),
-                trust_level: "agent_summary".to_owned(),
-            })
+            self.ingest_event_with_extractor(
+                EventInput {
+                    speaker_id: "agent".to_owned(),
+                    actor_agent_id: actor_agent_id.clone(),
+                    text,
+                    scope: "private".to_owned(),
+                    trust_level: "agent_summary".to_owned(),
+                },
+                extractor,
+            )
             .map_err(|source| SessionError::new(format!("record session memory: {source}")))?;
             let event_id = next_id("event", event_number);
             remembered_event_ids.push(event_id.clone());
@@ -881,8 +902,18 @@ pub struct SessionEndInput {
     pub actor_agent_id: Option<String>,
     /// Optional task summary.
     pub summary: Option<String>,
-    /// Explicit claims to record through the v1 rule extractor.
+    /// Claims or natural-language memory notes to record at session end.
     pub remember: Vec<String>,
+}
+
+/// How session-end memory inputs should be presented to an extractor.
+#[derive(Debug, Clone, Copy, Eq, PartialEq, Serialize, Deserialize)]
+#[serde(rename_all = "snake_case")]
+pub enum SessionMemoryInputMode {
+    /// Prefix each memory string with the explicit v1 `remember:` marker.
+    ExplicitClaim,
+    /// Pass each memory string as the raw event text.
+    RawEvent,
 }
 
 /// Agent session record persisted in the v1 store.
@@ -3008,6 +3039,58 @@ mod tests {
             .audit
             .iter()
             .any(|event| event.kind == AuditKind::SessionEnd));
+        Ok(())
+    }
+
+    #[test]
+    fn agent_session_end_can_use_custom_extractor_for_raw_memory_notes(
+    ) -> Result<(), Box<dyn std::error::Error>> {
+        struct RawMemoryExtractor;
+
+        impl MnemeExtractor for RawMemoryExtractor {
+            fn extract(
+                &self,
+                event: &EventRecord,
+            ) -> Result<Option<ExtractedClaim>, ExtractorError> {
+                assert_eq!(event.speaker_id, "agent");
+                assert_eq!(event.trust_level, "agent_summary");
+                assert!(!event.text.starts_with("remember:"));
+                Ok(Some(ExtractedClaim::new(
+                    "user",
+                    "prefers",
+                    "direct planning docs",
+                )))
+            }
+        }
+
+        let mut engine = MnemeEngine::new(MnemeConfig::default());
+        let begin = engine.begin_session(SessionBeginInput {
+            task: "Draft a planning doc".to_owned(),
+            actor_agent_id: Some("codex".to_owned()),
+            query: None,
+            allowed_scopes: vec!["private".to_owned()],
+            max_items: DEFAULT_CONTEXT_MAX_ITEMS,
+        });
+
+        let end = engine.end_session_with_extractor(
+            SessionEndInput {
+                session_id: begin.session.id,
+                actor_agent_id: Some("codex".to_owned()),
+                summary: Some("Prepared the planning doc".to_owned()),
+                remember: vec!["For future planning docs, keep explanations direct.".to_owned()],
+            },
+            &RawMemoryExtractor,
+            SessionMemoryInputMode::RawEvent,
+        )?;
+        let snapshot = engine.snapshot();
+
+        assert_eq!(end.remembered_event_ids, vec!["event-001"]);
+        assert_eq!(end.remembered_claim_ids, vec!["claim-001"]);
+        assert_eq!(
+            snapshot.events[0].text,
+            "For future planning docs, keep explanations direct."
+        );
+        assert_eq!(snapshot.claims[0].object, "direct planning docs");
         Ok(())
     }
 

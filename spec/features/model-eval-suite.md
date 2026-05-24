@@ -18,9 +18,9 @@ credentials.
   shall cover the command protocol without provider credentials.
 - [REQ-MODEL-EVAL-005][Testability] The `model` suite shall cover implicit
   preference extraction, communication preferences, negative format
-  preferences, project-scoped preferences, no-claim events, quoted sample data,
-  third-party attribution, over-extraction avoidance, secret blocking, and
-  lifecycle correction.
+  preferences, project-scoped preferences, agent session-end extraction,
+  no-claim events, quoted sample data, third-party attribution,
+  over-extraction avoidance, secret blocking, and lifecycle correction.
 - [REQ-MODEL-EVAL-006][Release] CI and release verification shall run the model
   suite through the deterministic command fixture.
 - [REQ-MODEL-EVAL-007][Observability] Model scenarios shall include

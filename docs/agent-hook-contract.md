@@ -42,6 +42,7 @@ Successful `hook end` output includes:
 - `operation: end`
 - `recoverable: false`
 - `store`
+- `extractor`
 - `session_id`
 - `remembered_event_count`
 - `remembered_claim_count`
@@ -99,11 +100,21 @@ cargo run -p mneme-cli -- hook end session-001 \
   --summary "Prepared a concise setup plan" \
   --remember "user prefers concise setup plans" \
   --store /tmp/mneme.json
+
+cargo run -p mneme-cli -- hook end session-001 \
+  --summary "Prepared a direct planning doc" \
+  --remember "For future planning docs, keep explanations direct and skip motivational language." \
+  --extractor command \
+  --extractor-command ./mneme-extractor-wrapper \
+  --store /tmp/mneme.json
 ```
 
 Agents should preserve `session_id` from begin and pass it to end. They should
 use `report.context_pack.items` as task context and treat `context_claim_ids` as
 the compact citation list for the started session.
+By default, hook end uses the rule extractor and treats `--remember` values as
+explicit claims. With `--extractor command`, hook end passes `--remember` values
+as raw memory notes to the configured command extractor.
 
 ## Runtime Wrapper
 
@@ -120,9 +131,9 @@ MNEME_STORE=/tmp/mneme.json \
 
 The wrapper uses `MNEME_BIN` when set, otherwise runs
 `cargo run -q -p mneme-cli --` from the repository, and falls back to
-`target/debug/mneme` only when cargo is unavailable. `MNEME_STORE`,
-`MNEME_AGENT_ID`, `MNEME_SCOPE`, and `MNEME_MAX_ITEMS` are appended when the same
-CLI options are not already present.
+`target/debug/mneme` only when cargo is unavailable. The wrapper applies
+`MNEME_STORE`, `MNEME_AGENT_ID`, `MNEME_SCOPE`, `MNEME_MAX_ITEMS`, and
+`MNEME_EXTRACTOR_COMMAND` when the same CLI options are not already present.
 
 Profiles can be loaded with `MNEME_AGENT_HOOK_CONFIG`, `MNEME_CONFIG`, or the
 default ignored `.mneme/mneme-agent-hook.env` path. The file format is

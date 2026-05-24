@@ -45,10 +45,10 @@ pub use v1::{
     ExtractorError, InMemoryStore, JsonFileStore, MigrationRecord, MnemeConfig, MnemeEngine,
     MnemeExtractor, MnemeState, MnemeStore, OmittedContextItem, RuleBasedExtractor,
     SessionBeginInput, SessionBeginReport, SessionEndInput, SessionEndReport, SessionError,
-    SessionRecord, SessionStatus, StateMetadata, StateValidationIssue, StateValidationReport,
-    StoreError, StoreErrorKind, StoreFileInspection, StoreFileStatus, StoreInspection,
-    StoreRepairReport, StoreRestoreReport, ValidationSeverity, DEFAULT_CONTEXT_MAX_ITEMS,
-    EXTRACTOR_COMMAND_SCHEMA_VERSION, MNEME_STATE_SCHEMA_VERSION,
+    SessionMemoryInputMode, SessionRecord, SessionStatus, StateMetadata, StateValidationIssue,
+    StateValidationReport, StoreError, StoreErrorKind, StoreFileInspection, StoreFileStatus,
+    StoreInspection, StoreRepairReport, StoreRestoreReport, ValidationSeverity,
+    DEFAULT_CONTEXT_MAX_ITEMS, EXTRACTOR_COMMAND_SCHEMA_VERSION, MNEME_STATE_SCHEMA_VERSION,
 };
 
 /// Public product name.

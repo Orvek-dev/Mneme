@@ -33,6 +33,8 @@ around task execution.
   by CLI tests and the local quality gate.
 - [REQ-HOOK-007][Release] The public docs shall define the hook envelope and
   error kinds.
+- [REQ-HOOK-009][Ports-and-adapters] `mneme hook end` shall expose opt-in
+  command extraction for session-end remembered notes.
 
 ## Verification Map
 
@@ -46,3 +48,4 @@ around task execution.
 | REQ-HOOK-006 | `scripts/quality-gate.sh` | verified |
 | REQ-HOOK-007 | `docs/agent-hook-contract.md` | verified |
 | REQ-HOOK-008 | `run_agent_hook_doctor` and CLI tests | verified |
+| REQ-HOOK-009 | `hook_end_accepts_command_extractor` CLI test | verified |
