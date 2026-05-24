@@ -68,3 +68,7 @@ sessions, session audit, and an agent eval suite.
 Phase 5 shipped the **Live Provider Quality Gate MVP** in `v0.11.0`, adding a
 strict baseline-gate command and failure summaries for local provider quality
 analysis.
+
+Phase 6 shipped the **Public Package & Onboarding MVP** in `v0.12.0`, adding
+package metadata, package assembly checks, and public getting-started guidance
+while keeping crates unpublished with `publish = false`.

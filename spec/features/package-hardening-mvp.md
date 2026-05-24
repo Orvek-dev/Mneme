@@ -25,6 +25,13 @@ checks, and verification commands.
   and eval harness checks.
 - [REQ-PKG-005][Ubiquitous] Public docs shall link to the CLI, eval, extraction,
   and v1 core contracts.
+- [REQ-PKG-006][Ubiquitous] Workspace package manifests shall include public
+  descriptions, repository metadata, README references, and an explicit
+  publication policy.
+- [REQ-PKG-007][Privacy] Package assembly checks shall reject known private or
+  generated file patterns from package contents.
+- [REQ-PKG-008][Ubiquitous] The repository shall provide a public getting
+  started path for new developers without private context.
 
 ## Verification Map
 
@@ -35,3 +42,6 @@ checks, and verification commands.
 | REQ-PKG-003 | `docs/release-checklist.md` | verified |
 | REQ-PKG-004 | `.github/workflows/release.yml` | verified |
 | REQ-PKG-005 | README documentation links | verified |
+| REQ-PKG-006 | crate `Cargo.toml` package metadata and `publish = false` | verified |
+| REQ-PKG-007 | `scripts/package-check.sh` | verified |
+| REQ-PKG-008 | `docs/getting-started.md` | verified |

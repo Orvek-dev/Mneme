@@ -10,6 +10,12 @@ Run the same checks locally before creating a tag:
 ./scripts/quality-gate.sh release
 ```
 
+For package-specific inspection, run:
+
+```sh
+./scripts/package-check.sh
+```
+
 Run a local CLI smoke check with an isolated store:
 
 ```sh
@@ -28,6 +34,8 @@ Before pushing a release tag, confirm:
 - no local `.mneme/` store is tracked;
 - no generated eval report is tracked;
 - no token, key, or secret file is tracked;
+- package manifests still have `publish = false` unless a public registry
+  release is intentionally being prepared;
 - `CHANGELOG.md` describes the release-relevant changes;
 - README commands still match the actual CLI and eval behavior.
 

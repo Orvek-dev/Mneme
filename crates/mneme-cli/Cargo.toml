@@ -3,13 +3,17 @@ name = "mneme-cli"
 version.workspace = true
 edition.workspace = true
 rust-version.workspace = true
+description = "Local command-line interface for the Mneme personal-memory runtime."
+repository = "https://github.com/Orvek-dev/Mneme"
+readme = "../../README.md"
+publish = false
 
 [[bin]]
 name = "mneme"
 path = "src/main.rs"
 
 [dependencies]
-mneme-core = { path = "../mneme-core" }
+mneme-core.workspace = true
 serde = { version = "1.0", features = ["derive"] }
 serde_json = "1.0"
 

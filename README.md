@@ -1,8 +1,8 @@
 # Mneme
 
 Mneme is an early personal-memory runtime and eval harness for agent workflows.
-The current repository focuses on deterministic v1 behavior before adding model
-providers, teams, UI, or production storage.
+The current repository focuses on deterministic v1 behavior before adding
+production provider integrations, teams, UI, or production storage.
 
 Mneme currently provides:
 
@@ -27,12 +27,16 @@ Mneme is pre-1.0. The useful surface today is local development and evaluation:
   memory writes;
 - extraction and storage are behind adapter boundaries;
 - model-backed extraction experiments can use a provider-neutral command
-  adapter without adding API keys to the repo.
+  adapter without adding API keys to the repo;
 - a public OpenAI wrapper example can run through the same command protocol,
-  with CI using deterministic dry-run mode.
+  with CI using deterministic dry-run mode;
+- workspace crates are package-checked locally but marked `publish = false`
+  until the public license and distribution policy are finalized.
 
 See [docs/v1-stability.md](docs/v1-stability.md) for the current stability
 contract.
+
+For a step-by-step first run, see [Getting Started](docs/getting-started.md).
 
 ## Quickstart
 
@@ -149,6 +153,12 @@ Before opening a PR, run:
 ./scripts/quality-gate.sh full
 ```
 
+Check package assembly directly:
+
+```sh
+./scripts/package-check.sh
+```
+
 Generated eval reports and local stores are ignored. Public scenarios under
 `evals/scenarios/` are tracked.
 
@@ -170,6 +180,7 @@ spec/               feature specs and verification maps
 ## Documentation
 
 - [Local CLI](docs/local-cli.md)
+- [Getting Started](docs/getting-started.md)
 - [Personal Runtime](docs/personal-runtime.md)
 - [Agent Integration](docs/agent-integration.md)
 - [Eval Scenario Format](docs/eval-scenario-format.md)
@@ -180,6 +191,7 @@ spec/               feature specs and verification maps
 - [OpenAI Provider Wrapper](docs/openai-provider-wrapper.md)
 - [Live Provider Baseline](docs/live-provider-baseline.md)
 - [Live Provider Baseline Runbook](docs/live-provider-baseline-runbook.md)
+- [Package Readiness](docs/package-readiness.md)
 - [CI Cost Policy](docs/ci-cost-policy.md)
 - [Phase 3 Readiness](docs/phase-3-readiness.md)
 - [Mneme v1 Personal Core](docs/mneme-v1-personal-core.md)
