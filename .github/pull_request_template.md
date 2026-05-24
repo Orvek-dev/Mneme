@@ -25,6 +25,8 @@ Governing requirement IDs:
 - [ ] No secrets, local paths, private planning notes, or personal workflow files
 - [ ] No generated runtime reports committed outside intentional fixtures
 - [ ] README/user-facing docs are written from a user perspective, when changed
+- [ ] No license or registry publication policy change unless intentional and
+      documented
 
 ## Residual Risk
 

@@ -10,6 +10,8 @@ trap 'rm -rf "$LIST_DIR"' EXIT
 
 echo "package-check: verifying package assembly and package file lists"
 
+./scripts/distribution-policy-check.sh
+
 cargo package -p mneme-core --allow-dirty --no-verify --locked
 
 for package in mneme-core mneme-cli mneme-eval; do

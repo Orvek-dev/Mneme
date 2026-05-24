@@ -13,6 +13,8 @@ Mneme is pre-1.0 and currently optimized for local development, deterministic
 evals, and provider-wrapper experiments. The crates are intentionally marked
 `publish = false` until the project has a final license and public distribution
 policy.
+The current distribution state is documented in
+`docs/distribution-policy.md`.
 
 ## First Run
 
@@ -127,6 +129,8 @@ RUSTDOCFLAGS="-D warnings" cargo doc --workspace --no-deps
 - Do not commit local stores, generated reports, credentials, or private
   planning notes.
 - Keep provider credentials in the shell or an untracked `.env` file.
+- Do not remove `publish = false` or add license metadata until the owner has
+  committed a license file and updated the distribution policy.
 - Add behavior changes through public specs, evals, tests, or docs.
 - Keep live provider reports local unless they are intentionally redacted public
   artifacts.

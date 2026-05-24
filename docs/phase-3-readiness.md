@@ -80,3 +80,7 @@ smoke checks in the quality gate.
 Phase 8 shipped the **API/Rustdoc Contract MVP** in `v0.14.0`, documenting the
 current Rust API surface, adding a compile-checked `mneme-core` example, and
 building Rustdoc with warnings denied in the quality gate.
+
+Phase 9 shipped the **License & Distribution Policy MVP** in `v0.15.0`,
+documenting the pending owner license decision, keeping registry publication
+disabled, and adding a distribution policy check to package verification.

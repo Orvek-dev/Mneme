@@ -4,6 +4,7 @@ Mneme is pre-1.0 and the workspace crates are not published to a registry.
 Each crate is marked `publish = false` to prevent accidental crates.io
 publication while the project is still stabilizing its public license,
 distribution, and API policy.
+The current distribution policy is documented in `docs/distribution-policy.md`.
 
 ## Current Packages
 
@@ -26,13 +27,16 @@ RUSTDOCFLAGS="-D warnings" cargo doc --workspace --no-deps
 Run:
 
 ```sh
+./scripts/distribution-policy-check.sh
 ./scripts/package-check.sh
 ```
 
-The package check assembles `mneme-core` and lists each workspace package's
-included files. `mneme-cli` and `mneme-eval` depend on the unpublished
-workspace-local `mneme-core` crate, so their file-list checks are the useful
-pre-publication signal until registry publication is explicitly enabled.
+The distribution policy check verifies that crates remain unpublished while no
+license file exists. The package check runs that guard before assembling
+`mneme-core` and listing each workspace package's included files. `mneme-cli`
+and `mneme-eval` depend on the unpublished workspace-local `mneme-core` crate,
+so their file-list checks are the useful pre-publication signal until registry
+publication is explicitly enabled.
 
 The script blocks known private or generated paths such as local stores, eval
 reports, private planning files, and local harness/template copies.
@@ -54,6 +58,8 @@ Do not remove `publish = false` until all of the following are true:
 - a public license has been selected and committed;
 - the crate API surfaces have an explicit stability policy;
 - Rustdoc verification is part of CI or the release quality gate;
+- `scripts/distribution-policy-check.sh` has been updated for the selected
+  license and publication target;
 - package contents are reviewed against `scripts/package-check.sh`;
 - `docs/release-checklist.md` includes registry publication steps;
 - CI verifies the exact package or publish dry-run command intended for release.
