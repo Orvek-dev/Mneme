@@ -6,6 +6,13 @@ commands remain useful for direct CLI inspection.
 
 ## Start A Task
 
+Check the local hook runtime first:
+
+```sh
+cargo run -p mneme-cli -- hook doctor --store /tmp/mneme.json
+scripts/mneme-agent-hook.sh doctor
+```
+
 Use `hook begin` to retrieve task-scoped context and create a session record:
 
 ```sh
@@ -53,6 +60,34 @@ read `ok`, `recoverable`, `error.kind`, `error.message`, and `error.exit_code`
 instead of parsing stderr.
 If `error.kind` is `store_lock`, another local writer is active; agents can
 continue without memory or retry the hook later.
+
+## Runtime Wrapper
+
+Use `scripts/mneme-agent-hook.sh` when configuring an agent runtime that should
+not know cargo details:
+
+```sh
+MNEME_STORE=/tmp/mneme.json \
+MNEME_AGENT_ID=codex \
+MNEME_SCOPE=private \
+MNEME_MAX_ITEMS=3 \
+  scripts/mneme-agent-hook.sh begin "Draft a setup plan" --query "local-first"
+
+MNEME_STORE=/tmp/mneme.json \
+MNEME_AGENT_ID=codex \
+  scripts/mneme-agent-hook.sh end session-001 --summary "Prepared setup plan"
+```
+
+Supported environment variables:
+
+- `MNEME_BIN`: path to an installed `mneme` binary.
+- `MNEME_STORE`: store path appended when `--store` is absent.
+- `MNEME_AGENT_ID`: agent ID appended when `--agent` is absent.
+- `MNEME_SCOPE`: begin scope appended when `--scope` is absent.
+- `MNEME_MAX_ITEMS`: begin item cap appended when `--max-items` is absent.
+
+`scripts/mneme-agent-hook.sh doctor` runs an isolated temporary-store smoke test
+covering hook doctor, begin, and end.
 
 ## Session Records
 

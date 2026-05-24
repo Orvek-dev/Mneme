@@ -4,6 +4,20 @@ This project follows the spirit of Keep a Changelog.
 
 ## Unreleased
 
+## [0.21.0] - 2026-05-24
+
+### Added
+
+- Added `mneme hook doctor` for hook runtime introspection with the stable
+  `mneme.agent_hook.v1` JSON envelope.
+- Added `scripts/mneme-agent-hook.sh` as an agent runtime wrapper for
+  `doctor`, `begin`, and `end`.
+- Added wrapper environment defaults for `MNEME_BIN`, `MNEME_STORE`,
+  `MNEME_AGENT_ID`, `MNEME_SCOPE`, and `MNEME_MAX_ITEMS`.
+- Added quality-gate smoke checks for hook doctor and wrapper doctor/begin/end
+  flows.
+- Added the Phase 15 agent runtime installation feature spec and docs.
+
 ## [0.20.0] - 2026-05-24
 
 ### Added

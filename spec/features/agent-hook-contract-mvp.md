@@ -9,7 +9,8 @@ around task execution.
 
 - The product runtime remains `mneme-core`.
 - Existing `begin` and `end` commands keep their current CLI behavior.
-- Agent automation should use `mneme hook begin/end` for stable JSON envelopes.
+- Agent automation should use `mneme hook doctor/begin/end` for stable JSON
+  envelopes.
 - Hook success and failure must both be machine-readable from stdout.
 
 ## Requirements
@@ -18,6 +19,8 @@ around task execution.
   same engine path as `mneme begin`.
 - [REQ-HOOK-002][Ubiquitous] `mneme hook end` shall end a session using the
   same engine path as `mneme end`.
+- [REQ-HOOK-008][Ubiquitous] `mneme hook doctor` shall report hook runtime
+  readiness without mutating memory state.
 - [REQ-HOOK-003][Ubiquitous] Hook success output shall include
   `schema_version: mneme.agent_hook.v1`, `ok`, `operation`, `store`, and
   session identifiers.
@@ -42,3 +45,4 @@ around task execution.
 | REQ-HOOK-005 | `CliError::reported` hook path | verified |
 | REQ-HOOK-006 | `scripts/quality-gate.sh` | verified |
 | REQ-HOOK-007 | `docs/agent-hook-contract.md` | verified |
+| REQ-HOOK-008 | `run_agent_hook_doctor` and CLI tests | verified |
