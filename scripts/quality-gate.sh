@@ -119,5 +119,6 @@ grep -q '"ok": true' "$BASELINE_GATE_STDOUT"
 grep -q '"failure-summary.empty"' "$BASELINE_GATE_REPORT"
 
 ./scripts/public-safety-check.sh
+./scripts/package-check.sh
 
 echo "quality-gate: ok"

@@ -46,6 +46,8 @@ eval update land in the same PR.
 - `scripts/quality-gate.sh` is the local and release verification entry point.
 - `scripts/public-safety-check.sh` guards against known private/public-safety
   file and text patterns before release.
+- `scripts/package-check.sh` verifies workspace package assembly and blocks
+  known private or generated files from package contents.
 
 ## Unstable Areas
 

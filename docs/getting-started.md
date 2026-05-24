@@ -1,0 +1,117 @@
+# Getting Started
+
+This guide is for a new developer using the public repository without private
+planning notes or local templates.
+
+## Prerequisites
+
+- Rust stable with `cargo`, `rustfmt`, and `clippy`.
+- Git.
+- Optional: GitHub CLI `gh` for release inspection and PR work.
+
+Mneme is pre-1.0 and currently optimized for local development, deterministic
+evals, and provider-wrapper experiments. The crates are intentionally marked
+`publish = false` until the project has a final license and public distribution
+policy.
+
+## First Run
+
+From the repository root:
+
+```sh
+cargo run -p mneme-cli -- doctor
+cargo run -p mneme-eval -- doctor
+```
+
+Use an isolated store for local experiments:
+
+```sh
+STORE=/tmp/mneme-getting-started.json
+rm -f "$STORE"
+cargo run -p mneme-cli -- remember "user prefers local-first tools" --store "$STORE"
+cargo run -p mneme-cli -- context "local-first" --store "$STORE" --json
+cargo run -p mneme-cli -- validate --store "$STORE"
+```
+
+The default store is `.mneme/mneme-v1.json` in the current directory. `.mneme/`
+is ignored by git.
+
+## Agent Session Flow
+
+Agents can retrieve task-scoped context and then write explicit post-task memory:
+
+```sh
+STORE=/tmp/mneme-agent-session.json
+rm -f "$STORE"
+cargo run -p mneme-cli -- remember "user prefers local-first tools" --store "$STORE"
+cargo run -p mneme-cli -- begin "Draft setup plan" \
+  --query "local-first" \
+  --agent codex \
+  --store "$STORE" \
+  --json
+cargo run -p mneme-cli -- end session-001 \
+  --summary "Prepared a concise setup plan" \
+  --remember "user prefers concise setup plans" \
+  --store "$STORE" \
+  --json
+```
+
+## Eval Harness
+
+Run the deterministic suites before changing behavior:
+
+```sh
+cargo run -p mneme-eval -- validate --suite core
+cargo run -p mneme-eval -- run --suite core --target fake
+cargo run -p mneme-eval -- run --suite core --target mneme-v1
+cargo run -p mneme-eval -- run --suite runtime --target mneme-v1
+cargo run -p mneme-eval -- run --suite agent --target mneme-v1
+```
+
+Run the model suite with the deterministic command fixture:
+
+```sh
+cargo run -p mneme-eval -- run --suite model \
+  --target mneme-v1-command \
+  --extractor-command evals/fixtures/command-extractor.sh
+```
+
+## Provider Wrapper Dry Run
+
+The OpenAI wrapper can be exercised without credentials:
+
+```sh
+MNEME_OPENAI_DRY_RUN=1 cargo run -p mneme-eval -- baseline --suite model \
+  --target mneme-v1-command \
+  --extractor-command wrappers/openai_extractor.py \
+  --iterations 2 \
+  --provider-label openai \
+  --model-label dry-run \
+  --run-label local-dry-run \
+  --report evals/reports/openai-dry-run-baseline.json
+
+cargo run -p mneme-eval -- baseline-gate evals/reports/openai-dry-run-baseline.json
+```
+
+`evals/reports/` is ignored by git.
+
+## Full Local Gate
+
+Before opening a phase-sized PR:
+
+```sh
+./scripts/quality-gate.sh full
+```
+
+That gate runs formatting, clippy, tests, CLI smoke checks, eval suites,
+dry-run provider baseline checks, public-safety checks, and package assembly
+checks.
+
+## Public Repository Rules
+
+- Do not commit local stores, generated reports, credentials, or private
+  planning notes.
+- Keep provider credentials in the shell or an untracked `.env` file.
+- Add behavior changes through public specs, evals, tests, or docs.
+- Keep live provider reports local unless they are intentionally redacted public
+  artifacts.
