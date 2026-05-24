@@ -40,10 +40,11 @@ pub fn run_cli(args: impl IntoIterator<Item = String>) -> Result<(), EvalError> 
         "validate" => run_validate(args.collect()),
         "acceptance" => run_acceptance(args.collect()),
         "baseline" => run_baseline(args.collect()),
+        "baseline-gate" => run_baseline_gate(args.collect()),
         "replay" => run_replay(args.collect()),
         "run" => run_suite(args.collect()),
         _ => Err(EvalError::invalid_cli(format!(
-            "unknown mneme-eval command: {command}\navailable commands: doctor, version, validate, acceptance, baseline, replay, run"
+            "unknown mneme-eval command: {command}\navailable commands: doctor, version, validate, acceptance, baseline, baseline-gate, replay, run"
         ))),
     }
 }
@@ -71,6 +72,20 @@ struct CommandOptions {
     run_label: Option<String>,
 }
 
+#[derive(Debug, Clone)]
+struct BaselineGateOptions {
+    json: bool,
+    report_path: Option<PathBuf>,
+    min_pass_rate: f64,
+    min_category_pass_rate: f64,
+    max_failed_iterations: usize,
+    max_failed_scenario_runs: usize,
+    require_live_provider: bool,
+    require_provider_label: bool,
+    require_model_label: bool,
+    require_run_label: bool,
+}
+
 impl Default for CommandOptions {
     fn default() -> Self {
         Self {
@@ -85,6 +100,23 @@ impl Default for CommandOptions {
             provider_label: None,
             model_label: None,
             run_label: None,
+        }
+    }
+}
+
+impl Default for BaselineGateOptions {
+    fn default() -> Self {
+        Self {
+            json: false,
+            report_path: None,
+            min_pass_rate: 1.0,
+            min_category_pass_rate: 1.0,
+            max_failed_iterations: 0,
+            max_failed_scenario_runs: 0,
+            require_live_provider: false,
+            require_provider_label: true,
+            require_model_label: true,
+            require_run_label: false,
         }
     }
 }
@@ -332,6 +364,287 @@ fn run_baseline(raw_args: Vec<String>) -> Result<(), EvalError> {
     } else {
         Err(EvalError::scenario("baseline failed"))
     }
+}
+
+fn run_baseline_gate(raw_args: Vec<String>) -> Result<(), EvalError> {
+    let (path, options) = parse_baseline_gate_args(raw_args)?;
+    let raw_json =
+        fs::read_to_string(&path).map_err(|source| EvalError::io("read", &path, source))?;
+    let baseline: BaselineReport =
+        serde_json::from_str(&raw_json).map_err(|source| EvalError::parse_json(&path, source))?;
+    let report = build_baseline_gate_report(&path, &raw_json, &baseline, &options);
+    emit_baseline_gate_report(&report, &options)?;
+    if report.ok {
+        Ok(())
+    } else {
+        Err(EvalError::scenario("baseline gate failed"))
+    }
+}
+
+fn build_baseline_gate_report(
+    path: &Path,
+    raw_json: &str,
+    baseline: &BaselineReport,
+    options: &BaselineGateOptions,
+) -> AcceptanceReport {
+    let mut gates = Vec::new();
+    let target = format!("baseline-gate:{}:{}", baseline.suite, baseline.target);
+
+    if baseline.report_schema_version == 1
+        && !baseline.suite.is_empty()
+        && !baseline.target.is_empty()
+        && baseline.iterations > 0
+        && baseline.scenario_count > 0
+    {
+        gates.push(AcceptanceGateReport::pass(
+            "report.contract",
+            format!(
+                "{} has schema v{} for suite {}",
+                path.display(),
+                baseline.report_schema_version,
+                baseline.suite
+            ),
+        ));
+    } else {
+        gates.push(AcceptanceGateReport::fail(
+            "report.contract",
+            "baseline report is missing required metadata, iterations, or scenarios",
+        ));
+    }
+
+    if baseline.target == TargetKind::MnemeV1Command.as_str()
+        && baseline.target_metadata.opt_in
+        && baseline.target_metadata.command_configured
+    {
+        gates.push(AcceptanceGateReport::pass(
+            "target.command-extractor",
+            "baseline used the opt-in command extractor target",
+        ));
+    } else {
+        gates.push(AcceptanceGateReport::fail(
+            "target.command-extractor",
+            format!(
+                "expected target={} opt_in=true command_configured=true, actual target={} opt_in={} command_configured={}",
+                TargetKind::MnemeV1Command.as_str(),
+                baseline.target,
+                baseline.target_metadata.opt_in,
+                baseline.target_metadata.command_configured
+            ),
+        ));
+    }
+
+    if baseline.ok {
+        gates.push(AcceptanceGateReport::pass(
+            "baseline.ok",
+            "baseline reported no failed iterations or scenario runs",
+        ));
+    } else {
+        gates.push(AcceptanceGateReport::fail(
+            "baseline.ok",
+            format!(
+                "failed_iterations={} failed_scenario_runs={}",
+                baseline.failed_iterations, baseline.failed_scenario_runs
+            ),
+        ));
+    }
+
+    gates.push(check_rate_gate(
+        "pass-rate.minimum",
+        baseline.pass_rate,
+        options.min_pass_rate,
+        "aggregate pass_rate",
+    ));
+
+    let failing_categories = baseline
+        .category_pass_rates
+        .iter()
+        .filter(|category| category.pass_rate < options.min_category_pass_rate)
+        .map(|category| format!("{}={:.4}", category.category, category.pass_rate))
+        .collect::<Vec<_>>();
+    if baseline.category_pass_rates.is_empty() {
+        gates.push(AcceptanceGateReport::fail(
+            "category-pass-rate.minimum",
+            "baseline report has no category pass rates",
+        ));
+    } else if failing_categories.is_empty() {
+        gates.push(AcceptanceGateReport::pass(
+            "category-pass-rate.minimum",
+            format!(
+                "{} categor{} met minimum {:.4}",
+                baseline.category_pass_rates.len(),
+                if baseline.category_pass_rates.len() == 1 {
+                    "y"
+                } else {
+                    "ies"
+                },
+                options.min_category_pass_rate
+            ),
+        ));
+    } else {
+        gates.push(AcceptanceGateReport::fail(
+            "category-pass-rate.minimum",
+            format!(
+                "category pass rate below {:.4}: {}",
+                options.min_category_pass_rate,
+                failing_categories.join(", ")
+            ),
+        ));
+    }
+
+    gates.push(check_maximum_gate(
+        "failed-iterations.maximum",
+        baseline.failed_iterations,
+        options.max_failed_iterations,
+    ));
+    gates.push(check_maximum_gate(
+        "failed-scenario-runs.maximum",
+        baseline.failed_scenario_runs,
+        options.max_failed_scenario_runs,
+    ));
+
+    gates.push(check_optional_metadata_gate(
+        "metadata.provider-label",
+        baseline.baseline_metadata.provider_label.as_deref(),
+        options.require_provider_label,
+    ));
+    gates.push(check_optional_metadata_gate(
+        "metadata.model-label",
+        baseline.baseline_metadata.model_label.as_deref(),
+        options.require_model_label,
+    ));
+    gates.push(check_optional_metadata_gate(
+        "metadata.run-label",
+        baseline.baseline_metadata.run_label.as_deref(),
+        options.require_run_label,
+    ));
+
+    if options.require_live_provider {
+        if baseline.baseline_metadata.live_provider {
+            gates.push(AcceptanceGateReport::pass(
+                "metadata.live-provider",
+                "baseline is marked as live provider",
+            ));
+        } else {
+            gates.push(AcceptanceGateReport::fail(
+                "metadata.live-provider",
+                "baseline must be marked with --live-provider",
+            ));
+        }
+    } else {
+        gates.push(AcceptanceGateReport::pass(
+            "metadata.live-provider",
+            format!(
+                "live_provider={} accepted by this gate",
+                baseline.baseline_metadata.live_provider
+            ),
+        ));
+    }
+
+    let redaction_findings = redaction_findings(raw_json);
+    if redaction_findings.is_empty() {
+        gates.push(AcceptanceGateReport::pass(
+            "redaction.scan",
+            "no obvious secrets or local absolute paths found in baseline report",
+        ));
+    } else {
+        gates.push(AcceptanceGateReport::fail(
+            "redaction.scan",
+            format!(
+                "potentially sensitive pattern(s): {}",
+                redaction_findings.join(", ")
+            ),
+        ));
+    }
+
+    if baseline.failure_summary.failed_checks.is_empty() {
+        gates.push(AcceptanceGateReport::pass(
+            "failure-summary.empty",
+            "baseline failure summary has no failed checks",
+        ));
+    } else {
+        let failed_checks = baseline
+            .failure_summary
+            .failed_checks
+            .iter()
+            .map(|check| format!("{}={}", check.check, check.count))
+            .collect::<Vec<_>>();
+        gates.push(AcceptanceGateReport::fail(
+            "failure-summary.empty",
+            format!("failed checks present: {}", failed_checks.join(", ")),
+        ));
+    }
+
+    AcceptanceReport::from_gates(target, gates)
+}
+
+fn check_rate_gate(
+    name: impl Into<String>,
+    actual: f64,
+    minimum: f64,
+    label: &str,
+) -> AcceptanceGateReport {
+    if actual >= minimum {
+        AcceptanceGateReport::pass(
+            name,
+            format!("{label} {:.4} met minimum {:.4}", actual, minimum),
+        )
+    } else {
+        AcceptanceGateReport::fail(
+            name,
+            format!("{label} {:.4} below minimum {:.4}", actual, minimum),
+        )
+    }
+}
+
+fn check_maximum_gate(
+    name: impl Into<String>,
+    actual: usize,
+    maximum: usize,
+) -> AcceptanceGateReport {
+    if actual <= maximum {
+        AcceptanceGateReport::pass(name, format!("{actual} is within maximum {maximum}"))
+    } else {
+        AcceptanceGateReport::fail(name, format!("{actual} exceeds maximum {maximum}"))
+    }
+}
+
+fn check_optional_metadata_gate(
+    name: impl Into<String>,
+    value: Option<&str>,
+    required: bool,
+) -> AcceptanceGateReport {
+    match (required, value.filter(|value| !value.trim().is_empty())) {
+        (true, Some(value)) => AcceptanceGateReport::pass(name, format!("present: {value}")),
+        (true, None) => AcceptanceGateReport::fail(name, "required metadata label is missing"),
+        (false, Some(value)) => AcceptanceGateReport::pass(name, format!("present: {value}")),
+        (false, None) => AcceptanceGateReport::pass(name, "not required and not present"),
+    }
+}
+
+fn redaction_findings(raw_json: &str) -> Vec<String> {
+    let uppercase = raw_json.to_ascii_uppercase();
+    let mut findings = Vec::new();
+    for pattern in [
+        "OPENAI_API_KEY",
+        "API_KEY=",
+        "API-KEY=",
+        "TOKEN=",
+        "PASSWORD=",
+        "SECRET=",
+        "BEARER ",
+    ] {
+        if uppercase.contains(pattern) {
+            findings.push(pattern.to_owned());
+        }
+    }
+    for pattern in ["sk-", "/Users/", "\\Users\\"] {
+        if raw_json.contains(pattern) {
+            findings.push(pattern.to_owned());
+        }
+    }
+    findings.sort();
+    findings.dedup();
+    findings
 }
 
 fn baseline_report_for_paths(
@@ -753,6 +1066,86 @@ fn parse_baseline_args(raw_args: Vec<String>) -> Result<(String, CommandOptions)
     Ok((suite.unwrap_or_else(|| "core".to_owned()), options))
 }
 
+fn parse_baseline_gate_args(
+    raw_args: Vec<String>,
+) -> Result<(PathBuf, BaselineGateOptions), EvalError> {
+    let mut path = None;
+    let mut options = BaselineGateOptions::default();
+    let mut idx = 0;
+    while idx < raw_args.len() {
+        match raw_args[idx].as_str() {
+            "--json" => options.json = true,
+            "--report" => {
+                idx += 1;
+                let Some(value) = raw_args.get(idx) else {
+                    return Err(EvalError::invalid_cli("--report requires a path"));
+                };
+                options.report_path = Some(PathBuf::from(value));
+            }
+            "--min-pass-rate" => {
+                idx += 1;
+                let Some(value) = raw_args.get(idx) else {
+                    return Err(EvalError::invalid_cli("--min-pass-rate requires a value"));
+                };
+                options.min_pass_rate = parse_rate("--min-pass-rate", value)?;
+            }
+            "--min-category-pass-rate" => {
+                idx += 1;
+                let Some(value) = raw_args.get(idx) else {
+                    return Err(EvalError::invalid_cli(
+                        "--min-category-pass-rate requires a value",
+                    ));
+                };
+                options.min_category_pass_rate = parse_rate("--min-category-pass-rate", value)?;
+            }
+            "--max-failed-iterations" => {
+                idx += 1;
+                let Some(value) = raw_args.get(idx) else {
+                    return Err(EvalError::invalid_cli(
+                        "--max-failed-iterations requires a value",
+                    ));
+                };
+                options.max_failed_iterations =
+                    parse_nonnegative_usize("--max-failed-iterations", value)?;
+            }
+            "--max-failed-scenario-runs" => {
+                idx += 1;
+                let Some(value) = raw_args.get(idx) else {
+                    return Err(EvalError::invalid_cli(
+                        "--max-failed-scenario-runs requires a value",
+                    ));
+                };
+                options.max_failed_scenario_runs =
+                    parse_nonnegative_usize("--max-failed-scenario-runs", value)?;
+            }
+            "--require-live-provider" => options.require_live_provider = true,
+            "--allow-missing-provider-label" => options.require_provider_label = false,
+            "--allow-missing-model-label" => options.require_model_label = false,
+            "--require-run-label" => options.require_run_label = true,
+            value if value.starts_with('-') => {
+                return Err(EvalError::invalid_cli(format!(
+                    "unknown baseline-gate option: {value}"
+                )));
+            }
+            value => {
+                if path.is_some() {
+                    return Err(EvalError::invalid_cli(
+                        "baseline-gate accepts one baseline report path",
+                    ));
+                }
+                path = Some(PathBuf::from(value));
+            }
+        }
+        idx += 1;
+    }
+    let Some(path) = path else {
+        return Err(EvalError::invalid_cli(
+            "usage: mneme-eval baseline-gate <baseline-report.json> [--min-pass-rate <0..1>] [--min-category-pass-rate <0..1>] [--max-failed-iterations <n>] [--max-failed-scenario-runs <n>] [--require-live-provider] [--allow-missing-provider-label] [--allow-missing-model-label] [--require-run-label] [--json] [--report <path>]",
+        ));
+    };
+    Ok((path, options))
+}
+
 fn parse_iterations(value: &str) -> Result<usize, EvalError> {
     let iterations = value.parse::<usize>().map_err(|_| {
         EvalError::invalid_cli(format!("--iterations must be a positive integer: {value}"))
@@ -763,6 +1156,24 @@ fn parse_iterations(value: &str) -> Result<usize, EvalError> {
         )));
     }
     Ok(iterations)
+}
+
+fn parse_nonnegative_usize(option: &str, value: &str) -> Result<usize, EvalError> {
+    value.parse::<usize>().map_err(|_| {
+        EvalError::invalid_cli(format!("{option} must be a non-negative integer: {value}"))
+    })
+}
+
+fn parse_rate(option: &str, value: &str) -> Result<f64, EvalError> {
+    let rate = value
+        .parse::<f64>()
+        .map_err(|_| EvalError::invalid_cli(format!("{option} must be a number: {value}")))?;
+    if !(0.0..=1.0).contains(&rate) {
+        return Err(EvalError::invalid_cli(format!(
+            "{option} must be between 0.0 and 1.0"
+        )));
+    }
+    Ok(rate)
 }
 
 fn parse_label(option: &str, value: &str) -> Result<String, EvalError> {
@@ -904,6 +1315,23 @@ fn emit_baseline_report(
         println!("{json}");
     } else {
         print_baseline_report(report);
+    }
+    Ok(())
+}
+
+fn emit_baseline_gate_report(
+    report: &AcceptanceReport,
+    options: &BaselineGateOptions,
+) -> Result<(), EvalError> {
+    if let Some(path) = &options.report_path {
+        write_report(path, report)?;
+    }
+    if options.json {
+        let json = serde_json::to_string_pretty(report)
+            .map_err(|source| EvalError::json(Path::new("<stdout>"), source))?;
+        println!("{json}");
+    } else {
+        print_acceptance_report(report);
     }
     Ok(())
 }
@@ -1162,6 +1590,126 @@ mod tests {
     }
 
     #[test]
+    fn parse_baseline_gate_accepts_thresholds() -> Result<(), EvalError> {
+        let (path, options) = parse_baseline_gate_args(vec![
+            "evals/reports/openai-live-baseline.json".to_owned(),
+            "--min-pass-rate".to_owned(),
+            "0.95".to_owned(),
+            "--min-category-pass-rate".to_owned(),
+            "0.9".to_owned(),
+            "--max-failed-iterations".to_owned(),
+            "1".to_owned(),
+            "--max-failed-scenario-runs".to_owned(),
+            "2".to_owned(),
+            "--require-live-provider".to_owned(),
+            "--require-run-label".to_owned(),
+            "--json".to_owned(),
+        ])?;
+        assert_eq!(
+            path,
+            PathBuf::from("evals/reports/openai-live-baseline.json")
+        );
+        assert_eq!(options.min_pass_rate, 0.95);
+        assert_eq!(options.min_category_pass_rate, 0.9);
+        assert_eq!(options.max_failed_iterations, 1);
+        assert_eq!(options.max_failed_scenario_runs, 2);
+        assert!(options.require_live_provider);
+        assert!(options.require_run_label);
+        assert!(options.json);
+        Ok(())
+    }
+
+    #[test]
+    fn parse_baseline_gate_rejects_invalid_rate() {
+        let result = parse_baseline_gate_args(vec![
+            "baseline.json".to_owned(),
+            "--min-pass-rate".to_owned(),
+            "1.5".to_owned(),
+        ]);
+        assert!(result.is_err());
+    }
+
+    #[test]
+    fn baseline_gate_accepts_passing_dry_run_report() -> Result<(), Box<dyn std::error::Error>> {
+        let report = passing_baseline_report(false);
+        let raw_json = serde_json::to_string(&report)?;
+        let gate = build_baseline_gate_report(
+            Path::new("baseline.json"),
+            &raw_json,
+            &report,
+            &BaselineGateOptions::default(),
+        );
+        assert!(gate.ok);
+        assert_eq!(gate.failed, 0);
+        Ok(())
+    }
+
+    #[test]
+    fn baseline_gate_requires_live_provider_when_configured(
+    ) -> Result<(), Box<dyn std::error::Error>> {
+        let report = passing_baseline_report(false);
+        let raw_json = serde_json::to_string(&report)?;
+        let options = BaselineGateOptions {
+            require_live_provider: true,
+            ..BaselineGateOptions::default()
+        };
+        let gate =
+            build_baseline_gate_report(Path::new("baseline.json"), &raw_json, &report, &options);
+        assert!(!gate.ok);
+        assert!(gate
+            .gates
+            .iter()
+            .any(|gate| gate.name == "metadata.live-provider" && gate.detail.contains("must")));
+        Ok(())
+    }
+
+    #[test]
+    fn baseline_gate_flags_redaction_findings() -> Result<(), Box<dyn std::error::Error>> {
+        let report = passing_baseline_report(true);
+        let key_name = format!("{}{}", "OPENAI_", "API_KEY");
+        let raw_json = format!(
+            "{}\n{}=placeholder\n",
+            serde_json::to_string(&report)?,
+            key_name
+        );
+        let expected_finding = key_name;
+        let gate = build_baseline_gate_report(
+            Path::new("baseline.json"),
+            &raw_json,
+            &report,
+            &BaselineGateOptions::default(),
+        );
+        assert!(!gate.ok);
+        assert!(gate.gates.iter().any(|gate| {
+            gate.name == "redaction.scan" && gate.detail.contains(&expected_finding)
+        }));
+        Ok(())
+    }
+
+    #[test]
+    fn baseline_gate_flags_key_prefix_findings() -> Result<(), Box<dyn std::error::Error>> {
+        let report = passing_baseline_report(true);
+        let raw_json = format!(
+            "{}\n{}{}example\n",
+            serde_json::to_string(&report)?,
+            "s",
+            "k-"
+        );
+        let gate = build_baseline_gate_report(
+            Path::new("baseline.json"),
+            &raw_json,
+            &report,
+            &BaselineGateOptions::default(),
+        );
+        assert!(!gate.ok);
+        assert!(gate
+            .gates
+            .iter()
+            .any(|gate| gate.name == "redaction.scan" && gate.detail.contains("sk-")));
+        Ok(())
+    }
+
+    #[test]
     fn parse_validate_requires_a_target() {
         let result = parse_validate_args(vec!["--json".to_owned()]);
         assert!(result.is_err());
@@ -1202,5 +1750,35 @@ mod tests {
         assert!(is_scenario_file(Path::new("a.yaml")));
         assert!(is_scenario_file(Path::new("a.yml")));
         assert!(!is_scenario_file(Path::new(".gitkeep")));
+    }
+
+    fn passing_baseline_report(live_provider: bool) -> BaselineReport {
+        let passed = EvalReport::from_results(
+            TargetKind::MnemeV1Command.as_str(),
+            crate::target::EvalTargetMetadata::command(true),
+            vec![ScenarioReport::new(
+                "scenario-a".to_owned(),
+                vec!["category-recall".to_owned()],
+                vec![crate::report::CheckReport::pass(
+                    "check", "expected", "expected",
+                )],
+            )],
+        );
+        BaselineReport::from_runs(
+            "model",
+            TargetKind::MnemeV1Command.as_str(),
+            crate::target::EvalTargetMetadata::command(true),
+            BaselineMetadata::new(
+                live_provider,
+                Some("openai".to_owned()),
+                Some("dry-run".to_owned()),
+                Some("test-run".to_owned()),
+            ),
+            vec![BaselineScenarioMetadata::new(
+                "scenario-a",
+                vec!["category-recall".to_owned()],
+            )],
+            vec![BaselineRunReport::from_eval_report(1, passed)],
+        )
     }
 }

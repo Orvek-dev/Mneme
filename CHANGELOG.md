@@ -4,6 +4,22 @@ This project follows the spirit of Keep a Changelog.
 
 ## Unreleased
 
+## [0.11.0] - 2026-05-24
+
+### Added
+
+- Added `mneme-eval baseline-gate` for strict provider baseline quality checks.
+- Added baseline failure summaries for failed categories, failed scenarios, and
+  failed check counts.
+- Added live-baseline helper gate output so local provider runs produce both a
+  raw baseline report and a quality gate report.
+- Added Live Provider Quality Gate MVP documentation and spec.
+
+### Changed
+
+- Extended the local quality gate to validate the dry-run OpenAI wrapper
+  baseline report with `baseline-gate`.
+
 ## [0.10.0] - 2026-05-24
 
 ### Added

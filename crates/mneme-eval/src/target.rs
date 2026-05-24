@@ -2,7 +2,7 @@ use crate::error::EvalError;
 use crate::fake::FakeEvalTarget;
 use crate::mneme_v1::{MnemeV1CommandEvalTarget, MnemeV1EvalTarget};
 use crate::scenario::Scenario;
-use serde::Serialize;
+use serde::{Deserialize, Serialize};
 
 pub(crate) trait EvalTarget {
     fn name(&self) -> &'static str;
@@ -93,7 +93,7 @@ pub(crate) struct CommandExtractorOptions {
     pub(crate) args: Vec<String>,
 }
 
-#[derive(Debug, Clone, Serialize)]
+#[derive(Debug, Clone, Deserialize, Serialize)]
 pub(crate) struct EvalTargetMetadata {
     pub(crate) extractor: String,
     #[serde(skip_serializing_if = "Option::is_none")]

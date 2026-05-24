@@ -31,11 +31,16 @@ metadata defaults. Override these values when needed:
 export MNEME_LIVE_BASELINE_ITERATIONS=5
 export MNEME_LIVE_BASELINE_RUN_LABEL=local-YYYYMMDD
 export MNEME_LIVE_BASELINE_REPORT=evals/reports/openai-live-baseline.json
+export MNEME_LIVE_BASELINE_GATE_REPORT=evals/reports/openai-live-baseline.gate.json
 ./scripts/live-baseline.sh
 ```
 
 Use a `run_label` that identifies the local run without including private
 project names, account IDs, ticket IDs, or user names.
+
+The helper writes both the baseline report and a gate report. It still runs the
+gate when the baseline command reports failed scenario runs, so the output can
+identify which category, scenario, or check failed.
 
 ## Success Criteria
 
@@ -47,6 +52,8 @@ For the current suite, treat a live baseline as usable only when:
 - every `category_pass_rates[].pass_rate` is `1.0`
 - `failed_iterations` is `0`
 - `failed_scenario_runs` is `0`
+- `failure_summary.failed_checks` is empty
+- `baseline-gate` passes with `--require-live-provider --require-run-label`
 
 If a run fails, keep the report locally and inspect category pass rates before
 changing code or prompts.

@@ -56,6 +56,12 @@ cargo run -p mneme-eval -- acceptance --suite model --target mneme-v1-command --
 Use `--json` for machine-readable output and `--report <path>` to write a JSON
 report.
 
+Gate a saved provider baseline report:
+
+```sh
+cargo run -p mneme-eval -- baseline-gate evals/reports/openai-dry-run-baseline.json
+```
+
 `fake` is the default target. CI passes targets explicitly so future adapters
 cannot silently change what is being tested.
 
