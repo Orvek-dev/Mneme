@@ -16,6 +16,187 @@ pub(crate) struct EvalReport {
     pub(crate) results: Vec<ScenarioReport>,
 }
 
+#[derive(Debug, Clone, Serialize)]
+pub(crate) struct BaselineReport {
+    pub(crate) report_schema_version: u32,
+    pub(crate) suite: String,
+    pub(crate) target: String,
+    pub(crate) target_metadata: EvalTargetMetadata,
+    pub(crate) ok: bool,
+    pub(crate) iterations: usize,
+    pub(crate) passed_iterations: usize,
+    pub(crate) failed_iterations: usize,
+    pub(crate) scenario_count: usize,
+    pub(crate) total_scenario_runs: usize,
+    pub(crate) passed_scenario_runs: usize,
+    pub(crate) failed_scenario_runs: usize,
+    pub(crate) pass_rate: f64,
+    pub(crate) scenario_pass_rates: Vec<BaselineScenarioSummary>,
+    pub(crate) runs: Vec<BaselineRunReport>,
+}
+
+impl BaselineReport {
+    pub(crate) fn from_runs(
+        suite: impl Into<String>,
+        target: impl Into<String>,
+        target_metadata: EvalTargetMetadata,
+        scenario_ids: Vec<String>,
+        runs: Vec<BaselineRunReport>,
+    ) -> Self {
+        let iterations = runs.len();
+        let scenario_count = scenario_ids.len();
+        let passed_iterations = runs.iter().filter(|run| run.ok).count();
+        let failed_iterations = iterations.saturating_sub(passed_iterations);
+        let total_scenario_runs = iterations.saturating_mul(scenario_count);
+        let passed_scenario_runs = runs.iter().map(|run| run.passed).sum();
+        let failed_scenario_runs = total_scenario_runs.saturating_sub(passed_scenario_runs);
+        let pass_rate = rate(passed_scenario_runs, total_scenario_runs);
+        let scenario_pass_rates = scenario_ids
+            .iter()
+            .map(|scenario_id| BaselineScenarioSummary::from_runs(scenario_id, &runs))
+            .collect();
+        Self {
+            report_schema_version: REPORT_SCHEMA_VERSION,
+            suite: suite.into(),
+            target: target.into(),
+            target_metadata,
+            ok: failed_iterations == 0 && failed_scenario_runs == 0,
+            iterations,
+            passed_iterations,
+            failed_iterations,
+            scenario_count,
+            total_scenario_runs,
+            passed_scenario_runs,
+            failed_scenario_runs,
+            pass_rate,
+            scenario_pass_rates,
+            runs,
+        }
+    }
+}
+
+#[derive(Debug, Clone, Serialize)]
+pub(crate) struct BaselineScenarioSummary {
+    pub(crate) scenario_id: String,
+    pub(crate) attempts: usize,
+    pub(crate) passed: usize,
+    pub(crate) failed: usize,
+    pub(crate) pass_rate: f64,
+}
+
+impl BaselineScenarioSummary {
+    fn from_runs(scenario_id: &str, runs: &[BaselineRunReport]) -> Self {
+        let attempts = runs.len();
+        let passed = runs
+            .iter()
+            .filter(|run| {
+                run.results
+                    .iter()
+                    .any(|result| result.scenario_id == scenario_id && result.ok)
+            })
+            .count();
+        let failed = attempts.saturating_sub(passed);
+        Self {
+            scenario_id: scenario_id.to_owned(),
+            attempts,
+            passed,
+            failed,
+            pass_rate: rate(passed, attempts),
+        }
+    }
+}
+
+#[derive(Debug, Clone, Serialize)]
+pub(crate) struct BaselineRunReport {
+    pub(crate) iteration: usize,
+    pub(crate) ok: bool,
+    pub(crate) scenario_count: usize,
+    pub(crate) passed: usize,
+    pub(crate) failed: usize,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub(crate) error: Option<String>,
+    pub(crate) results: Vec<BaselineScenarioRunReport>,
+}
+
+impl BaselineRunReport {
+    pub(crate) fn from_eval_report(iteration: usize, report: EvalReport) -> Self {
+        let results = report
+            .results
+            .into_iter()
+            .map(BaselineScenarioRunReport::from_scenario_report)
+            .collect::<Vec<_>>();
+        Self {
+            iteration,
+            ok: report.ok,
+            scenario_count: report.scenario_count,
+            passed: report.passed,
+            failed: report.failed,
+            error: None,
+            results,
+        }
+    }
+
+    pub(crate) fn from_error(
+        iteration: usize,
+        scenario_ids: &[String],
+        error: impl Into<String>,
+    ) -> Self {
+        let results = scenario_ids
+            .iter()
+            .map(|scenario_id| BaselineScenarioRunReport::error(scenario_id.clone()))
+            .collect::<Vec<_>>();
+        Self {
+            iteration,
+            ok: false,
+            scenario_count: scenario_ids.len(),
+            passed: 0,
+            failed: scenario_ids.len(),
+            error: Some(error.into()),
+            results,
+        }
+    }
+}
+
+#[derive(Debug, Clone, Serialize)]
+pub(crate) struct BaselineScenarioRunReport {
+    pub(crate) scenario_id: String,
+    pub(crate) ok: bool,
+    #[serde(skip_serializing_if = "Vec::is_empty")]
+    pub(crate) failed_checks: Vec<String>,
+}
+
+impl BaselineScenarioRunReport {
+    fn from_scenario_report(report: ScenarioReport) -> Self {
+        let failed_checks = report
+            .checks
+            .iter()
+            .filter(|check| check.status == CheckStatus::Fail)
+            .map(|check| check.name.clone())
+            .collect();
+        Self {
+            scenario_id: report.scenario_id,
+            ok: report.ok,
+            failed_checks,
+        }
+    }
+
+    fn error(scenario_id: String) -> Self {
+        Self {
+            scenario_id,
+            ok: false,
+            failed_checks: Vec::new(),
+        }
+    }
+}
+
+fn rate(passed: usize, total: usize) -> f64 {
+    if total == 0 {
+        0.0
+    } else {
+        passed as f64 / total as f64
+    }
+}
+
 impl EvalReport {
     pub(crate) fn from_results(
         target: impl Into<String>,
@@ -265,6 +446,56 @@ mod tests {
         assert_eq!(json["gates"][0]["name"], "gate");
         assert_eq!(json["gates"][0]["status"], "pass");
         assert_eq!(json["gates"][0]["detail"], "ok");
+        Ok(())
+    }
+
+    #[test]
+    fn baseline_report_json_preserves_schema_contract() -> Result<(), serde_json::Error> {
+        let passed = EvalReport::from_results(
+            "mneme-v1-command",
+            EvalTargetMetadata::command(true),
+            vec![ScenarioReport::new(
+                "scenario-a".to_owned(),
+                Vec::new(),
+                vec![CheckReport::pass("check", "expected", "expected")],
+            )],
+        );
+        let failed = EvalReport::from_results(
+            "mneme-v1-command",
+            EvalTargetMetadata::command(true),
+            vec![ScenarioReport::new(
+                "scenario-a".to_owned(),
+                Vec::new(),
+                vec![CheckReport::fail("check", "expected", "actual", "artifact")],
+            )],
+        );
+        let report = BaselineReport::from_runs(
+            "model",
+            "mneme-v1-command",
+            EvalTargetMetadata::command(true),
+            vec!["scenario-a".to_owned()],
+            vec![
+                BaselineRunReport::from_eval_report(1, passed),
+                BaselineRunReport::from_eval_report(2, failed),
+            ],
+        );
+        let json = serde_json::to_value(&report)?;
+
+        assert_eq!(json["report_schema_version"], REPORT_SCHEMA_VERSION);
+        assert_eq!(json["suite"], "model");
+        assert_eq!(json["target"], "mneme-v1-command");
+        assert_eq!(json["target_metadata"]["command_configured"], true);
+        assert_eq!(json["ok"], false);
+        assert_eq!(json["iterations"], 2);
+        assert_eq!(json["passed_iterations"], 1);
+        assert_eq!(json["failed_iterations"], 1);
+        assert_eq!(json["scenario_count"], 1);
+        assert_eq!(json["total_scenario_runs"], 2);
+        assert_eq!(json["passed_scenario_runs"], 1);
+        assert_eq!(json["failed_scenario_runs"], 1);
+        assert_eq!(json["pass_rate"], 0.5);
+        assert_eq!(json["scenario_pass_rates"][0]["scenario_id"], "scenario-a");
+        assert_eq!(json["runs"][1]["results"][0]["failed_checks"][0], "check");
         Ok(())
     }
 }

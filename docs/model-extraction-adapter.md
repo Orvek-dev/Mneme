@@ -90,3 +90,7 @@ MNEME_OPENAI_DRY_RUN=1 cargo run -p mneme-eval -- acceptance --suite model \
 
 For live local use, set `OPENAI_API_KEY` and optionally `OPENAI_MODEL` in the
 environment. See [OpenAI Provider Wrapper](openai-provider-wrapper.md).
+
+For repeated provider-wrapper quality tracking, use
+[`mneme-eval baseline`](live-provider-baseline.md) instead of relying on a
+single suite run.
