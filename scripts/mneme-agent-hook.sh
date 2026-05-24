@@ -12,12 +12,79 @@ Usage:
   scripts/mneme-agent-hook.sh end <session-id> [mneme hook end options]
 
 Environment:
+  MNEME_AGENT_HOOK_CONFIG  Optional path to a KEY=VALUE runtime profile.
+  MNEME_CONFIG             Fallback config path when MNEME_AGENT_HOOK_CONFIG is absent.
   MNEME_BIN        Optional path to an installed mneme binary.
   MNEME_STORE      Optional store path appended when --store is absent.
   MNEME_AGENT_ID   Optional agent id appended when --agent is absent.
   MNEME_SCOPE      Optional begin scope appended when --scope is absent.
   MNEME_MAX_ITEMS  Optional begin max item count appended when --max-items is absent.
 EOF
+}
+
+strip_optional_quotes() {
+  local value="$1"
+  case "$value" in
+    \"*\")
+      value="${value#\"}"
+      value="${value%\"}"
+      ;;
+    \'*\')
+      value="${value#\'}"
+      value="${value%\'}"
+      ;;
+  esac
+  printf '%s' "$value"
+}
+
+apply_config_value() {
+  local key="$1"
+  local value="$2"
+  case "$key" in
+    MNEME_BIN)
+      if [ -z "${MNEME_BIN:-}" ]; then MNEME_BIN="$value"; fi
+      ;;
+    MNEME_STORE)
+      if [ -z "${MNEME_STORE:-}" ]; then MNEME_STORE="$value"; fi
+      ;;
+    MNEME_AGENT_ID)
+      if [ -z "${MNEME_AGENT_ID:-}" ]; then MNEME_AGENT_ID="$value"; fi
+      ;;
+    MNEME_SCOPE)
+      if [ -z "${MNEME_SCOPE:-}" ]; then MNEME_SCOPE="$value"; fi
+      ;;
+    MNEME_MAX_ITEMS)
+      if [ -z "${MNEME_MAX_ITEMS:-}" ]; then MNEME_MAX_ITEMS="$value"; fi
+      ;;
+    *)
+      printf '%s\n' "mneme-agent-hook: unknown config key: $key" >&2
+      exit 2
+      ;;
+  esac
+}
+
+load_runtime_config() {
+  CONFIG_PATH="${MNEME_AGENT_HOOK_CONFIG:-${MNEME_CONFIG:-${ROOT}/.mneme/mneme-agent-hook.env}}"
+  CONFIG_LOADED=false
+  if [ ! -f "$CONFIG_PATH" ]; then
+    return 0
+  fi
+  CONFIG_LOADED=true
+  local line key value
+  while IFS= read -r line || [ -n "$line" ]; do
+    line="${line%$'\r'}"
+    case "$line" in
+      ""|\#*) continue ;;
+    esac
+    if [[ "$line" != *=* ]]; then
+      printf '%s\n' "mneme-agent-hook: invalid config line: $line" >&2
+      exit 2
+    fi
+    key="${line%%=*}"
+    value="${line#*=}"
+    value="$(strip_optional_quotes "$value")"
+    apply_config_value "$key" "$value"
+  done < "$CONFIG_PATH"
 }
 
 mneme_cmd() {
@@ -93,8 +160,15 @@ run_doctor() {
   grep -q '"operation": "end"' "$end_report"
   grep -q '"ok": true' "$end_report"
 
+  if [ "${CONFIG_LOADED:-false}" = true ]; then
+    printf 'mneme-agent-hook: config=%s\n' "$CONFIG_PATH"
+  else
+    printf 'mneme-agent-hook: config=absent\n'
+  fi
   printf '%s\n' "mneme-agent-hook: ok"
 }
+
+load_runtime_config
 
 command="${1:-}"
 case "$command" in

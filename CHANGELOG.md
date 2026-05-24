@@ -4,6 +4,18 @@ This project follows the spirit of Keep a Changelog.
 
 ## Unreleased
 
+## [0.22.0] - 2026-05-24
+
+### Added
+
+- Added agent hook runtime profile loading to `scripts/mneme-agent-hook.sh`.
+- Added `MNEME_AGENT_HOOK_CONFIG` and `MNEME_CONFIG` support for wrapper
+  configuration files.
+- Added a public-safe `examples/mneme-agent-hook.env.example` profile template.
+- Added quality-gate smoke checks for config-driven wrapper doctor/begin/end
+  flows.
+- Added the Phase 16 runtime config and install profile feature spec and docs.
+
 ## [0.21.0] - 2026-05-24
 
 ### Added

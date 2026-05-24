@@ -31,6 +31,8 @@ Mneme is pre-1.0. The useful surface today is local development and evaluation:
 - agent hooks expose a stable JSON envelope for doctor/begin/end automation;
 - `scripts/mneme-agent-hook.sh` provides an environment-configurable local
   wrapper for agent runtimes;
+- agent hook runtime profiles can keep local store, agent, scope, and item-cap
+  settings out of each invocation;
 - extraction and storage are behind adapter boundaries;
 - model-backed extraction experiments can use a provider-neutral command
   adapter without adding API keys to the repo;
@@ -77,6 +79,14 @@ cargo run -p mneme-cli -- begin "Draft setup plan" --query "local-first" --agent
 cargo run -p mneme-cli -- end session-001 --summary "Prepared a concise setup plan" --remember "user prefers concise setup plans" --store "$STORE" --json
 cargo run -p mneme-cli -- hook doctor --store "$STORE"
 cargo run -p mneme-cli -- hook begin "Draft setup plan" --query "local-first" --agent codex --store "$STORE"
+scripts/mneme-agent-hook.sh doctor
+```
+
+Use a local ignored runtime profile when wiring an agent:
+
+```sh
+mkdir -p .mneme
+cp examples/mneme-agent-hook.env.example .mneme/mneme-agent-hook.env
 scripts/mneme-agent-hook.sh doctor
 ```
 
@@ -222,6 +232,7 @@ spec/               feature specs and verification maps
 - [Personal Runtime](docs/personal-runtime.md)
 - [Agent Integration](docs/agent-integration.md)
 - [Agent Hook Contract](docs/agent-hook-contract.md)
+- [Agent Runtime Config](docs/agent-runtime-config.md)
 - [Eval Scenario Format](docs/eval-scenario-format.md)
 - [Eval Acceptance Gate](docs/eval-harness-acceptance.md)
 - [Eval Target Adapter Contract](docs/eval-target-adapter-contract.md)

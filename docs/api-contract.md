@@ -48,7 +48,8 @@ without linking directly to Rust APIs.
 Agent runtimes can use `scripts/mneme-agent-hook.sh` as the repository-local
 installation wrapper. It delegates to an installed `MNEME_BIN`, otherwise runs
 cargo from the repository, and uses a local debug binary only when cargo is
-unavailable.
+unavailable. The wrapper can load runtime profiles from
+`MNEME_AGENT_HOOK_CONFIG`, `MNEME_CONFIG`, or `.mneme/mneme-agent-hook.env`.
 
 Stable behavior remains defined by `docs/v1-stability.md`, public feature
 specs, eval scenarios, and the release quality gate.
