@@ -35,6 +35,8 @@ eval update land in the same PR.
   citations.
 - Agent sessions can begin with scoped context and end with explicit remembered
   claims.
+- Review artifacts summarize store metadata, claim status counts, scope counts,
+  source event IDs, and session summaries without mutating store state.
 - Extraction adapters propose claims; the engine owns IDs, provenance, safety,
   audit, and lifecycle state.
 
@@ -47,8 +49,8 @@ eval update land in the same PR.
 - The `core`, `runtime`, and `agent` suites must pass for `fake` and
   `mneme-v1`.
 - `mneme-cli` supports `doctor`, `remember`, `correct`, `forget`, `claims`,
-  `context`, `snapshot`, `begin`, `end`, `validate`, `export`, `import`,
-  `compact`, `repair`, `version`, and command-specific help.
+  `context`, `snapshot`, `begin`, `end`, `validate`, `export`, `review`,
+  `import`, `compact`, `repair`, `version`, and command-specific help.
 - `mneme hook doctor/begin/end` emit the `mneme.agent_hook.v1` JSON envelope for
   success and failure, with non-zero process exits on failure.
 - `scripts/mneme-agent-hook.sh` provides the repository-local wrapper for agent

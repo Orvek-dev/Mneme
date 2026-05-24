@@ -43,6 +43,13 @@ cargo run -p mneme-cli -- claims --status active --store /tmp/mneme.json --json
 cargo run -p mneme-cli -- forget --claim-id claim-001 --store /tmp/mneme.json
 ```
 
+Export a review artifact when the store needs a durable audit surface:
+
+```sh
+cargo run -p mneme-cli -- review /tmp/mneme-review.md --store /tmp/mneme.json
+cargo run -p mneme-cli -- review /tmp/mneme-review.json --format json --store /tmp/mneme.json
+```
+
 Validate the current store:
 
 ```sh

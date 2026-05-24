@@ -22,6 +22,7 @@ cargo run -p mneme-cli -- remember "user prefers project launch reviews" --scope
 cargo run -p mneme-cli -- correct "user prefers local-first tools" "user prefers desktop IDE"
 cargo run -p mneme-cli -- forget "user prefers desktop IDE"
 cargo run -p mneme-cli -- claims --status active --json
+cargo run -p mneme-cli -- review /tmp/mneme-review.md
 cargo run -p mneme-cli -- context "desktop IDE"
 cargo run -p mneme-cli -- context "project launch" --scope project-alpha --max-items 3
 cargo run -p mneme-cli -- snapshot --json
@@ -78,6 +79,17 @@ cargo run -p mneme-cli -- correct --claim-id claim-002 "user prefers terminal wo
 ```
 
 Unknown or inactive claim IDs fail before writing a lifecycle event.
+
+Use `review` when the inspection output should become a file that can be read
+or attached outside the CLI:
+
+```sh
+cargo run -p mneme-cli -- review /tmp/mneme-review.md --store /tmp/mneme.json
+cargo run -p mneme-cli -- review /tmp/mneme-review.json --format json --store /tmp/mneme.json --json
+```
+
+Markdown artifacts are optimized for human review. JSON artifacts carry the
+same counts and summaries for scripts.
 
 ## Store Maintenance
 

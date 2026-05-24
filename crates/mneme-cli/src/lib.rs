@@ -5,6 +5,7 @@
 //! should prefer `mneme-core` APIs when they need direct engine access; use
 //! [`run_cli`] when the command-line contract is the desired boundary.
 
+use std::collections::BTreeMap;
 use std::env;
 use std::fmt::{Display, Formatter};
 use std::io::{self, Write};
@@ -15,8 +16,8 @@ use mneme_core::{
     ContextPack, ContextQuery, EngineSnapshot, EventInput, ExtractorError, JsonFileStore,
     MnemeConfig, MnemeEngine, MnemeExtractor, MnemeState, MnemeStore, RuleBasedExtractor,
     SessionBeginInput, SessionBeginReport, SessionEndInput, SessionEndReport, SessionError,
-    StateValidationReport, StoreError, StoreErrorKind, StoreFileStatus, StoreInspection,
-    StoreRepairReport, DEFAULT_CONTEXT_MAX_ITEMS, PRODUCT_NAME,
+    SessionRecord, StateValidationReport, StoreError, StoreErrorKind, StoreFileStatus,
+    StoreInspection, StoreRepairReport, DEFAULT_CONTEXT_MAX_ITEMS, PRODUCT_NAME,
 };
 use serde::Serialize;
 
@@ -234,11 +235,12 @@ fn run_cli_with_writer(
         "hook" => run_command_or_help("hook", raw_args, writer, run_agent_hook),
         "validate" => run_command_or_help("validate", raw_args, writer, run_validate_store),
         "export" => run_command_or_help("export", raw_args, writer, run_export),
+        "review" => run_command_or_help("review", raw_args, writer, run_review),
         "import" => run_command_or_help("import", raw_args, writer, run_import),
         "compact" => run_command_or_help("compact", raw_args, writer, run_compact),
         "repair" => run_command_or_help("repair", raw_args, writer, run_repair),
         _ => Err(CliError::invalid_cli(format!(
-            "unknown mneme command: {command}\navailable commands: doctor, version, ingest, remember, correct, forget, claims, context, snapshot, begin, end, hook, validate, export, import, compact, repair"
+            "unknown mneme command: {command}\navailable commands: doctor, version, ingest, remember, correct, forget, claims, context, snapshot, begin, end, hook, validate, export, review, import, compact, repair"
         ))),
     }
 }
@@ -287,7 +289,7 @@ fn print_help(command: Option<&str>, writer: &mut impl Write) -> Result<(), CliE
         None => MNEME_HELP,
         Some(command) => command_help(command).ok_or_else(|| {
             CliError::invalid_cli(format!(
-                "unknown mneme help topic: {command}\navailable help topics: doctor, version, ingest, remember, correct, forget, claims, context, snapshot, begin, end, hook, validate, export, import, compact, repair"
+                "unknown mneme help topic: {command}\navailable help topics: doctor, version, ingest, remember, correct, forget, claims, context, snapshot, begin, end, hook, validate, export, review, import, compact, repair"
             ))
         })?,
     };
@@ -311,6 +313,7 @@ fn command_help(command: &str) -> Option<&'static str> {
         "hook" => Some(MNEME_HOOK_HELP),
         "validate" => Some(MNEME_VALIDATE_HELP),
         "export" => Some(MNEME_EXPORT_HELP),
+        "review" => Some(MNEME_REVIEW_HELP),
         "import" => Some(MNEME_IMPORT_HELP),
         "compact" => Some(MNEME_COMPACT_HELP),
         "repair" => Some(MNEME_REPAIR_HELP),
@@ -339,6 +342,7 @@ Commands:
   hook        Agent hook JSON contract for begin/end automation.
   validate    Inspect the current store and backup.
   export      Export the current store state to JSON.
+  review      Export a human-readable memory review artifact.
   import      Import a store state from JSON.
   compact     Remove inactive claims and unreferenced events.
   repair      Restore the current store from its backup when possible.
@@ -464,6 +468,15 @@ Export the current store state to JSON.
 Example:
   mneme export /tmp/mneme-export.json --store /tmp/mneme.json"#;
 
+const MNEME_REVIEW_HELP: &str = r#"Usage: mneme review <path> [--store <path>] [--format markdown|json] [--json]
+
+Export a memory review artifact summarizing stored claims, lifecycle status,
+scope distribution, source events, sessions, and store metadata.
+
+Examples:
+  mneme review /tmp/mneme-review.md --store /tmp/mneme.json
+  mneme review /tmp/mneme-review.json --format json --store /tmp/mneme.json --json"#;
+
 const MNEME_IMPORT_HELP: &str = r#"Usage: mneme import <path> [--store <path>] [--json]
 
 Import a validated store state from JSON.
@@ -546,6 +559,36 @@ struct ClaimsOptions {
     common: CommonOptions,
     statuses: Vec<ClaimStatus>,
     scopes: Vec<String>,
+}
+
+#[derive(Debug, Clone)]
+struct ReviewOptions {
+    common: CommonOptions,
+    format: ReviewFormat,
+}
+
+impl Default for ReviewOptions {
+    fn default() -> Self {
+        Self {
+            common: CommonOptions::default(),
+            format: ReviewFormat::Markdown,
+        }
+    }
+}
+
+#[derive(Debug, Clone, Copy, Eq, PartialEq)]
+enum ReviewFormat {
+    Markdown,
+    Json,
+}
+
+impl ReviewFormat {
+    const fn as_str(self) -> &'static str {
+        match self {
+            Self::Markdown => "markdown",
+            Self::Json => "json",
+        }
+    }
 }
 
 #[derive(Debug, Clone, Default)]
@@ -636,6 +679,64 @@ struct ClaimsFilterReport {
 struct SnapshotReport {
     store: String,
     snapshot: EngineSnapshot,
+}
+
+#[derive(Debug, Serialize)]
+struct ReviewReport {
+    command: String,
+    store: String,
+    path: String,
+    format: String,
+    schema_version: u32,
+    generation: u64,
+    event_count: usize,
+    claim_count: usize,
+    session_count: usize,
+    active_claim_count: usize,
+    blocked_secret_claim_count: usize,
+    superseded_claim_count: usize,
+    forgotten_claim_count: usize,
+    status_counts: Vec<ClaimStatusCount>,
+    scope_counts: Vec<ClaimScopeCount>,
+    claims: Vec<ClaimSummary>,
+    sessions: Vec<SessionSummary>,
+}
+
+#[derive(Debug, Serialize)]
+struct ClaimStatusCount {
+    status: String,
+    count: usize,
+}
+
+#[derive(Debug, Serialize)]
+struct ClaimScopeCount {
+    scope: String,
+    count: usize,
+}
+
+#[derive(Debug, Serialize)]
+struct SessionSummary {
+    id: String,
+    status: String,
+    task: String,
+    actor_agent_id: Option<String>,
+    context_query: String,
+    context_claim_ids: Vec<String>,
+    memory_event_ids: Vec<String>,
+}
+
+impl From<&SessionRecord> for SessionSummary {
+    fn from(session: &SessionRecord) -> Self {
+        Self {
+            id: session.id.clone(),
+            status: session.status.as_str().to_owned(),
+            task: session.task.clone(),
+            actor_agent_id: session.actor_agent_id.clone(),
+            context_query: session.context_query.clone(),
+            context_claim_ids: session.context_claim_ids.clone(),
+            memory_event_ids: session.memory_event_ids.clone(),
+        }
+    }
 }
 
 #[derive(Debug, Serialize)]
@@ -944,6 +1045,16 @@ fn run_snapshot(raw_args: Vec<String>, writer: &mut impl Write) -> Result<(), Cl
         snapshot: engine.snapshot(),
     };
     emit_snapshot_report(&report, options.json, writer)
+}
+
+fn run_review(raw_args: Vec<String>, writer: &mut impl Write) -> Result<(), CliError> {
+    let (path, options) = parse_review_args(raw_args)?;
+    let store_path = resolve_store_path(&options.common)?;
+    let engine = load_engine(&store_path)?;
+    let snapshot = engine.snapshot();
+    let report = build_review_report(&store_path, &path, options.format, &snapshot);
+    write_review_artifact(&path, &report, options.format)?;
+    emit_review_report(&report, options.common.json, writer)
 }
 
 fn run_begin(raw_args: Vec<String>, writer: &mut impl Write) -> Result<(), CliError> {
@@ -1547,6 +1658,37 @@ fn parse_claims_args(raw_args: Vec<String>) -> Result<ClaimsOptions, CliError> {
     Ok(options)
 }
 
+fn parse_review_args(raw_args: Vec<String>) -> Result<(PathBuf, ReviewOptions), CliError> {
+    let mut options = ReviewOptions::default();
+    let mut positionals = Vec::new();
+    let mut idx = 0;
+    while idx < raw_args.len() {
+        if parse_common_option(&raw_args, &mut idx, &mut options.common)? {
+            idx += 1;
+            continue;
+        }
+        match raw_args[idx].as_str() {
+            "--format" => {
+                idx += 1;
+                options.format = parse_review_format(required_arg(&raw_args, idx, "--format")?)?;
+            }
+            value if value.starts_with('-') => {
+                return Err(CliError::invalid_cli(format!(
+                    "unknown review option: {value}"
+                )));
+            }
+            value => positionals.push(value.to_owned()),
+        }
+        idx += 1;
+    }
+    if positionals.len() != 1 {
+        return Err(CliError::invalid_cli(
+            "usage: mneme review <path> [--store <path>] [--format markdown|json] [--json]",
+        ));
+    }
+    Ok((PathBuf::from(positionals.remove(0)), options))
+}
+
 fn parse_query_args(raw_args: Vec<String>) -> Result<(String, RetrievalOptions), CliError> {
     let mut options = RetrievalOptions::default();
     let mut positionals = Vec::new();
@@ -1680,6 +1822,16 @@ fn parse_claim_status(value: String) -> Result<ClaimStatus, CliError> {
         "forgotten" => Ok(ClaimStatus::Forgotten),
         _ => Err(CliError::invalid_cli(format!(
             "unknown claim status: {value}\navailable statuses: active, blocked_secret, superseded, forgotten"
+        ))),
+    }
+}
+
+fn parse_review_format(value: String) -> Result<ReviewFormat, CliError> {
+    match value.as_str() {
+        "markdown" | "md" => Ok(ReviewFormat::Markdown),
+        "json" => Ok(ReviewFormat::Json),
+        _ => Err(CliError::invalid_cli(format!(
+            "unknown review format: {value}\navailable review formats: markdown, json"
         ))),
     }
 }
@@ -1890,6 +2042,174 @@ fn write_state_json(path: &Path, state: &MnemeState) -> Result<(), CliError> {
     std::fs::write(path, format!("{json}\n")).map_err(|source| CliError::io("write", path, source))
 }
 
+fn build_review_report(
+    store_path: &Path,
+    path: &Path,
+    format: ReviewFormat,
+    snapshot: &EngineSnapshot,
+) -> ReviewReport {
+    let active_claim_count = count_claims_with_status(&snapshot.claims, ClaimStatus::Active);
+    let blocked_secret_claim_count =
+        count_claims_with_status(&snapshot.claims, ClaimStatus::BlockedSecret);
+    let superseded_claim_count =
+        count_claims_with_status(&snapshot.claims, ClaimStatus::Superseded);
+    let forgotten_claim_count = count_claims_with_status(&snapshot.claims, ClaimStatus::Forgotten);
+    let mut scope_counts = BTreeMap::<String, usize>::new();
+    for claim in &snapshot.claims {
+        *scope_counts.entry(claim.scope.clone()).or_default() += 1;
+    }
+    ReviewReport {
+        command: "review".to_owned(),
+        store: store_path.display().to_string(),
+        path: path.display().to_string(),
+        format: format.as_str().to_owned(),
+        schema_version: snapshot.schema_version,
+        generation: snapshot.metadata.generation,
+        event_count: snapshot.events.len(),
+        claim_count: snapshot.claims.len(),
+        session_count: snapshot.sessions.len(),
+        active_claim_count,
+        blocked_secret_claim_count,
+        superseded_claim_count,
+        forgotten_claim_count,
+        status_counts: vec![
+            ClaimStatusCount {
+                status: ClaimStatus::Active.as_str().to_owned(),
+                count: active_claim_count,
+            },
+            ClaimStatusCount {
+                status: ClaimStatus::BlockedSecret.as_str().to_owned(),
+                count: blocked_secret_claim_count,
+            },
+            ClaimStatusCount {
+                status: ClaimStatus::Superseded.as_str().to_owned(),
+                count: superseded_claim_count,
+            },
+            ClaimStatusCount {
+                status: ClaimStatus::Forgotten.as_str().to_owned(),
+                count: forgotten_claim_count,
+            },
+        ],
+        scope_counts: scope_counts
+            .into_iter()
+            .map(|(scope, count)| ClaimScopeCount { scope, count })
+            .collect(),
+        claims: snapshot.claims.iter().map(ClaimSummary::from).collect(),
+        sessions: snapshot.sessions.iter().map(SessionSummary::from).collect(),
+    }
+}
+
+fn count_claims_with_status(claims: &[ClaimRecord], status: ClaimStatus) -> usize {
+    claims.iter().filter(|claim| claim.status == status).count()
+}
+
+fn write_review_artifact(
+    path: &Path,
+    report: &ReviewReport,
+    format: ReviewFormat,
+) -> Result<(), CliError> {
+    if let Some(parent) = path
+        .parent()
+        .filter(|parent| !parent.as_os_str().is_empty())
+    {
+        std::fs::create_dir_all(parent)
+            .map_err(|source| CliError::io("create dir", parent, source))?;
+    }
+    let content = match format {
+        ReviewFormat::Markdown => render_review_markdown(report),
+        ReviewFormat::Json => {
+            let json = serde_json::to_string_pretty(report).map_err(CliError::json)?;
+            format!("{json}\n")
+        }
+    };
+    std::fs::write(path, content).map_err(|source| CliError::io("write", path, source))
+}
+
+fn render_review_markdown(report: &ReviewReport) -> String {
+    let mut output = String::new();
+    output.push_str("# Mneme Memory Review\n\n");
+    output.push_str("## Store\n\n");
+    output.push_str(&format!("- Store: `{}`\n", report.store));
+    output.push_str(&format!("- Schema version: `{}`\n", report.schema_version));
+    output.push_str(&format!("- Generation: `{}`\n", report.generation));
+    output.push_str(&format!("- Events: `{}`\n", report.event_count));
+    output.push_str(&format!("- Claims: `{}`\n", report.claim_count));
+    output.push_str(&format!("- Sessions: `{}`\n", report.session_count));
+
+    output.push_str("\n## Claim Status Counts\n\n");
+    output.push_str("| Status | Count |\n");
+    output.push_str("| --- | ---: |\n");
+    for count in &report.status_counts {
+        output.push_str(&format!(
+            "| `{}` | {} |\n",
+            escape_markdown_cell(&count.status),
+            count.count
+        ));
+    }
+
+    output.push_str("\n## Scope Counts\n\n");
+    if report.scope_counts.is_empty() {
+        output.push_str("_No claim scopes recorded._\n");
+    } else {
+        output.push_str("| Scope | Count |\n");
+        output.push_str("| --- | ---: |\n");
+        for count in &report.scope_counts {
+            output.push_str(&format!(
+                "| `{}` | {} |\n",
+                escape_markdown_cell(&count.scope),
+                count.count
+            ));
+        }
+    }
+
+    output.push_str("\n## Claims\n\n");
+    if report.claims.is_empty() {
+        output.push_str("_No claims stored._\n");
+    } else {
+        output.push_str("| ID | Status | Scope | Claim | Sources |\n");
+        output.push_str("| --- | --- | --- | --- | --- |\n");
+        for claim in &report.claims {
+            let text = format!("{} {} {}", claim.subject, claim.predicate, claim.object);
+            output.push_str(&format!(
+                "| `{}` | `{}` | `{}` | {} | {} |\n",
+                escape_markdown_cell(&claim.id),
+                escape_markdown_cell(&claim.status),
+                escape_markdown_cell(&claim.scope),
+                escape_markdown_cell(&text),
+                escape_markdown_cell(&claim.source_event_ids.join(", "))
+            ));
+        }
+    }
+
+    output.push_str("\n## Sessions\n\n");
+    if report.sessions.is_empty() {
+        output.push_str("_No sessions recorded._\n");
+    } else {
+        output.push_str("| ID | Status | Task | Query | Context Claims | Memory Events |\n");
+        output.push_str("| --- | --- | --- | --- | --- | --- |\n");
+        for session in &report.sessions {
+            output.push_str(&format!(
+                "| `{}` | `{}` | {} | {} | {} | {} |\n",
+                escape_markdown_cell(&session.id),
+                escape_markdown_cell(&session.status),
+                escape_markdown_cell(&session.task),
+                escape_markdown_cell(&session.context_query),
+                escape_markdown_cell(&session.context_claim_ids.join(", ")),
+                escape_markdown_cell(&session.memory_event_ids.join(", "))
+            ));
+        }
+    }
+
+    output
+}
+
+fn escape_markdown_cell(value: &str) -> String {
+    value
+        .replace('\\', "\\\\")
+        .replace('|', "\\|")
+        .replace('\n', " ")
+}
+
 fn emit_event_report(
     report: &EventCommandReport,
     json: bool,
@@ -1980,6 +2300,27 @@ fn emit_snapshot_report(
         report.snapshot.events.len(),
         report.snapshot.claims.len(),
         report.snapshot.audit.len()
+    )
+    .map_err(|source| CliError::io("write", Path::new("<stdout>"), source))
+}
+
+fn emit_review_report(
+    report: &ReviewReport,
+    json: bool,
+    writer: &mut impl Write,
+) -> Result<(), CliError> {
+    if json {
+        return write_json(writer, report);
+    }
+    writeln!(
+        writer,
+        "mneme: review exported {} to {} (format={}, claims={}, active={}, sessions={})",
+        report.store,
+        report.path,
+        report.format,
+        report.claim_count,
+        report.active_claim_count,
+        report.session_count
     )
     .map_err(|source| CliError::io("write", Path::new("<stdout>"), source))
 }
@@ -2156,6 +2497,7 @@ mod tests {
         assert!(text.contains("mneme help begin"));
         assert!(text.contains("hook"));
         assert!(text.contains("claims"));
+        assert!(text.contains("review"));
 
         let mut command_output = Vec::new();
         run_cli_with_writer(
@@ -2176,6 +2518,15 @@ mod tests {
         assert!(hook_text.contains("mneme hook doctor"));
         assert!(hook_text.contains("mneme hook begin"));
         assert!(hook_text.contains("mneme.agent_hook.v1"));
+
+        let mut review_output = Vec::new();
+        run_cli_with_writer(
+            vec!["mneme".to_owned(), "review".to_owned(), "--help".to_owned()],
+            &mut review_output,
+        )?;
+        let review_text = String::from_utf8(review_output)?;
+        assert!(review_text.contains("Usage: mneme review <path>"));
+        assert!(review_text.contains("--format markdown|json"));
         Ok(())
     }
 
@@ -2494,6 +2845,146 @@ mod tests {
         assert!(error.to_string().contains("only active claims"));
 
         let _ = std::fs::remove_file(&path);
+        Ok(())
+    }
+
+    #[test]
+    fn review_exports_markdown_and_json_artifacts() -> Result<(), Box<dyn std::error::Error>> {
+        let path = temp_store_path("review-artifact-store");
+        let markdown_path = temp_store_path("review-artifact").with_extension("md");
+        let json_path = temp_store_path("review-artifact").with_extension("review.json");
+        for path in [&path, &markdown_path, &json_path] {
+            let _ = std::fs::remove_file(path);
+            let _ = std::fs::remove_file(format!("{}.bak", path.display()));
+        }
+
+        run_cli_with_writer(
+            vec![
+                "mneme".to_owned(),
+                "remember".to_owned(),
+                "user prefers local-first tools".to_owned(),
+                "--store".to_owned(),
+                path.display().to_string(),
+            ],
+            &mut Vec::new(),
+        )?;
+        run_cli_with_writer(
+            vec![
+                "mneme".to_owned(),
+                "remember".to_owned(),
+                "user prefers project launch reviews".to_owned(),
+                "--scope".to_owned(),
+                "project-alpha".to_owned(),
+                "--store".to_owned(),
+                path.display().to_string(),
+            ],
+            &mut Vec::new(),
+        )?;
+        run_cli_with_writer(
+            vec![
+                "mneme".to_owned(),
+                "correct".to_owned(),
+                "--claim-id".to_owned(),
+                "claim-001".to_owned(),
+                "user prefers terminal workflows".to_owned(),
+                "--store".to_owned(),
+                path.display().to_string(),
+            ],
+            &mut Vec::new(),
+        )?;
+        run_cli_with_writer(
+            vec![
+                "mneme".to_owned(),
+                "forget".to_owned(),
+                "--claim-id".to_owned(),
+                "claim-003".to_owned(),
+                "--store".to_owned(),
+                path.display().to_string(),
+            ],
+            &mut Vec::new(),
+        )?;
+        run_cli_with_writer(
+            vec![
+                "mneme".to_owned(),
+                "remember".to_owned(),
+                "user token API_KEY=FAKE_TEST_VALUE".to_owned(),
+                "--store".to_owned(),
+                path.display().to_string(),
+            ],
+            &mut Vec::new(),
+        )?;
+        run_cli_with_writer(
+            vec![
+                "mneme".to_owned(),
+                "begin".to_owned(),
+                "Draft launch review".to_owned(),
+                "--query".to_owned(),
+                "project launch".to_owned(),
+                "--scope".to_owned(),
+                "project-alpha".to_owned(),
+                "--agent".to_owned(),
+                "codex".to_owned(),
+                "--store".to_owned(),
+                path.display().to_string(),
+            ],
+            &mut Vec::new(),
+        )?;
+
+        let mut markdown_stdout = Vec::new();
+        run_cli_with_writer(
+            vec![
+                "mneme".to_owned(),
+                "review".to_owned(),
+                markdown_path.display().to_string(),
+                "--store".to_owned(),
+                path.display().to_string(),
+                "--json".to_owned(),
+            ],
+            &mut markdown_stdout,
+        )?;
+        let markdown_report = String::from_utf8(markdown_stdout)?;
+        assert!(markdown_report.contains("\"command\": \"review\""));
+        assert!(markdown_report.contains("\"format\": \"markdown\""));
+        assert!(markdown_report.contains("\"blocked_secret_claim_count\": 1"));
+
+        let markdown = std::fs::read_to_string(&markdown_path)?;
+        assert!(markdown.contains("# Mneme Memory Review"));
+        assert!(markdown.contains("Claim Status Counts"));
+        assert!(markdown.contains("claim-001"));
+        assert!(markdown.contains("superseded"));
+        assert!(markdown.contains("forgotten"));
+        assert!(markdown.contains("blocked_secret"));
+        assert!(markdown.contains("project-alpha"));
+        assert!(markdown.contains("event-001"));
+        assert!(markdown.contains("session-001"));
+
+        let mut json_stdout = Vec::new();
+        run_cli_with_writer(
+            vec![
+                "mneme".to_owned(),
+                "review".to_owned(),
+                json_path.display().to_string(),
+                "--format".to_owned(),
+                "json".to_owned(),
+                "--store".to_owned(),
+                path.display().to_string(),
+                "--json".to_owned(),
+            ],
+            &mut json_stdout,
+        )?;
+        let stdout_text = String::from_utf8(json_stdout)?;
+        assert!(stdout_text.contains("\"format\": \"json\""));
+
+        let json = std::fs::read_to_string(&json_path)?;
+        assert!(json.contains("\"format\": \"json\""));
+        assert!(json.contains("\"scope\": \"project-alpha\""));
+        assert!(json.contains("\"blocked_secret_claim_count\": 1"));
+        assert!(json.contains("\"session_count\": 1"));
+
+        for path in [&path, &markdown_path, &json_path] {
+            let _ = std::fs::remove_file(path);
+            let _ = std::fs::remove_file(format!("{}.bak", path.display()));
+        }
         Ok(())
     }
 
