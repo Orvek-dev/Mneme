@@ -31,6 +31,8 @@ eval update land in the same PR.
   required fields, missing claim source events, invalid budgets, and empty
   audit targets.
 - Store repair can restore an invalid current store from a valid backup.
+- Store repair can normalize compatible legacy schema metadata while preserving
+  the previous file as backup.
 - Compaction removes inactive claims while preserving active claim recall and
   citations.
 - Agent sessions can begin with scoped context and end with explicit remembered
@@ -59,6 +61,8 @@ eval update land in the same PR.
 - `mneme doctor` reports local workspace health for the store, backup, and
   agent hook profile without mutating files; `--json` exposes the same report
   for scripts.
+- `mneme repair --check` reports repair or normalization readiness without
+  mutating files.
 - `mneme hook doctor/begin/end` emit the `mneme.agent_hook.v1` JSON envelope for
   success and failure, with non-zero process exits on failure.
 - `scripts/mneme-agent-hook.sh` provides the repository-local wrapper for agent

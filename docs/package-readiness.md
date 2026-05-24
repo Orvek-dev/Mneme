@@ -66,8 +66,9 @@ mneme doctor --json
 The full quality gate installs into a temporary root with `--debug` and smokes
 the installed binary before release. It also checks `mneme doctor --json`
 before and after workspace initialization, validates invalid-profile and
-invalid-store doctor reports, and verifies the generated agent hook profile
-through `scripts/mneme-agent-hook.sh`.
+invalid-store doctor reports, checks `mneme repair --check` for valid and
+repairable stores, and verifies the generated agent hook profile through
+`scripts/mneme-agent-hook.sh`.
 
 ## Publication Policy
 
