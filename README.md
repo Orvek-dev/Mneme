@@ -35,6 +35,8 @@ Mneme is pre-1.0. The useful surface today is local development and evaluation:
 
 See [docs/v1-stability.md](docs/v1-stability.md) for the current stability
 contract.
+See [docs/api-contract.md](docs/api-contract.md) for the current Rust API
+surface and documentation gate.
 
 For a step-by-step first run, see [Getting Started](docs/getting-started.md).
 
@@ -167,6 +169,12 @@ Check package assembly directly:
 ./scripts/package-check.sh
 ```
 
+Build API docs with warnings denied:
+
+```sh
+RUSTDOCFLAGS="-D warnings" cargo doc --workspace --no-deps
+```
+
 Generated eval reports and local stores are ignored. Public scenarios under
 `evals/scenarios/` are tracked.
 
@@ -189,6 +197,7 @@ spec/               feature specs and verification maps
 
 - [Local CLI](docs/local-cli.md)
 - [Getting Started](docs/getting-started.md)
+- [API Contract](docs/api-contract.md)
 - [Personal Runtime](docs/personal-runtime.md)
 - [Agent Integration](docs/agent-integration.md)
 - [Eval Scenario Format](docs/eval-scenario-format.md)

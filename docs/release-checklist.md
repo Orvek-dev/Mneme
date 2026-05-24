@@ -16,6 +16,12 @@ For package-specific inspection, run:
 ./scripts/package-check.sh
 ```
 
+For API documentation inspection, run:
+
+```sh
+RUSTDOCFLAGS="-D warnings" cargo doc --workspace --no-deps
+```
+
 Run a local CLI smoke check with an isolated store:
 
 ```sh
@@ -38,6 +44,7 @@ Before pushing a release tag, confirm:
   release is intentionally being prepared;
 - `CHANGELOG.md` describes the release-relevant changes;
 - README commands still match the actual CLI and eval behavior.
+- Rustdoc builds cleanly when public API docs or examples changed.
 
 The quality gate runs `scripts/public-safety-check.sh`, but release owners
 should still inspect unusual new files before tagging.

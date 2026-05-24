@@ -111,9 +111,16 @@ Before opening a phase-sized PR:
 ./scripts/quality-gate.sh full
 ```
 
-That gate runs formatting, clippy, tests, CLI smoke checks, eval suites,
-dry-run provider baseline checks, public-safety checks, and package assembly
-checks.
+That gate runs formatting, clippy, tests, Rustdoc with warnings denied, CLI
+smoke checks, eval suites, dry-run provider baseline checks, public-safety
+checks, and package assembly checks.
+
+For API-level work, inspect the current contract and docs locally:
+
+```sh
+cargo run -p mneme-core --example personal_memory
+RUSTDOCFLAGS="-D warnings" cargo doc --workspace --no-deps
+```
 
 ## Public Repository Rules
 

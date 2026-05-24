@@ -12,6 +12,7 @@ echo "quality-gate: mode=${MODE}"
 cargo fmt --all --check
 cargo clippy --workspace --all-targets -- -D warnings
 cargo test --workspace --all-targets
+RUSTDOCFLAGS="-D warnings" cargo doc --workspace --no-deps
 
 cargo run -p mneme-cli -- doctor
 cargo run -p mneme-eval -- doctor
