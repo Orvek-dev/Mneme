@@ -18,38 +18,7 @@ jobs:
           rustup toolchain install stable --profile minimal --component rustfmt,clippy
           rustup default stable
       - name: Verify
-        run: |
-          cargo fmt --all --check
-          cargo clippy --workspace --all-targets -- -D warnings
-          cargo test --workspace --all-targets
-          cargo run -p mneme-cli -- doctor
-          cargo run -p mneme-eval -- doctor
-          STORE="${RUNNER_TEMP}/mneme-cli-release-smoke.json"
-          cargo run -p mneme-cli -- remember "user prefers local-first tools" --store "${STORE}"
-          cargo run -p mneme-cli -- context "local-first" --store "${STORE}" --json | grep -q "local-first tools"
-          COMMAND_STORE="${RUNNER_TEMP}/mneme-command-extractor-release-smoke.json"
-          RESPONSE='{"schema_version":"mneme.extractor.command.v1","claim":{"subject":"user","predicate":"prefers","object":"command-backed extraction"}}'
-          cargo run -p mneme-cli -- ingest "the user likes model-backed extraction" \
-            --extractor command \
-            --extractor-command /bin/sh \
-            --extractor-arg -c \
-            --extractor-arg "cat >/dev/null; printf '%s\n' '${RESPONSE}'" \
-            --store "${COMMAND_STORE}"
-          cargo run -p mneme-cli -- context "command-backed" --store "${COMMAND_STORE}" --json | grep -q "command-backed extraction"
-          cargo run -p mneme-eval -- validate --suite core
-          cargo run -p mneme-eval -- validate --suite model
-          cargo run -p mneme-eval -- run --suite core --target fake
-          cargo run -p mneme-eval -- run --suite core --target mneme-v1
-          cargo run -p mneme-eval -- run --suite model --target mneme-v1-command --extractor-command evals/fixtures/command-extractor.sh
-          MNEME_OPENAI_DRY_RUN=1 cargo run -p mneme-eval -- run --suite model --target mneme-v1-command --extractor-command wrappers/openai_extractor.py
-          cargo run -p mneme-eval -- acceptance --suite core --target fake
-          cargo run -p mneme-eval -- acceptance --suite core --target mneme-v1
-          cargo run -p mneme-eval -- acceptance --suite model --target mneme-v1-command --extractor-command evals/fixtures/command-extractor.sh
-          MNEME_OPENAI_DRY_RUN=1 cargo run -p mneme-eval -- acceptance --suite model --target mneme-v1-command --extractor-command wrappers/openai_extractor.py
-          MNEME_OPENAI_DRY_RUN=1 cargo run -p mneme-eval -- baseline --suite model --target mneme-v1-command --extractor-command wrappers/openai_extractor.py --iterations 2 --provider-label openai --model-label dry-run --run-label release-dry-run --json | tee "${RUNNER_TEMP}/mneme-openai-release-baseline.json"
-          grep -q '"provider_label": "openai"' "${RUNNER_TEMP}/mneme-openai-release-baseline.json"
-          grep -q '"model_label": "dry-run"' "${RUNNER_TEMP}/mneme-openai-release-baseline.json"
-          grep -q '"failed_scenario_runs": 0' "${RUNNER_TEMP}/mneme-openai-release-baseline.json"
+        run: ./scripts/quality-gate.sh release
       - name: Create GitHub release
         env:
           GH_TOKEN: ${{ github.token }}

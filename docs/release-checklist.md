@@ -7,19 +7,7 @@ Mneme releases should be cut only from `main` after CI has passed.
 Run the same checks locally before creating a tag:
 
 ```sh
-cargo fmt --all --check
-cargo clippy --workspace --all-targets -- -D warnings
-cargo test --workspace --all-targets
-cargo run -p mneme-cli -- doctor
-cargo run -p mneme-eval -- doctor
-cargo run -p mneme-eval -- validate --suite core
-cargo run -p mneme-eval -- validate --suite model
-cargo run -p mneme-eval -- run --suite core --target fake
-cargo run -p mneme-eval -- run --suite core --target mneme-v1
-cargo run -p mneme-eval -- run --suite model --target mneme-v1-command --extractor-command evals/fixtures/command-extractor.sh
-cargo run -p mneme-eval -- acceptance --suite core --target fake
-cargo run -p mneme-eval -- acceptance --suite core --target mneme-v1
-cargo run -p mneme-eval -- acceptance --suite model --target mneme-v1-command --extractor-command evals/fixtures/command-extractor.sh
+./scripts/quality-gate.sh release
 ```
 
 Run a local CLI smoke check with an isolated store:
@@ -43,6 +31,9 @@ Before pushing a release tag, confirm:
 - `CHANGELOG.md` describes the release-relevant changes;
 - README commands still match the actual CLI and eval behavior.
 
+The quality gate runs `scripts/public-safety-check.sh`, but release owners
+should still inspect unusual new files before tagging.
+
 ## Tagging
 
 Create annotated tags from `main`:
@@ -58,6 +49,10 @@ The release workflow verifies the workspace again. Release publication requires
 the workflow-scoped `GITHUB_TOKEN` to have `contents: write` permission. The
 workflow requests that permission explicitly and marks `v0.x` tags as GitHub
 prereleases.
+
+CI runs on pull requests and `main` pushes only. Feature branch pushes are
+intentionally not full CI triggers; run `scripts/quality-gate.sh` locally before
+opening one phase-sized PR.
 
 After the workflow completes, verify the public release:
 

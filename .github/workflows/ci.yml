@@ -2,17 +2,22 @@ name: CI
 
 on:
   pull_request:
+    branches:
+      - main
   push:
     branches:
       - main
-      - "codex/**"
-      - "phase/**"
+  workflow_dispatch:
+
+concurrency:
+  group: ${{ github.workflow }}-${{ github.event.pull_request.number || github.ref }}
+  cancel-in-progress: true
 
 permissions:
   contents: read
 
 jobs:
-  rust:
+  quality-gate:
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v5
@@ -20,108 +25,5 @@ jobs:
         run: |
           rustup toolchain install stable --profile minimal --component rustfmt,clippy
           rustup default stable
-      - name: Format
-        run: cargo fmt --all --check
-      - name: Clippy
-        run: cargo clippy --workspace --all-targets -- -D warnings
-      - name: Test
-        run: cargo test --workspace --all-targets
-      - name: Eval harness doctor
-        run: cargo run -p mneme-eval -- doctor
-      - name: Local CLI doctor
-        run: cargo run -p mneme-cli -- doctor
-      - name: Local CLI smoke
-        run: |
-          STORE="${RUNNER_TEMP}/mneme-cli-smoke.json"
-          cargo run -p mneme-cli -- remember "user prefers local-first tools" --store "${STORE}"
-          cargo run -p mneme-cli -- context "local-first" --store "${STORE}" --json | tee "${RUNNER_TEMP}/mneme-cli-context.json"
-          grep -q "local-first tools" "${RUNNER_TEMP}/mneme-cli-context.json"
-      - name: Command extractor smoke
-        run: |
-          STORE="${RUNNER_TEMP}/mneme-command-extractor-smoke.json"
-          RESPONSE='{"schema_version":"mneme.extractor.command.v1","claim":{"subject":"user","predicate":"prefers","object":"command-backed extraction"}}'
-          cargo run -p mneme-cli -- ingest "the user likes model-backed extraction" \
-            --extractor command \
-            --extractor-command /bin/sh \
-            --extractor-arg -c \
-            --extractor-arg "cat >/dev/null; printf '%s\n' '${RESPONSE}'" \
-            --store "${STORE}" \
-            --json | tee "${RUNNER_TEMP}/mneme-command-extractor-ingest.json"
-          grep -q '"extractor": "command"' "${RUNNER_TEMP}/mneme-command-extractor-ingest.json"
-          cargo run -p mneme-cli -- context "command-backed" --store "${STORE}" --json | tee "${RUNNER_TEMP}/mneme-command-extractor-context.json"
-          grep -q "command-backed extraction" "${RUNNER_TEMP}/mneme-command-extractor-context.json"
-      - name: Eval scenario validation
-        run: cargo run -p mneme-eval -- validate --suite core
-      - name: Eval model suite validation
-        run: cargo run -p mneme-eval -- validate --suite model
-      - name: Eval invalid fixture check
-        run: |
-          for scenario in evals/fixtures/invalid/*.yaml; do
-            if cargo run -p mneme-eval -- validate "$scenario"; then
-              echo "invalid scenario unexpectedly passed validation: $scenario"
-              exit 1
-            fi
-          done
-      - name: Eval core suite
-        run: cargo run -p mneme-eval -- run --suite core --target fake
-      - name: Eval Mneme v1 core suite
-        run: cargo run -p mneme-eval -- run --suite core --target mneme-v1
-      - name: Eval command extractor model suite
-        run: |
-          cargo run -p mneme-eval -- run --suite model \
-            --target mneme-v1-command \
-            --extractor-command evals/fixtures/command-extractor.sh \
-            --json | tee "${RUNNER_TEMP}/mneme-model-suite.json"
-          grep -q '"target": "mneme-v1-command"' "${RUNNER_TEMP}/mneme-model-suite.json"
-          grep -q '"protocol": "mneme.extractor.command.v1"' "${RUNNER_TEMP}/mneme-model-suite.json"
-      - name: OpenAI wrapper dry-run model suite
-        env:
-          MNEME_OPENAI_DRY_RUN: "1"
-        run: |
-          cargo run -p mneme-eval -- run --suite model \
-            --target mneme-v1-command \
-            --extractor-command wrappers/openai_extractor.py \
-            --json | tee "${RUNNER_TEMP}/mneme-openai-wrapper-suite.json"
-          grep -q '"target": "mneme-v1-command"' "${RUNNER_TEMP}/mneme-openai-wrapper-suite.json"
-          grep -q '"protocol": "mneme.extractor.command.v1"' "${RUNNER_TEMP}/mneme-openai-wrapper-suite.json"
-      - name: Eval seeded fault check
-        run: |
-          if cargo run -p mneme-eval -- run --suite core --target fake --seeded-fault skip-claims; then
-            echo "seeded fault unexpectedly passed"
-            exit 1
-          fi
-      - name: Eval acceptance gate
-        run: cargo run -p mneme-eval -- acceptance --suite core --target fake
-      - name: Eval Mneme v1 acceptance gate
-        run: cargo run -p mneme-eval -- acceptance --suite core --target mneme-v1
-      - name: Eval command extractor model acceptance gate
-        run: |
-          cargo run -p mneme-eval -- acceptance --suite model \
-            --target mneme-v1-command \
-            --extractor-command evals/fixtures/command-extractor.sh
-      - name: OpenAI wrapper dry-run model acceptance gate
-        env:
-          MNEME_OPENAI_DRY_RUN: "1"
-        run: |
-          cargo run -p mneme-eval -- acceptance --suite model \
-            --target mneme-v1-command \
-            --extractor-command wrappers/openai_extractor.py
-      - name: OpenAI wrapper dry-run baseline
-        env:
-          MNEME_OPENAI_DRY_RUN: "1"
-        run: |
-          cargo run -p mneme-eval -- baseline --suite model \
-            --target mneme-v1-command \
-            --extractor-command wrappers/openai_extractor.py \
-            --iterations 2 \
-            --provider-label openai \
-            --model-label dry-run \
-            --run-label ci-dry-run \
-            --json | tee "${RUNNER_TEMP}/mneme-openai-wrapper-baseline.json"
-          grep -q '"iterations": 2' "${RUNNER_TEMP}/mneme-openai-wrapper-baseline.json"
-          grep -q '"provider_label": "openai"' "${RUNNER_TEMP}/mneme-openai-wrapper-baseline.json"
-          grep -q '"model_label": "dry-run"' "${RUNNER_TEMP}/mneme-openai-wrapper-baseline.json"
-          grep -q '"scenario_count": 8' "${RUNNER_TEMP}/mneme-openai-wrapper-baseline.json"
-          grep -q '"category": "no-claim"' "${RUNNER_TEMP}/mneme-openai-wrapper-baseline.json"
-          grep -q '"passed_iterations": 2' "${RUNNER_TEMP}/mneme-openai-wrapper-baseline.json"
-          grep -q '"failed_scenario_runs": 0' "${RUNNER_TEMP}/mneme-openai-wrapper-baseline.json"
+      - name: Quality gate
+        run: ./scripts/quality-gate.sh ci
