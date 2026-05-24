@@ -46,6 +46,12 @@ MNEME_OPENAI_DRY_RUN=1 cargo run -p mneme-eval -- baseline --suite model \
   --json
 ```
 
+Gate the saved baseline report before treating it as usable:
+
+```sh
+cargo run -p mneme-eval -- baseline-gate evals/reports/openai-dry-run-baseline.json
+```
+
 ## Live Local Use
 
 Keep credentials in the local shell or an untracked `.env` file:

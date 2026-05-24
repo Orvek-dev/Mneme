@@ -1,4 +1,4 @@
-use serde::Serialize;
+use serde::{Deserialize, Serialize};
 use std::collections::BTreeMap;
 
 use crate::target::EvalTargetMetadata;
@@ -17,7 +17,7 @@ pub(crate) struct EvalReport {
     pub(crate) results: Vec<ScenarioReport>,
 }
 
-#[derive(Debug, Clone, Serialize)]
+#[derive(Debug, Clone, Deserialize, Serialize)]
 pub(crate) struct BaselineReport {
     pub(crate) report_schema_version: u32,
     pub(crate) suite: String,
@@ -35,6 +35,8 @@ pub(crate) struct BaselineReport {
     pub(crate) pass_rate: f64,
     pub(crate) category_pass_rates: Vec<BaselineCategorySummary>,
     pub(crate) scenario_pass_rates: Vec<BaselineScenarioSummary>,
+    #[serde(default)]
+    pub(crate) failure_summary: BaselineFailureSummary,
     pub(crate) runs: Vec<BaselineRunReport>,
 }
 
@@ -59,7 +61,12 @@ impl BaselineReport {
         let scenario_pass_rates = scenarios
             .iter()
             .map(|scenario| BaselineScenarioSummary::from_runs(&scenario.id, &runs))
-            .collect();
+            .collect::<Vec<_>>();
+        let failure_summary = BaselineFailureSummary::from_report_parts(
+            &category_pass_rates,
+            &scenario_pass_rates,
+            &runs,
+        );
         Self {
             report_schema_version: REPORT_SCHEMA_VERSION,
             suite: suite.into(),
@@ -77,12 +84,13 @@ impl BaselineReport {
             pass_rate,
             category_pass_rates,
             scenario_pass_rates,
+            failure_summary,
             runs,
         }
     }
 }
 
-#[derive(Debug, Clone, Default, Serialize)]
+#[derive(Debug, Clone, Default, Deserialize, Serialize)]
 pub(crate) struct BaselineMetadata {
     pub(crate) live_provider: bool,
     #[serde(skip_serializing_if = "Option::is_none")]
@@ -124,7 +132,7 @@ impl BaselineScenarioMetadata {
     }
 }
 
-#[derive(Debug, Clone, Serialize)]
+#[derive(Debug, Clone, Deserialize, Serialize)]
 pub(crate) struct BaselineCategorySummary {
     pub(crate) category: String,
     pub(crate) scenario_count: usize,
@@ -134,7 +142,7 @@ pub(crate) struct BaselineCategorySummary {
     pub(crate) pass_rate: f64,
 }
 
-#[derive(Debug, Clone, Serialize)]
+#[derive(Debug, Clone, Deserialize, Serialize)]
 pub(crate) struct BaselineScenarioSummary {
     pub(crate) scenario_id: String,
     pub(crate) attempts: usize,
@@ -165,7 +173,70 @@ impl BaselineScenarioSummary {
     }
 }
 
-#[derive(Debug, Clone, Serialize)]
+#[derive(Debug, Clone, Default, Deserialize, Serialize)]
+pub(crate) struct BaselineFailureSummary {
+    pub(crate) failed_categories: Vec<BaselineCategorySummary>,
+    pub(crate) failed_scenarios: Vec<BaselineScenarioSummary>,
+    pub(crate) failed_checks: Vec<BaselineFailedCheckSummary>,
+}
+
+impl BaselineFailureSummary {
+    fn from_report_parts(
+        categories: &[BaselineCategorySummary],
+        scenarios: &[BaselineScenarioSummary],
+        runs: &[BaselineRunReport],
+    ) -> Self {
+        let failed_categories = categories
+            .iter()
+            .filter(|category| category.failed > 0)
+            .cloned()
+            .collect();
+        let failed_scenarios = scenarios
+            .iter()
+            .filter(|scenario| scenario.failed > 0)
+            .cloned()
+            .collect();
+        let failed_checks = failed_check_counts(runs);
+        Self {
+            failed_categories,
+            failed_scenarios,
+            failed_checks,
+        }
+    }
+}
+
+#[derive(Debug, Clone, Deserialize, Serialize)]
+pub(crate) struct BaselineFailedCheckSummary {
+    pub(crate) check: String,
+    pub(crate) count: usize,
+}
+
+fn failed_check_counts(runs: &[BaselineRunReport]) -> Vec<BaselineFailedCheckSummary> {
+    let mut counts: BTreeMap<String, usize> = BTreeMap::new();
+    for run in runs {
+        if run.error.is_some() {
+            *counts.entry("run.error".to_owned()).or_default() += 1;
+        }
+        for result in &run.results {
+            if result.ok {
+                continue;
+            }
+            if result.failed_checks.is_empty() {
+                *counts.entry("scenario.failed".to_owned()).or_default() += 1;
+            } else {
+                for check in &result.failed_checks {
+                    *counts.entry(check.clone()).or_default() += 1;
+                }
+            }
+        }
+    }
+    counts
+        .into_iter()
+        .map(|(check, count)| BaselineFailedCheckSummary { check, count })
+        .collect()
+}
+
+#[derive(Debug, Clone, Deserialize, Serialize)]
 pub(crate) struct BaselineRunReport {
     pub(crate) iteration: usize,
     pub(crate) ok: bool,
@@ -216,11 +287,11 @@ impl BaselineRunReport {
     }
 }
 
-#[derive(Debug, Clone, Serialize)]
+#[derive(Debug, Clone, Deserialize, Serialize)]
 pub(crate) struct BaselineScenarioRunReport {
     pub(crate) scenario_id: String,
     pub(crate) ok: bool,
-    #[serde(skip_serializing_if = "Vec::is_empty")]
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
     pub(crate) failed_checks: Vec<String>,
 }
 
@@ -616,6 +687,19 @@ mod tests {
         assert_eq!(json["category_pass_rates"][0]["category"], "recall");
         assert_eq!(json["category_pass_rates"][0]["pass_rate"], 0.5);
         assert_eq!(json["scenario_pass_rates"][0]["scenario_id"], "scenario-a");
+        assert_eq!(
+            json["failure_summary"]["failed_categories"][0]["category"],
+            "recall"
+        );
+        assert_eq!(
+            json["failure_summary"]["failed_scenarios"][0]["scenario_id"],
+            "scenario-a"
+        );
+        assert_eq!(
+            json["failure_summary"]["failed_checks"][0]["check"],
+            "check"
+        );
+        assert_eq!(json["failure_summary"]["failed_checks"][0]["count"], 1);
         assert_eq!(json["runs"][1]["results"][0]["failed_checks"][0], "check");
         Ok(())
     }

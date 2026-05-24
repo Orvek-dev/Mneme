@@ -124,6 +124,11 @@ MNEME_OPENAI_DRY_RUN=1 cargo run -p mneme-eval -- baseline --suite model \
 ```
 
 Baseline JSON includes aggregate, category-level, and per-scenario pass rates.
+Gate a saved baseline report before treating it as usable:
+
+```sh
+cargo run -p mneme-eval -- baseline-gate evals/reports/openai-dry-run-baseline.json
+```
 
 Run the acceptance gate:
 

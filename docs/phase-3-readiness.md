@@ -64,3 +64,7 @@ storage scaffolding.
 
 Phase 4 shipped the **Agent Integration MVP** in `v0.10.0`, adding begin/end
 sessions, session audit, and an agent eval suite.
+
+Phase 5 shipped the **Live Provider Quality Gate MVP** in `v0.11.0`, adding a
+strict baseline-gate command and failure summaries for local provider quality
+analysis.
