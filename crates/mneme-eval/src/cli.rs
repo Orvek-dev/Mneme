@@ -7,14 +7,17 @@ use serde::Serialize;
 
 use crate::error::EvalError;
 use crate::report::{
-    AcceptanceGateReport, AcceptanceReport, EvalReport, ScenarioReport, ScenarioValidationReport,
-    ValidationReport,
+    AcceptanceGateReport, AcceptanceReport, BaselineReport, BaselineRunReport, EvalReport,
+    ScenarioReport, ScenarioValidationReport, ValidationReport,
 };
 use crate::runtime::replay_scenario;
 use crate::scenario::load_scenario;
 use crate::target::{
     build_target, CommandExtractorOptions, FaultMode, TargetKind, TargetRunOptions,
 };
+
+const DEFAULT_BASELINE_ITERATIONS: usize = 3;
+const MAX_BASELINE_ITERATIONS: usize = 100;
 
 /// Runs the Mneme eval harness command-line interface.
 pub fn run_cli(args: impl IntoIterator<Item = String>) -> Result<(), EvalError> {
@@ -35,10 +38,11 @@ pub fn run_cli(args: impl IntoIterator<Item = String>) -> Result<(), EvalError> 
         }
         "validate" => run_validate(args.collect()),
         "acceptance" => run_acceptance(args.collect()),
+        "baseline" => run_baseline(args.collect()),
         "replay" => run_replay(args.collect()),
         "run" => run_suite(args.collect()),
         _ => Err(EvalError::invalid_cli(format!(
-            "unknown mneme-eval command: {command}\navailable commands: doctor, version, validate, acceptance, replay, run"
+            "unknown mneme-eval command: {command}\navailable commands: doctor, version, validate, acceptance, baseline, replay, run"
         ))),
     }
 }
@@ -59,6 +63,7 @@ struct CommandOptions {
     fault_mode: FaultMode,
     extractor_command: Option<String>,
     extractor_args: Vec<String>,
+    iterations: usize,
 }
 
 impl Default for CommandOptions {
@@ -70,6 +75,7 @@ impl Default for CommandOptions {
             fault_mode: FaultMode::None,
             extractor_command: None,
             extractor_args: Vec::new(),
+            iterations: DEFAULT_BASELINE_ITERATIONS,
         }
     }
 }
@@ -307,6 +313,47 @@ fn run_suite(raw_args: Vec<String>) -> Result<(), EvalError> {
     }
 }
 
+fn run_baseline(raw_args: Vec<String>) -> Result<(), EvalError> {
+    let (suite, options) = parse_baseline_args(raw_args)?;
+    let paths = scenario_paths_for_suite(&suite)?;
+    let report = baseline_report_for_paths(&suite, &paths, &options)?;
+    emit_baseline_report(&report, &options)?;
+    if report.ok {
+        Ok(())
+    } else {
+        Err(EvalError::scenario("baseline failed"))
+    }
+}
+
+fn baseline_report_for_paths(
+    suite: &str,
+    paths: &[PathBuf],
+    options: &CommandOptions,
+) -> Result<BaselineReport, EvalError> {
+    let target = build_target(options.target_kind);
+    let target_name = target.name().to_owned();
+    let run_options = target_run_options(options);
+    let target_metadata = target.metadata(&run_options);
+    let scenario_ids = scenario_ids_for_paths(paths)?;
+    let mut runs = Vec::new();
+    for iteration in 1..=options.iterations {
+        let run = match eval_report_for_paths(paths, options) {
+            Ok(report) => BaselineRunReport::from_eval_report(iteration, report),
+            Err(error) => {
+                BaselineRunReport::from_error(iteration, &scenario_ids, error.to_string())
+            }
+        };
+        runs.push(run);
+    }
+    Ok(BaselineReport::from_runs(
+        suite.to_owned(),
+        target_name,
+        target_metadata,
+        scenario_ids,
+        runs,
+    ))
+}
+
 fn eval_report_for_paths(
     paths: &[PathBuf],
     options: &CommandOptions,
@@ -329,6 +376,13 @@ fn eval_report_for_paths(
         target_metadata,
         results,
     ))
+}
+
+fn scenario_ids_for_paths(paths: &[PathBuf]) -> Result<Vec<String>, EvalError> {
+    paths
+        .iter()
+        .map(|path| load_scenario(path).map(|scenario| scenario.id))
+        .collect()
 }
 
 fn target_run_options(options: &CommandOptions) -> TargetRunOptions {
@@ -587,6 +641,80 @@ fn parse_suite_args(raw_args: Vec<String>) -> Result<(String, CommandOptions), E
     Ok((suite.unwrap_or_else(|| "core".to_owned()), options))
 }
 
+fn parse_baseline_args(raw_args: Vec<String>) -> Result<(String, CommandOptions), EvalError> {
+    let mut suite = None;
+    let mut options = CommandOptions::default();
+    let mut idx = 0;
+    while idx < raw_args.len() {
+        match raw_args[idx].as_str() {
+            "--suite" => {
+                idx += 1;
+                let Some(value) = raw_args.get(idx) else {
+                    return Err(EvalError::invalid_cli("--suite requires a name"));
+                };
+                suite = Some(value.clone());
+            }
+            "--json" => options.json = true,
+            "--report" => {
+                idx += 1;
+                let Some(value) = raw_args.get(idx) else {
+                    return Err(EvalError::invalid_cli("--report requires a path"));
+                };
+                options.report_path = Some(PathBuf::from(value));
+            }
+            "--target" => {
+                idx += 1;
+                let Some(value) = raw_args.get(idx) else {
+                    return Err(EvalError::invalid_cli("--target requires a name"));
+                };
+                options.target_kind = parse_target_kind(value)?;
+            }
+            "--extractor-command" => {
+                idx += 1;
+                let Some(value) = raw_args.get(idx) else {
+                    return Err(EvalError::invalid_cli(
+                        "--extractor-command requires a program",
+                    ));
+                };
+                options.extractor_command = Some(value.clone());
+            }
+            "--extractor-arg" => {
+                idx += 1;
+                let Some(value) = raw_args.get(idx) else {
+                    return Err(EvalError::invalid_cli("--extractor-arg requires a value"));
+                };
+                options.extractor_args.push(value.clone());
+            }
+            "--iterations" => {
+                idx += 1;
+                let Some(value) = raw_args.get(idx) else {
+                    return Err(EvalError::invalid_cli("--iterations requires a value"));
+                };
+                options.iterations = parse_iterations(value)?;
+            }
+            value => {
+                return Err(EvalError::invalid_cli(format!(
+                    "unknown baseline option: {value}"
+                )));
+            }
+        }
+        idx += 1;
+    }
+    Ok((suite.unwrap_or_else(|| "core".to_owned()), options))
+}
+
+fn parse_iterations(value: &str) -> Result<usize, EvalError> {
+    let iterations = value.parse::<usize>().map_err(|_| {
+        EvalError::invalid_cli(format!("--iterations must be a positive integer: {value}"))
+    })?;
+    if !(1..=MAX_BASELINE_ITERATIONS).contains(&iterations) {
+        return Err(EvalError::invalid_cli(format!(
+            "--iterations must be between 1 and {MAX_BASELINE_ITERATIONS}"
+        )));
+    }
+    Ok(iterations)
+}
+
 fn parse_target_kind(value: &str) -> Result<TargetKind, EvalError> {
     TargetKind::parse(value).ok_or_else(|| {
         EvalError::invalid_cli(format!(
@@ -690,6 +818,23 @@ fn emit_acceptance_report(
     Ok(())
 }
 
+fn emit_baseline_report(
+    report: &BaselineReport,
+    options: &CommandOptions,
+) -> Result<(), EvalError> {
+    if let Some(path) = &options.report_path {
+        write_report(path, report)?;
+    }
+    if options.json {
+        let json = serde_json::to_string_pretty(report)
+            .map_err(|source| EvalError::json(Path::new("<stdout>"), source))?;
+        println!("{json}");
+    } else {
+        print_baseline_report(report);
+    }
+    Ok(())
+}
+
 fn write_report<T: Serialize>(path: &Path, report: &T) -> Result<(), EvalError> {
     if let Some(parent) = path
         .parent()
@@ -741,6 +886,42 @@ fn print_acceptance_report(report: &AcceptanceReport) {
             "FAIL"
         };
         println!("- {status} {}: {}", gate.name, gate.detail);
+    }
+}
+
+fn print_baseline_report(report: &BaselineReport) {
+    println!(
+        "baseline: suite={}, target={}, {} iteration(s), pass_rate={:.2}%, {} passed, {} failed",
+        report.suite,
+        report.target,
+        report.iterations,
+        report.pass_rate * 100.0,
+        report.passed_iterations,
+        report.failed_iterations
+    );
+    for run in &report.runs {
+        let status = if run.ok { "PASS" } else { "FAIL" };
+        println!(
+            "- {status} iteration {}: {}/{} scenario(s)",
+            run.iteration, run.passed, run.scenario_count
+        );
+        if let Some(error) = &run.error {
+            println!("  - error={error}");
+        }
+        for result in &run.results {
+            if result.ok {
+                continue;
+            }
+            if result.failed_checks.is_empty() {
+                println!("  - {} failed", result.scenario_id);
+            } else {
+                println!(
+                    "  - {} failed checks={}",
+                    result.scenario_id,
+                    result.failed_checks.join(",")
+                );
+            }
+        }
     }
 }
 
@@ -853,6 +1034,41 @@ mod tests {
             Some(Path::new("evals/reports/acceptance.json"))
         );
         Ok(())
+    }
+
+    #[test]
+    fn parse_baseline_accepts_iterations_and_command_target() -> Result<(), EvalError> {
+        let (suite, options) = parse_baseline_args(vec![
+            "--suite".to_owned(),
+            "model".to_owned(),
+            "--target".to_owned(),
+            "mneme-v1-command".to_owned(),
+            "--extractor-command".to_owned(),
+            "wrappers/openai_extractor.py".to_owned(),
+            "--iterations".to_owned(),
+            "2".to_owned(),
+            "--json".to_owned(),
+        ])?;
+        assert_eq!(suite, "model");
+        assert_eq!(options.target_kind, TargetKind::MnemeV1Command);
+        assert_eq!(options.iterations, 2);
+        assert!(options.json);
+        assert_eq!(
+            options.extractor_command.as_deref(),
+            Some("wrappers/openai_extractor.py")
+        );
+        Ok(())
+    }
+
+    #[test]
+    fn parse_baseline_rejects_zero_iterations() {
+        let result = parse_baseline_args(vec![
+            "--suite".to_owned(),
+            "model".to_owned(),
+            "--iterations".to_owned(),
+            "0".to_owned(),
+        ]);
+        assert!(result.is_err());
     }
 
     #[test]

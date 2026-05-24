@@ -34,6 +34,16 @@ MNEME_OPENAI_DRY_RUN=1 cargo run -p mneme-eval -- acceptance --suite model \
   --extractor-command wrappers/openai_extractor.py
 ```
 
+Build a repeated dry-run baseline:
+
+```sh
+MNEME_OPENAI_DRY_RUN=1 cargo run -p mneme-eval -- baseline --suite model \
+  --target mneme-v1-command \
+  --extractor-command wrappers/openai_extractor.py \
+  --iterations 2 \
+  --json
+```
+
 ## Live Local Use
 
 Keep credentials in the local shell or an untracked `.env` file:
@@ -51,6 +61,9 @@ cargo run -p mneme-cli -- ingest "I work best with local-first tools." \
   --extractor-command wrappers/openai_extractor.py \
   --store /tmp/mneme.json
 ```
+
+For repeated live evals, use `mneme-eval baseline` and write the report under
+ignored `evals/reports/`. See [Live Provider Baseline](live-provider-baseline.md).
 
 ## Safety Rules
 

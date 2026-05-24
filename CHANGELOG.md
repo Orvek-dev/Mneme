@@ -4,6 +4,17 @@ This project follows the spirit of Keep a Changelog.
 
 ## Unreleased
 
+## [0.5.0] - 2026-05-24
+
+### Added
+
+- Added `mneme-eval baseline` for repeated suite runs and aggregate pass-rate
+  reporting.
+- Added baseline report schema fields for iteration results, scenario pass
+  rates, and run-level provider errors.
+- Added live-provider baseline documentation for local OpenAI wrapper evals.
+- Added CI and release dry-run coverage for the baseline command.
+
 ## [0.4.0] - 2026-05-24
 
 ### Added
