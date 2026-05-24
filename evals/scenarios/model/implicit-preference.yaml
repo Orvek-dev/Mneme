@@ -3,6 +3,8 @@ tags:
   - model
   - command-extractor
   - recall
+  - category-recall
+  - category-preference
 budget:
   daily_cloud_tokens: 100
 events:

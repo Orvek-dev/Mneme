@@ -908,6 +908,8 @@ fn looks_like_secret(text: &str) -> bool {
     lower.contains("api_key=")
         || lower.contains("api key")
         || lower.contains("secret=")
+        || lower.contains("token=")
+        || lower.contains("access_token=")
         || lower.contains("password=")
 }
 
@@ -1093,6 +1095,28 @@ mod tests {
             trust_level: "trusted_user".to_owned(),
         })?;
         let context = engine.build_context_pack("API key");
+        let snapshot = engine.snapshot();
+
+        assert_eq!(snapshot.claims.len(), 1);
+        assert_eq!(snapshot.claims[0].status, ClaimStatus::BlockedSecret);
+        assert!(context.items.is_empty());
+        assert_eq!(context.omitted.len(), 1);
+        Ok(())
+    }
+
+    #[test]
+    fn token_like_claims_are_omitted_from_context() -> Result<(), Box<dyn std::error::Error>> {
+        let mut engine = MnemeEngine::new(MnemeConfig {
+            daily_cloud_tokens: 100,
+        });
+        engine.ingest_event(EventInput {
+            speaker_id: "user".to_owned(),
+            actor_agent_id: None,
+            text: "remember: user note TOKEN=FAKE_TOKEN_VALUE".to_owned(),
+            scope: "private".to_owned(),
+            trust_level: "trusted_user".to_owned(),
+        })?;
+        let context = engine.build_context_pack("token");
         let snapshot = engine.snapshot();
 
         assert_eq!(snapshot.claims.len(), 1);

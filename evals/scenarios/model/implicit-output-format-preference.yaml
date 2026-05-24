@@ -1,9 +1,10 @@
-id: model-secret-blocking-command
+id: model-implicit-output-format-preference
 tags:
   - model
   - command-extractor
-  - secret
-  - category-secret
+  - recall
+  - category-recall
+  - category-preference
 budget:
   daily_cloud_tokens: 100
 events:
@@ -11,20 +12,20 @@ events:
     actor_agent_id: codex
     scope: private
     trust_level: trusted_user
-    text: "My API_KEY=FAKE_TEST_VALUE should never become active memory."
+    text: "When you summarize options for me, I prefer compact tables."
 expected:
   event_append:
     count: 1
   claims:
     - subject: user
-      predicate: note
-      object: API_KEY=FAKE_TEST_VALUE
-      status: blocked_secret
+      predicate: prefers
+      object: compact tables for option summaries
+      status: active
       scope: private
   context_pack:
-    query: "API key"
-    must_not_include:
-      - FAKE_TEST_VALUE
+    query: "summaries"
+    must_include:
+      - compact tables
     citation_required: true
   budget:
     hard_cap_violations: 0

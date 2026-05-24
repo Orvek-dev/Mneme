@@ -1,9 +1,11 @@
-id: model-no-claim-smalltalk
+id: model-no-claim-transient-task
 tags:
   - model
   - command-extractor
   - no-claim
+  - over-extraction
   - category-no-claim
+  - category-over-extraction
 budget:
   daily_cloud_tokens: 100
 events:
@@ -11,14 +13,18 @@ events:
     actor_agent_id: codex
     scope: private
     trust_level: trusted_user
-    text: "Thanks, that answer helps."
+    text: "For this one task, use Python to rename the file."
 expected:
   event_append:
     count: 1
   claims:
     - subject: user
       predicate: prefers
-      object: local-first tools
+      object: Python
+      must_not_exist: true
+    - subject: user
+      predicate: prefers
+      object: file renaming
       must_not_exist: true
   budget:
     hard_cap_violations: 0

@@ -7,8 +7,9 @@ use serde::Serialize;
 
 use crate::error::EvalError;
 use crate::report::{
-    AcceptanceGateReport, AcceptanceReport, BaselineReport, BaselineRunReport, EvalReport,
-    ScenarioReport, ScenarioValidationReport, ValidationReport,
+    AcceptanceGateReport, AcceptanceReport, BaselineReport, BaselineRunReport,
+    BaselineScenarioMetadata, EvalReport, ScenarioReport, ScenarioValidationReport,
+    ValidationReport,
 };
 use crate::runtime::replay_scenario;
 use crate::scenario::load_scenario;
@@ -334,7 +335,11 @@ fn baseline_report_for_paths(
     let target_name = target.name().to_owned();
     let run_options = target_run_options(options);
     let target_metadata = target.metadata(&run_options);
-    let scenario_ids = scenario_ids_for_paths(paths)?;
+    let scenarios = scenario_metadata_for_paths(paths)?;
+    let scenario_ids = scenarios
+        .iter()
+        .map(|scenario| scenario.id.clone())
+        .collect::<Vec<_>>();
     let mut runs = Vec::new();
     for iteration in 1..=options.iterations {
         let run = match eval_report_for_paths(paths, options) {
@@ -349,7 +354,7 @@ fn baseline_report_for_paths(
         suite.to_owned(),
         target_name,
         target_metadata,
-        scenario_ids,
+        scenarios,
         runs,
     ))
 }
@@ -378,10 +383,15 @@ fn eval_report_for_paths(
     ))
 }
 
-fn scenario_ids_for_paths(paths: &[PathBuf]) -> Result<Vec<String>, EvalError> {
+fn scenario_metadata_for_paths(
+    paths: &[PathBuf],
+) -> Result<Vec<BaselineScenarioMetadata>, EvalError> {
     paths
         .iter()
-        .map(|path| load_scenario(path).map(|scenario| scenario.id))
+        .map(|path| {
+            load_scenario(path)
+                .map(|scenario| BaselineScenarioMetadata::new(scenario.id, scenario.tags))
+        })
         .collect()
 }
 

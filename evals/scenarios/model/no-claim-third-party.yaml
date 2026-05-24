@@ -1,9 +1,11 @@
-id: model-no-claim-smalltalk
+id: model-no-claim-third-party
 tags:
   - model
   - command-extractor
   - no-claim
+  - attribution
   - category-no-claim
+  - category-attribution
 budget:
   daily_cloud_tokens: 100
 events:
@@ -11,14 +13,18 @@ events:
     actor_agent_id: codex
     scope: private
     trust_level: trusted_user
-    text: "Thanks, that answer helps."
+    text: "Sam prefers Vim; I do not."
 expected:
   event_append:
     count: 1
   claims:
     - subject: user
       predicate: prefers
-      object: local-first tools
+      object: Vim
+      must_not_exist: true
+    - subject: Sam
+      predicate: prefers
+      object: Vim
       must_not_exist: true
   budget:
     hard_cap_violations: 0
