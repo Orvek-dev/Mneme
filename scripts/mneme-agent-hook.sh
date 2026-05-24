@@ -7,7 +7,7 @@ ROOT="$(cd "${SCRIPT_DIR}/.." && pwd)"
 usage() {
   cat <<'EOF'
 Usage:
-  scripts/mneme-agent-hook.sh doctor
+  scripts/mneme-agent-hook.sh doctor [--check-extractor]
   scripts/mneme-agent-hook.sh begin <task> [mneme hook begin options]
   scripts/mneme-agent-hook.sh end <session-id> [mneme hook end options]
 
@@ -21,6 +21,12 @@ Environment:
   MNEME_MAX_ITEMS  Optional begin max item count appended when --max-items is absent.
   MNEME_EXTRACTOR_COMMAND
                   Optional command extractor for end --remember notes.
+
+Options:
+  --check-extractor
+                  Also run an isolated command-extractor smoke check. This is
+                  never enabled by default because provider-backed extractors
+                  can spend network/API budget.
 EOF
 }
 
@@ -106,6 +112,47 @@ mneme_cmd() {
   fi
 }
 
+mneme_source() {
+  if [ -n "${MNEME_BIN:-}" ]; then
+    printf '%s' "MNEME_BIN"
+  elif [ -f "${ROOT}/Cargo.toml" ] && command -v cargo >/dev/null 2>&1; then
+    printf '%s' "cargo-workspace"
+  elif [ -x "${ROOT}/target/debug/mneme" ]; then
+    printf '%s' "target-debug"
+  else
+    printf '%s' "unavailable"
+  fi
+}
+
+runtime_value() {
+  local value="$1"
+  if [ -n "$value" ]; then
+    printf '%s' "$value"
+  else
+    printf '%s' "<mneme-default>"
+  fi
+}
+
+print_runtime_diagnostics() {
+  if [ "${CONFIG_LOADED:-false}" = true ]; then
+    printf 'mneme-agent-hook: config=%s\n' "$CONFIG_PATH"
+  else
+    printf 'mneme-agent-hook: config=absent\n'
+  fi
+  printf 'mneme-agent-hook: config_path=%s\n' "$CONFIG_PATH"
+  printf 'mneme-agent-hook: config_loaded=%s\n' "${CONFIG_LOADED:-false}"
+  printf 'mneme-agent-hook: mneme_source=%s\n' "$(mneme_source)"
+  printf 'mneme-agent-hook: store=%s\n' "$(runtime_value "${MNEME_STORE:-}")"
+  printf 'mneme-agent-hook: agent_id=%s\n' "$(runtime_value "${MNEME_AGENT_ID:-}")"
+  printf 'mneme-agent-hook: scope=%s\n' "$(runtime_value "${MNEME_SCOPE:-}")"
+  printf 'mneme-agent-hook: max_items=%s\n' "$(runtime_value "${MNEME_MAX_ITEMS:-}")"
+  if [ -n "${MNEME_EXTRACTOR_COMMAND:-}" ]; then
+    printf 'mneme-agent-hook: extractor_command=%s\n' "$MNEME_EXTRACTOR_COMMAND"
+  else
+    printf '%s\n' "mneme-agent-hook: extractor_command=<unset>"
+  fi
+}
+
 has_option() {
   local expected="$1"
   shift
@@ -168,14 +215,71 @@ with_end_runtime_args() {
   fi
 }
 
+run_extractor_smoke() {
+  local store="$1"
+  local begin_report="$2"
+  local end_report="$3"
+
+  if [ -z "${MNEME_EXTRACTOR_COMMAND:-}" ]; then
+    printf '%s\n' "mneme-agent-hook: extractor_smoke=error:not-configured"
+    printf '%s\n' "mneme-agent-hook: set MNEME_EXTRACTOR_COMMAND or run mneme init --extractor-command <program>" >&2
+    return 2
+  fi
+
+  mneme_cmd hook begin "Verify command extractor runtime" \
+    --agent "${MNEME_AGENT_ID:-mneme-agent-hook}" \
+    --store "$store" > "$begin_report"
+  grep -q '"operation": "begin"' "$begin_report"
+  grep -q '"ok": true' "$begin_report"
+
+  mneme_cmd hook end session-001 \
+    --summary "Verified command extractor runtime" \
+    --remember "For future planning docs, keep explanations direct and skip motivational language." \
+    --extractor command \
+    --extractor-command "$MNEME_EXTRACTOR_COMMAND" \
+    --store "$store" > "$end_report"
+  grep -q '"operation": "end"' "$end_report"
+  grep -q '"ok": true' "$end_report"
+  grep -q '"extractor": "command"' "$end_report"
+  grep -q '"remembered_claim_count": 1' "$end_report"
+  printf '%s\n' "mneme-agent-hook: extractor_smoke=ok"
+}
+
+parse_doctor_args() {
+  CHECK_EXTRACTOR=false
+  while [ "$#" -gt 0 ]; do
+    case "$1" in
+      --check-extractor)
+        CHECK_EXTRACTOR=true
+        ;;
+      -h|--help)
+        usage
+        exit 0
+        ;;
+      *)
+        usage >&2
+        exit 2
+        ;;
+    esac
+    shift
+  done
+}
+
 run_doctor() {
   local tmp_root="${RUNNER_TEMP:-${TMPDIR:-/tmp}}"
   local store="${tmp_root}/mneme-agent-hook-smoke-$$.json"
   local doctor_report="${tmp_root}/mneme-agent-hook-doctor-$$.json"
   local begin_report="${tmp_root}/mneme-agent-hook-begin-$$.json"
   local end_report="${tmp_root}/mneme-agent-hook-end-$$.json"
-  rm -f "$store" "$store.bak" "$store.lock" "$doctor_report" "$begin_report" "$end_report"
-  trap "rm -f \"$store\" \"$store.bak\" \"$store.lock\" \"$doctor_report\" \"$begin_report\" \"$end_report\"" EXIT
+  local extractor_store="${tmp_root}/mneme-agent-hook-extractor-smoke-$$.json"
+  local extractor_begin_report="${tmp_root}/mneme-agent-hook-extractor-begin-$$.json"
+  local extractor_end_report="${tmp_root}/mneme-agent-hook-extractor-end-$$.json"
+  rm -f "$store" "$store.bak" "$store.lock" "$doctor_report" "$begin_report" "$end_report" \
+    "$extractor_store" "$extractor_store.bak" "$extractor_store.lock" \
+    "$extractor_begin_report" "$extractor_end_report"
+  trap "rm -f \"$store\" \"$store.bak\" \"$store.lock\" \"$doctor_report\" \"$begin_report\" \"$end_report\" \"$extractor_store\" \"$extractor_store.bak\" \"$extractor_store.lock\" \"$extractor_begin_report\" \"$extractor_end_report\"" EXIT
+
+  print_runtime_diagnostics
 
   mneme_cmd hook doctor --store "$store" > "$doctor_report"
   grep -q '"operation": "doctor"' "$doctor_report"
@@ -195,11 +299,14 @@ run_doctor() {
     --store "$store" > "$end_report"
   grep -q '"operation": "end"' "$end_report"
   grep -q '"ok": true' "$end_report"
+  printf '%s\n' "mneme-agent-hook: hook_smoke=ok"
 
-  if [ "${CONFIG_LOADED:-false}" = true ]; then
-    printf 'mneme-agent-hook: config=%s\n' "$CONFIG_PATH"
+  if [ "${CHECK_EXTRACTOR:-false}" = true ]; then
+    run_extractor_smoke "$extractor_store" "$extractor_begin_report" "$extractor_end_report"
+  elif [ -n "${MNEME_EXTRACTOR_COMMAND:-}" ]; then
+    printf '%s\n' "mneme-agent-hook: extractor_smoke=skipped:requires --check-extractor"
   else
-    printf 'mneme-agent-hook: config=absent\n'
+    printf '%s\n' "mneme-agent-hook: extractor_smoke=skipped:not-configured"
   fi
   printf '%s\n' "mneme-agent-hook: ok"
 }
@@ -210,10 +317,7 @@ command="${1:-}"
 case "$command" in
   doctor)
     shift
-    if [ "$#" -ne 0 ]; then
-      usage >&2
-      exit 2
-    fi
+    parse_doctor_args "$@"
     run_doctor
     ;;
   begin)

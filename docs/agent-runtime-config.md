@@ -73,3 +73,19 @@ scripts/mneme-agent-hook.sh doctor
 files. `scripts/mneme-agent-hook.sh doctor` uses an isolated temporary store
 for its smoke test and reports whether a profile was loaded without writing to
 the configured project store.
+
+Wrapper doctor output also reports the selected `mneme` source, configured
+store, agent, scope, max item cap, and extractor command. It does not run the
+configured command extractor by default, even when `MNEME_EXTRACTOR_COMMAND` is
+set. This keeps routine diagnostics no-cost for provider-backed wrappers.
+
+Run an extractor smoke only when you explicitly want to execute the configured
+command:
+
+```sh
+MNEME_AGENT_HOOK_CONFIG=.mneme/mneme-agent-hook.env \
+  scripts/mneme-agent-hook.sh doctor --check-extractor
+```
+
+Use `MNEME_OPENAI_DRY_RUN=1` or a fixture command when checking provider-backed
+wrappers without spending live API budget.

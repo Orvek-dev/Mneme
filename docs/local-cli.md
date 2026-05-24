@@ -294,3 +294,8 @@ the response JSON to stdout. `MNEME_EXTRACTOR_COMMAND` can provide the command
 program when `--extractor-command` is omitted; pass command arguments with
 repeated `--extractor-arg <arg>` flags. API keys should stay in the wrapper's
 environment, not in the Mneme store or tracked repo files.
+
+`scripts/mneme-agent-hook.sh doctor` reports wrapper runtime settings but does
+not run `MNEME_EXTRACTOR_COMMAND` by default. Use
+`scripts/mneme-agent-hook.sh doctor --check-extractor` for an explicit
+extractor smoke check.

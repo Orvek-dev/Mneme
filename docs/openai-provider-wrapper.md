@@ -40,6 +40,18 @@ MNEME_OPENAI_DRY_RUN=1 cargo run -p mneme-eval -- acceptance --suite model \
   --extractor-command wrappers/openai_extractor.py
 ```
 
+When the wrapper is installed in an agent runtime profile, default diagnostics
+remain no-cost:
+
+```sh
+MNEME_AGENT_HOOK_CONFIG=.mneme/mneme-agent-hook.env \
+MNEME_OPENAI_DRY_RUN=1 \
+  scripts/mneme-agent-hook.sh doctor --check-extractor
+```
+
+Without `--check-extractor`, wrapper doctor reports the configured extractor
+command but does not execute it.
+
 Build a repeated dry-run baseline:
 
 ```sh
