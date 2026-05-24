@@ -144,3 +144,8 @@ Phase 23 shipped the **Memory Quality & Review Loop MVP** in `v0.29.0`, adding
 `mneme quality`, quality findings inside review artifacts, eval checks for
 duplicate/blocked/inactive review queues, and quality-gate checks that safe
 quality reports do not leak blocked-secret text.
+
+Phase 24 shipped the **Guided Memory Curation MVP** in `v0.30.0`, adding
+`mneme curate`, dry-run cleanup plans, explicit duplicate cleanup and
+compaction, curation before/after eval checks, and quality-gate checks for
+redaction, backup creation, and post-curation quality health.

@@ -54,7 +54,7 @@ eval update land in the same PR.
 - The `core`, `runtime`, and `agent` suites must pass for `fake` and
   `mneme-v1`.
 - `mneme-cli` supports `init`, `doctor`, `remember`, `correct`, `forget`,
-  `claims`, `quality`, `context`, `snapshot`, `begin`, `end`, `validate`,
+  `claims`, `quality`, `curate`, `context`, `snapshot`, `begin`, `end`, `validate`,
   `export`, `review`, `import`, `compact`, `repair`, `version`, and
   command-specific help.
 - `mneme init` creates a valid local v1 store and an agent hook runtime profile
@@ -65,6 +65,8 @@ eval update land in the same PR.
 - `mneme quality` reports duplicate active claims, blocked-secret claims,
   inactive lifecycle history, review queue items, and suggested next commands
   without mutating files.
+- `mneme curate` reports a dry-run cleanup plan by default; applied curation
+  requires `--apply`, and non-active record removal requires `--compact`.
 - `mneme repair --check` reports repair or normalization readiness without
   mutating files.
 - `mneme hook doctor/begin/end` emit the `mneme.agent_hook.v1` JSON envelope for

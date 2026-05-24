@@ -225,6 +225,7 @@ fn run_cli_with_writer(
         "forget" => run_command_or_help("forget", raw_args, writer, run_forget),
         "claims" => run_command_or_help("claims", raw_args, writer, run_claims),
         "quality" => run_command_or_help("quality", raw_args, writer, run_quality),
+        "curate" => run_command_or_help("curate", raw_args, writer, run_curate),
         "context" => run_command_or_help("context", raw_args, writer, run_context),
         "snapshot" => run_command_or_help("snapshot", raw_args, writer, run_snapshot),
         "begin" => run_command_or_help("begin", raw_args, writer, run_begin),
@@ -237,7 +238,7 @@ fn run_cli_with_writer(
         "compact" => run_command_or_help("compact", raw_args, writer, run_compact),
         "repair" => run_command_or_help("repair", raw_args, writer, run_repair),
         _ => Err(CliError::invalid_cli(format!(
-            "unknown mneme command: {command}\navailable commands: init, doctor, version, ingest, remember, correct, forget, claims, quality, context, snapshot, begin, end, hook, validate, export, review, import, compact, repair"
+            "unknown mneme command: {command}\navailable commands: init, doctor, version, ingest, remember, correct, forget, claims, quality, curate, context, snapshot, begin, end, hook, validate, export, review, import, compact, repair"
         ))),
     }
 }
@@ -286,7 +287,7 @@ fn print_help(command: Option<&str>, writer: &mut impl Write) -> Result<(), CliE
         None => MNEME_HELP,
         Some(command) => command_help(command).ok_or_else(|| {
             CliError::invalid_cli(format!(
-                "unknown mneme help topic: {command}\navailable help topics: init, doctor, version, ingest, remember, correct, forget, claims, quality, context, snapshot, begin, end, hook, validate, export, review, import, compact, repair"
+                "unknown mneme help topic: {command}\navailable help topics: init, doctor, version, ingest, remember, correct, forget, claims, quality, curate, context, snapshot, begin, end, hook, validate, export, review, import, compact, repair"
             ))
         })?,
     };
@@ -305,6 +306,7 @@ fn command_help(command: &str) -> Option<&'static str> {
         "forget" => Some(MNEME_FORGET_HELP),
         "claims" => Some(MNEME_CLAIMS_HELP),
         "quality" => Some(MNEME_QUALITY_HELP),
+        "curate" => Some(MNEME_CURATE_HELP),
         "context" => Some(MNEME_CONTEXT_HELP),
         "snapshot" => Some(MNEME_SNAPSHOT_HELP),
         "begin" => Some(MNEME_BEGIN_HELP),
@@ -336,6 +338,7 @@ Commands:
   forget      Mark a claim as forgotten.
   claims      Review stored memory claims.
   quality     Inspect memory quality findings and review queue.
+  curate      Plan or apply guided memory cleanup actions.
   context     Build a cited context pack for a query.
   snapshot    Print the current store snapshot.
   begin       Start an agent task session and retrieve context.
@@ -357,6 +360,7 @@ Examples:
   mneme remember "user prefers local-first tools" --store /tmp/mneme.json
   mneme claims --status active --store /tmp/mneme.json --json
   mneme quality --store /tmp/mneme.json --json
+  mneme curate --store /tmp/mneme.json --json
   mneme context "local-first" --store /tmp/mneme.json --json
   mneme hook begin "Draft setup plan" --query "local-first" --store /tmp/mneme.json
   mneme help begin"#;
@@ -437,6 +441,17 @@ the next review commands to run.
 
 Example:
   mneme quality --store /tmp/mneme.json --json"#;
+
+const MNEME_CURATE_HELP: &str = r#"Usage: mneme curate [--store <path>] [--apply] [--compact] [--json]
+
+Build a guided memory cleanup plan. By default this is a dry run that does not
+mutate the store. Use --apply to forget redundant duplicate active claims. Add
+--compact to remove non-active records, including blocked-secret, superseded,
+and forgotten claims, after the applied cleanup writes a backup.
+
+Examples:
+  mneme curate --store /tmp/mneme.json --json
+  mneme curate --apply --compact --store /tmp/mneme.json --json"#;
 
 const MNEME_CONTEXT_HELP: &str = r#"Usage: mneme context <query> [--scope <scope>]... [--max-items <n>] [--store <path>] [--json]
 
@@ -549,6 +564,13 @@ struct DoctorOptions {
 struct RepairOptions {
     common: CommonOptions,
     check: bool,
+}
+
+#[derive(Debug, Clone, Default)]
+struct CurateOptions {
+    common: CommonOptions,
+    apply: bool,
+    compact: bool,
 }
 
 #[derive(Debug, Clone)]
@@ -829,6 +851,53 @@ struct MemoryReviewQueueItem {
     claim_text: Option<String>,
     reason: String,
     suggested_commands: Vec<String>,
+}
+
+#[derive(Debug, Serialize)]
+struct MemoryCurationReport {
+    command: String,
+    store: String,
+    mode: String,
+    ok: bool,
+    changed: bool,
+    backup_path: String,
+    before: MemoryQualityReport,
+    after: Option<MemoryQualityReport>,
+    plan: MemoryCurationPlan,
+    applied: MemoryCurationApplied,
+}
+
+#[derive(Debug, Clone, Serialize)]
+struct MemoryCurationPlan {
+    action_count: usize,
+    applyable_action_count: usize,
+    manual_action_count: usize,
+    duplicate_forget_count: usize,
+    compact_target_count: usize,
+    blocked_secret_review_count: usize,
+    compact_recommended: bool,
+    compact_requested: bool,
+    actions: Vec<MemoryCurationAction>,
+    next_commands: Vec<String>,
+}
+
+#[derive(Debug, Clone, Serialize)]
+struct MemoryCurationAction {
+    kind: String,
+    status: String,
+    claim_ids: Vec<String>,
+    kept_claim_id: Option<String>,
+    claim_text: Option<String>,
+    reason: String,
+    safety: String,
+}
+
+#[derive(Debug, Clone, Default, Serialize)]
+struct MemoryCurationApplied {
+    event_count: usize,
+    forgotten_claim_count: usize,
+    compacted: bool,
+    compaction: Option<CompactionReport>,
 }
 
 #[derive(Debug, Serialize)]
@@ -1227,6 +1296,90 @@ fn run_quality(raw_args: Vec<String>, writer: &mut impl Write) -> Result<(), Cli
     let snapshot = engine.snapshot();
     let report = build_memory_quality_report(&store_path, &snapshot.claims, true);
     emit_quality_report(&report, options.json, writer)
+}
+
+fn run_curate(raw_args: Vec<String>, writer: &mut impl Write) -> Result<(), CliError> {
+    let options = parse_curate_args(raw_args)?;
+    let store_path = resolve_store_path(&options.common)?;
+    let mut engine = load_engine(&store_path)?;
+    let before_snapshot = engine.snapshot();
+    let before = build_memory_quality_report(&store_path, &before_snapshot.claims, true);
+    let mut plan =
+        build_memory_curation_plan(&store_path, &before_snapshot.claims, options.compact, true);
+    let mut applied = MemoryCurationApplied::default();
+
+    if options.apply {
+        for action in &mut plan.actions {
+            match action.kind.as_str() {
+                "forget_duplicate_active" => {
+                    for claim_id in action.claim_ids.clone() {
+                        require_active_claim_id(&engine, &claim_id)?;
+                        engine
+                            .ingest_event(EventInput {
+                                speaker_id: "system".to_owned(),
+                                actor_agent_id: Some("mneme-curate".to_owned()),
+                                text: format!("forget-id: {claim_id}"),
+                                scope: "private".to_owned(),
+                                trust_level: "system".to_owned(),
+                            })
+                            .map_err(CliError::extractor)?;
+                        applied.event_count += 1;
+                        applied.forgotten_claim_count += 1;
+                    }
+                    action.status = "applied".to_owned();
+                }
+                "compact_non_active_records" if options.compact => {
+                    let compaction = engine.compact();
+                    applied.compacted =
+                        compaction.removed_claims > 0 || compaction.removed_events > 0;
+                    applied.compaction = Some(compaction);
+                    action.status = "applied".to_owned();
+                }
+                "compact_non_active_records" => {
+                    action.status = "skipped".to_owned();
+                }
+                "review_blocked_secret" => {
+                    action.status = "manual".to_owned();
+                }
+                _ => {}
+            }
+        }
+        if applied.event_count > 0 || applied.compaction.is_some() {
+            persist_engine(&store_path, &engine)?;
+        }
+    }
+
+    let after = if options.apply {
+        let after_snapshot = engine.snapshot();
+        Some(build_memory_quality_report(
+            &store_path,
+            &after_snapshot.claims,
+            true,
+        ))
+    } else {
+        None
+    };
+    let changed = applied.event_count > 0 || applied.compaction.is_some();
+    let report = MemoryCurationReport {
+        command: "curate".to_owned(),
+        store: store_path.display().to_string(),
+        mode: if options.apply {
+            "apply".to_owned()
+        } else {
+            "dry_run".to_owned()
+        },
+        ok: true,
+        changed,
+        backup_path: JsonFileStore::new(store_path.clone())
+            .backup_path()
+            .display()
+            .to_string(),
+        before,
+        after,
+        plan,
+        applied,
+    };
+    emit_curate_report(&report, options.common.json, writer)
 }
 
 fn run_event_command(
@@ -1677,6 +1830,37 @@ fn parse_repair_args(raw_args: Vec<String>) -> Result<RepairOptions, CliError> {
             value => {
                 return Err(CliError::invalid_cli(format!(
                     "unexpected repair argument: {value}"
+                )));
+            }
+        }
+        idx += 1;
+    }
+    Ok(options)
+}
+
+fn parse_curate_args(raw_args: Vec<String>) -> Result<CurateOptions, CliError> {
+    let mut options = CurateOptions::default();
+    let mut idx = 0;
+    while idx < raw_args.len() {
+        if parse_common_option(&raw_args, &mut idx, &mut options.common)? {
+            idx += 1;
+            continue;
+        }
+        match raw_args[idx].as_str() {
+            "--apply" => {
+                options.apply = true;
+            }
+            "--compact" => {
+                options.compact = true;
+            }
+            value if value.starts_with('-') => {
+                return Err(CliError::invalid_cli(format!(
+                    "unknown curate option: {value}"
+                )));
+            }
+            value => {
+                return Err(CliError::invalid_cli(format!(
+                    "unexpected curate argument: {value}"
                 )));
             }
         }
@@ -2980,7 +3164,7 @@ fn build_memory_quality_report(
             claim_ids: claim_ids.clone(),
             detail: format!("{} claims are blocked as secret-like", blocked_claims.len()),
             recommendation:
-                "confirm these claims stay blocked, or forget them if they should not be retained"
+                "confirm these claims stay blocked, or compact them after local privacy review"
                     .to_owned(),
         });
         for claim in blocked_claims {
@@ -2999,8 +3183,7 @@ fn build_memory_quality_report(
                         store_path.display()
                     ),
                     format!(
-                        "mneme forget --claim-id {} --store \"{}\"",
-                        claim.id,
+                        "mneme curate --apply --compact --store \"{}\"",
                         store_path.display()
                     ),
                 ],
@@ -3060,6 +3243,12 @@ fn build_memory_quality_report(
             store_path.display()
         ));
     }
+    if blocked_secret_claim_count > 0 || duplicate_active_claim_count > 0 {
+        next_commands.push(format!(
+            "mneme curate --store \"{}\" --json",
+            store_path.display()
+        ));
+    }
     if claims.is_empty() {
         next_commands.push(format!(
             "mneme remember \"user prefers ...\" --store \"{}\"",
@@ -3090,6 +3279,153 @@ fn build_memory_quality_report(
         review_queue,
         next_commands,
     }
+}
+
+fn build_memory_curation_plan(
+    store_path: &Path,
+    claims: &[ClaimRecord],
+    compact_requested: bool,
+    redact_sensitive: bool,
+) -> MemoryCurationPlan {
+    let mut actions = Vec::new();
+    let mut duplicate_forget_count = 0;
+    let mut blocked_secret_review_count = 0;
+    let mut compact_target_ids = Vec::new();
+
+    let mut active_groups = BTreeMap::<String, Vec<&ClaimRecord>>::new();
+    for claim in claims
+        .iter()
+        .filter(|claim| claim.status == ClaimStatus::Active)
+    {
+        active_groups
+            .entry(quality_claim_key(claim))
+            .or_default()
+            .push(claim);
+    }
+
+    for group in active_groups.values().filter(|group| group.len() > 1) {
+        let kept_claim = group[0];
+        let duplicate_claims = group.iter().skip(1).copied().collect::<Vec<_>>();
+        let duplicate_ids = duplicate_claims
+            .iter()
+            .map(|claim| claim.id.clone())
+            .collect::<Vec<_>>();
+        duplicate_forget_count += duplicate_ids.len();
+        compact_target_ids.extend(duplicate_ids.iter().cloned());
+        actions.push(MemoryCurationAction {
+            kind: "forget_duplicate_active".to_owned(),
+            status: "planned".to_owned(),
+            claim_ids: duplicate_ids,
+            kept_claim_id: Some(kept_claim.id.clone()),
+            claim_text: Some(quality_claim_text(kept_claim, redact_sensitive)),
+            reason: "keep the earliest active duplicate and forget redundant active copies"
+                .to_owned(),
+            safety: "deterministic_active_claim_only".to_owned(),
+        });
+    }
+
+    for claim in claims
+        .iter()
+        .filter(|claim| claim.status == ClaimStatus::BlockedSecret)
+    {
+        blocked_secret_review_count += 1;
+        compact_target_ids.push(claim.id.clone());
+        actions.push(MemoryCurationAction {
+            kind: "review_blocked_secret".to_owned(),
+            status: "manual".to_owned(),
+            claim_ids: vec![claim.id.clone()],
+            kept_claim_id: None,
+            claim_text: Some(quality_claim_text(claim, redact_sensitive)),
+            reason: "blocked-secret records stay out of active context; compact only after review"
+                .to_owned(),
+            safety: "manual_privacy_review".to_owned(),
+        });
+    }
+
+    compact_target_ids.extend(
+        claims
+            .iter()
+            .filter(|claim| {
+                matches!(
+                    claim.status,
+                    ClaimStatus::Superseded | ClaimStatus::Forgotten
+                )
+            })
+            .map(|claim| claim.id.clone()),
+    );
+    dedupe_strings(&mut compact_target_ids);
+
+    let compact_recommended = !compact_target_ids.is_empty();
+    if compact_recommended {
+        actions.push(MemoryCurationAction {
+            kind: "compact_non_active_records".to_owned(),
+            status: if compact_requested {
+                "planned".to_owned()
+            } else {
+                "available".to_owned()
+            },
+            claim_ids: compact_target_ids.clone(),
+            kept_claim_id: None,
+            claim_text: None,
+            reason: "remove blocked-secret, superseded, and forgotten records after review"
+                .to_owned(),
+            safety: "requires_explicit_compact".to_owned(),
+        });
+    }
+
+    let applyable_action_count = actions
+        .iter()
+        .filter(|action| {
+            action.kind == "forget_duplicate_active"
+                || (action.kind == "compact_non_active_records" && compact_requested)
+        })
+        .count();
+    let manual_action_count = actions
+        .iter()
+        .filter(|action| action.kind == "review_blocked_secret")
+        .count();
+    let mut next_commands = Vec::new();
+    if duplicate_forget_count > 0 {
+        next_commands.push(format!(
+            "mneme curate --apply --store \"{}\"",
+            store_path.display()
+        ));
+    }
+    if compact_recommended {
+        next_commands.push(format!(
+            "mneme curate --apply --compact --store \"{}\"",
+            store_path.display()
+        ));
+    }
+    if actions.is_empty() {
+        next_commands.push(format!(
+            "mneme quality --store \"{}\" --json",
+            store_path.display()
+        ));
+    } else {
+        next_commands.push(format!(
+            "mneme review /tmp/mneme-review.md --store \"{}\"",
+            store_path.display()
+        ));
+    }
+
+    MemoryCurationPlan {
+        action_count: actions.len(),
+        applyable_action_count,
+        manual_action_count,
+        duplicate_forget_count,
+        compact_target_count: compact_target_ids.len(),
+        blocked_secret_review_count,
+        compact_recommended,
+        compact_requested,
+        actions,
+        next_commands,
+    }
+}
+
+fn dedupe_strings(values: &mut Vec<String>) {
+    let mut seen = std::collections::BTreeSet::new();
+    values.retain(|value| seen.insert(value.clone()));
 }
 
 fn quality_claim_key(claim: &ClaimRecord) -> String {
@@ -3729,6 +4065,57 @@ fn emit_quality_report(
     Ok(())
 }
 
+fn emit_curate_report(
+    report: &MemoryCurationReport,
+    json: bool,
+    writer: &mut impl Write,
+) -> Result<(), CliError> {
+    if json {
+        return write_json(writer, report);
+    }
+    writeln!(
+        writer,
+        "mneme: curate {} (mode={}, actions={}, changed={})",
+        report.store, report.mode, report.plan.action_count, report.changed
+    )
+    .map_err(|source| CliError::io("write", Path::new("<stdout>"), source))?;
+    writeln!(
+        writer,
+        "mneme: before health={} findings={} review_items={}",
+        report.before.health,
+        report.before.findings.len(),
+        report.before.review_item_count
+    )
+    .map_err(|source| CliError::io("write", Path::new("<stdout>"), source))?;
+    if let Some(after) = &report.after {
+        writeln!(
+            writer,
+            "mneme: after health={} findings={} review_items={}",
+            after.health,
+            after.findings.len(),
+            after.review_item_count
+        )
+        .map_err(|source| CliError::io("write", Path::new("<stdout>"), source))?;
+    }
+    for action in &report.plan.actions {
+        writeln!(
+            writer,
+            "- [{}] {} ({})",
+            action.status,
+            action.kind,
+            action.claim_ids.join(",")
+        )
+        .map_err(|source| CliError::io("write", Path::new("<stdout>"), source))?;
+        writeln!(writer, "  safety: {}", action.safety)
+            .map_err(|source| CliError::io("write", Path::new("<stdout>"), source))?;
+    }
+    for command in &report.plan.next_commands {
+        writeln!(writer, "next: {command}")
+            .map_err(|source| CliError::io("write", Path::new("<stdout>"), source))?;
+    }
+    Ok(())
+}
+
 fn emit_snapshot_report(
     report: &SnapshotReport,
     json: bool,
@@ -3966,6 +4353,7 @@ mod tests {
         assert!(text.contains("hook"));
         assert!(text.contains("claims"));
         assert!(text.contains("quality"));
+        assert!(text.contains("curate"));
         assert!(text.contains("review"));
 
         let mut init_output = Vec::new();
@@ -4020,6 +4408,16 @@ mod tests {
         let quality_text = String::from_utf8(quality_output)?;
         assert!(quality_text.contains("Usage: mneme quality"));
         assert!(quality_text.contains("duplicate active claims"));
+
+        let mut curate_output = Vec::new();
+        run_cli_with_writer(
+            vec!["mneme".to_owned(), "curate".to_owned(), "--help".to_owned()],
+            &mut curate_output,
+        )?;
+        let curate_text = String::from_utf8(curate_output)?;
+        assert!(curate_text.contains("Usage: mneme curate"));
+        assert!(curate_text.contains("--apply"));
+        assert!(curate_text.contains("--compact"));
 
         let mut repair_output = Vec::new();
         run_cli_with_writer(
@@ -4625,6 +5023,128 @@ mod tests {
         let _ = std::fs::remove_file(&path);
         let _ = std::fs::remove_file(&markdown_path);
         let _ = std::fs::remove_file(format!("{}.bak", path.display()));
+        Ok(())
+    }
+
+    #[test]
+    fn curate_plans_and_applies_guided_cleanup() -> Result<(), Box<dyn std::error::Error>> {
+        let path = temp_store_path("guided-curation");
+        let backup_path = std::path::PathBuf::from(format!("{}.bak", path.display()));
+        let _ = std::fs::remove_file(&path);
+        let _ = std::fs::remove_file(&backup_path);
+
+        for claim in [
+            "user prefers curated memory",
+            "user prefers curated memory",
+            "user token API_KEY=FAKE_TEST_VALUE",
+            "user prefers old curation notes",
+        ] {
+            run_cli_with_writer(
+                vec![
+                    "mneme".to_owned(),
+                    "remember".to_owned(),
+                    claim.to_owned(),
+                    "--store".to_owned(),
+                    path.display().to_string(),
+                ],
+                &mut Vec::new(),
+            )?;
+        }
+        run_cli_with_writer(
+            vec![
+                "mneme".to_owned(),
+                "correct".to_owned(),
+                "--claim-id".to_owned(),
+                "claim-004".to_owned(),
+                "user prefers current curation notes".to_owned(),
+                "--store".to_owned(),
+                path.display().to_string(),
+            ],
+            &mut Vec::new(),
+        )?;
+
+        let mut dry_run_output = Vec::new();
+        run_cli_with_writer(
+            vec![
+                "mneme".to_owned(),
+                "curate".to_owned(),
+                "--store".to_owned(),
+                path.display().to_string(),
+                "--json".to_owned(),
+            ],
+            &mut dry_run_output,
+        )?;
+        let dry_run = String::from_utf8(dry_run_output)?;
+        assert!(dry_run.contains("\"command\": \"curate\""));
+        assert!(dry_run.contains("\"mode\": \"dry_run\""));
+        assert!(dry_run.contains("\"changed\": false"));
+        assert!(dry_run.contains("\"duplicate_forget_count\": 1"));
+        assert!(dry_run.contains("\"blocked_secret_review_count\": 1"));
+        assert!(dry_run.contains("\"compact_target_count\": 3"));
+        assert!(dry_run.contains("\"kind\": \"forget_duplicate_active\""));
+        assert!(dry_run.contains("\"kind\": \"review_blocked_secret\""));
+        assert!(dry_run.contains("\"kind\": \"compact_non_active_records\""));
+        assert!(dry_run.contains("[redacted:blocked_secret]"));
+        assert!(!dry_run.contains("API_KEY=FAKE_TEST_VALUE"));
+
+        let mut quality_after_dry_run = Vec::new();
+        run_cli_with_writer(
+            vec![
+                "mneme".to_owned(),
+                "quality".to_owned(),
+                "--store".to_owned(),
+                path.display().to_string(),
+                "--json".to_owned(),
+            ],
+            &mut quality_after_dry_run,
+        )?;
+        let quality_after_dry_run = String::from_utf8(quality_after_dry_run)?;
+        assert!(quality_after_dry_run.contains("\"duplicate_active_group_count\": 1"));
+        assert!(quality_after_dry_run.contains("\"blocked_secret_claim_count\": 1"));
+        assert!(quality_after_dry_run.contains("\"inactive_claim_count\": 1"));
+
+        let mut apply_output = Vec::new();
+        run_cli_with_writer(
+            vec![
+                "mneme".to_owned(),
+                "curate".to_owned(),
+                "--apply".to_owned(),
+                "--compact".to_owned(),
+                "--store".to_owned(),
+                path.display().to_string(),
+                "--json".to_owned(),
+            ],
+            &mut apply_output,
+        )?;
+        let apply = String::from_utf8(apply_output)?;
+        assert!(apply.contains("\"mode\": \"apply\""));
+        assert!(apply.contains("\"changed\": true"));
+        assert!(apply.contains("\"forgotten_claim_count\": 1"));
+        assert!(apply.contains("\"compacted\": true"));
+        assert!(apply.contains("\"health\": \"ok\""));
+        assert!(apply.contains("\"duplicate_active_group_count\": 0"));
+        assert!(apply.contains("\"blocked_secret_claim_count\": 0"));
+        assert!(apply.contains("\"inactive_claim_count\": 0"));
+        assert!(!apply.contains("API_KEY=FAKE_TEST_VALUE"));
+        assert!(backup_path.exists());
+
+        let mut final_quality_output = Vec::new();
+        run_cli_with_writer(
+            vec![
+                "mneme".to_owned(),
+                "quality".to_owned(),
+                "--store".to_owned(),
+                path.display().to_string(),
+                "--json".to_owned(),
+            ],
+            &mut final_quality_output,
+        )?;
+        let final_quality = String::from_utf8(final_quality_output)?;
+        assert!(final_quality.contains("\"health\": \"ok\""));
+        assert!(final_quality.contains("\"review_item_count\": 0"));
+
+        let _ = std::fs::remove_file(&path);
+        let _ = std::fs::remove_file(&backup_path);
         Ok(())
     }
 

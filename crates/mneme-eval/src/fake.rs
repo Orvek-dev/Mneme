@@ -1,9 +1,9 @@
 use crate::error::EvalError;
 use crate::scenario::{AgentFlow, ContextPackExpected, Scenario};
 use crate::target::{
-    build_quality_actual, ActualState, AuditEvent, Claim, ContextItem, ContextPack, EvalTarget,
-    EvalTargetMetadata, FaultMode, OmittedItem, RecordedEvent, SessionActual, StoreActual,
-    TargetRunOptions,
+    build_curation_actual, build_curation_plan_actual, build_quality_actual, ActualState,
+    AuditEvent, Claim, ContextItem, ContextPack, EvalTarget, EvalTargetMetadata, FaultMode,
+    OmittedItem, RecordedEvent, SessionActual, StoreActual, TargetRunOptions,
 };
 use mneme_core::DEFAULT_CONTEXT_MAX_ITEMS;
 
@@ -89,6 +89,12 @@ fn run_fake_runtime(scenario: &Scenario, options: TargetRunOptions) -> ActualSta
         compacted = true;
     }
 
+    if let Some(curation) = &scenario.maintenance.curation {
+        let curation_actual = apply_curation(&mut actual, curation.apply, curation.compact);
+        compacted |= curation_actual.compacted;
+        actual.curation = Some(curation_actual);
+    }
+
     if let Some(agent_flow) = &scenario.agent_flow {
         apply_agent_flow(&mut actual, agent_flow, options.clone());
     }
@@ -109,6 +115,7 @@ fn run_fake_runtime(scenario: &Scenario, options: TargetRunOptions) -> ActualSta
         || scenario.maintenance.export_import_roundtrip
         || scenario.maintenance.compact_after_events
         || scenario.maintenance.repair_from_backup
+        || scenario.maintenance.curation.is_some()
     {
         actual.store = Some(StoreActual {
             schema_version: Some(mneme_core::MNEME_STATE_SCHEMA_VERSION),
@@ -224,6 +231,44 @@ fn compact_actual(actual: &mut ActualState) {
         kind: "state.compact".to_owned(),
         target_id: "fake".to_owned(),
     });
+}
+
+fn apply_curation(
+    actual: &mut ActualState,
+    apply: bool,
+    compact: bool,
+) -> crate::target::CurationActual {
+    let before_claims = actual.claims.clone();
+    let plan = build_curation_plan_actual(&before_claims);
+    let mut changed = false;
+    let mut compacted = false;
+
+    if apply {
+        for claim_id in &plan.duplicate_forget_ids {
+            let event = RecordedEvent {
+                id: format!("event-{:03}", actual.events.len() + 1),
+                speaker_id: "system".to_owned(),
+                actor_agent_id: Some("mneme-curate".to_owned()),
+                text: format!("forget-id: {claim_id}"),
+                scope: "private".to_owned(),
+                trust_level: "system".to_owned(),
+            };
+            actual.audit.push(AuditEvent {
+                kind: "event.append".to_owned(),
+                target_id: format!("{}:mneme-curate:system", event.id),
+            });
+            forget_claim_by_id(actual, claim_id);
+            actual.events.push(event);
+            changed = true;
+        }
+        if compact && plan.compact_recommended {
+            compact_actual(actual);
+            compacted = true;
+            changed = true;
+        }
+    }
+
+    build_curation_actual(&before_claims, &actual.claims, compacted, changed)
 }
 
 fn apply_lifecycle_event(actual: &mut ActualState, event: &RecordedEvent) -> bool {

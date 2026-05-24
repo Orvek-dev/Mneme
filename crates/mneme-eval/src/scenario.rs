@@ -49,6 +49,14 @@ pub(crate) struct Maintenance {
     pub(crate) export_import_roundtrip: bool,
     pub(crate) compact_after_events: bool,
     pub(crate) repair_from_backup: bool,
+    pub(crate) curation: Option<CurationMaintenance>,
+}
+
+#[derive(Debug, Clone, Default, Deserialize)]
+#[serde(default, deny_unknown_fields)]
+pub(crate) struct CurationMaintenance {
+    pub(crate) apply: bool,
+    pub(crate) compact: bool,
 }
 
 #[derive(Debug, Clone, Deserialize)]
@@ -102,6 +110,7 @@ pub(crate) struct Expected {
     pub(crate) store: Option<StoreExpected>,
     pub(crate) session: Option<SessionExpected>,
     pub(crate) quality: Option<QualityExpected>,
+    pub(crate) curation: Option<CurationExpected>,
 }
 
 impl Expected {
@@ -114,6 +123,7 @@ impl Expected {
             && self.store.is_none()
             && self.session.is_none()
             && self.quality.is_none()
+            && self.curation.is_none()
     }
 }
 
@@ -195,6 +205,18 @@ pub(crate) struct QualityExpected {
     pub(crate) finding_kinds: Vec<String>,
 }
 
+#[derive(Debug, Clone, Default, Deserialize)]
+#[serde(default, deny_unknown_fields)]
+pub(crate) struct CurationExpected {
+    pub(crate) duplicate_forget_count: Option<usize>,
+    pub(crate) blocked_secret_review_count: Option<usize>,
+    pub(crate) compact_recommended: Option<bool>,
+    pub(crate) compacted: Option<bool>,
+    pub(crate) changed: Option<bool>,
+    pub(crate) before_quality: Option<QualityExpected>,
+    pub(crate) after_quality: Option<QualityExpected>,
+}
+
 pub(crate) fn load_scenario(path: &Path) -> Result<Scenario, EvalError> {
     let text = fs::read_to_string(path).map_err(|source| EvalError::io("read", path, source))?;
     let scenario: Scenario =
@@ -213,6 +235,17 @@ fn validate_scenario(scenario: &Scenario, path: &Path) -> Result<(), EvalError> 
     if scenario.budget.daily_cloud_tokens == 0 {
         return Err(EvalError::scenario(format!(
             "scenario {} has a zero daily_cloud_tokens budget",
+            scenario.id
+        )));
+    }
+    if scenario
+        .maintenance
+        .curation
+        .as_ref()
+        .is_some_and(|curation| curation.compact && !curation.apply)
+    {
+        return Err(EvalError::scenario(format!(
+            "scenario {} maintenance curation compact requires apply",
             scenario.id
         )));
     }
@@ -404,16 +437,32 @@ fn validate_scenario(scenario: &Scenario, path: &Path) -> Result<(), EvalError> 
         }
     }
     if let Some(quality) = &scenario.expected.quality {
-        if quality
-            .finding_kinds
-            .iter()
-            .any(|kind| kind.trim().is_empty())
-        {
-            return Err(EvalError::scenario(format!(
-                "scenario {} quality has an empty finding_kinds entry",
-                scenario.id
-            )));
+        validate_quality_expected(quality, &scenario.id, "quality")?;
+    }
+    if let Some(curation) = &scenario.expected.curation {
+        if let Some(before_quality) = &curation.before_quality {
+            validate_quality_expected(before_quality, &scenario.id, "curation.before_quality")?;
         }
+        if let Some(after_quality) = &curation.after_quality {
+            validate_quality_expected(after_quality, &scenario.id, "curation.after_quality")?;
+        }
+    }
+    Ok(())
+}
+
+fn validate_quality_expected(
+    quality: &QualityExpected,
+    scenario_id: &str,
+    field: &str,
+) -> Result<(), EvalError> {
+    if quality
+        .finding_kinds
+        .iter()
+        .any(|kind| kind.trim().is_empty())
+    {
+        return Err(EvalError::scenario(format!(
+            "scenario {scenario_id} {field} has an empty finding_kinds entry"
+        )));
     }
     Ok(())
 }

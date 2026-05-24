@@ -43,6 +43,7 @@ Review stored claims before changing them:
 ```sh
 cargo run -p mneme-cli -- claims --status active --store /tmp/mneme.json --json
 cargo run -p mneme-cli -- quality --store /tmp/mneme.json --json
+cargo run -p mneme-cli -- curate --store /tmp/mneme.json --json
 cargo run -p mneme-cli -- forget --claim-id claim-001 --store /tmp/mneme.json
 ```
 
@@ -59,6 +60,11 @@ the store. Review artifacts include the same quality section and redact
 sensitive claim text by default. Use `--include-sensitive` only for local
 private inspection.
 
+`mneme curate` turns those findings into a dry-run cleanup plan. Add `--apply`
+to forget redundant duplicate active claims by ID. Add `--compact` only when
+non-active records, including blocked-secret, superseded, and forgotten claims,
+should be removed after review.
+
 Validate the current store:
 
 ```sh
@@ -72,11 +78,14 @@ cargo run -p mneme-cli -- export /tmp/mneme-export.json --store /tmp/mneme.json
 cargo run -p mneme-cli -- import /tmp/mneme-export.json --store /tmp/mneme-restored.json
 ```
 
-Compact inactive lifecycle records while preserving active recall:
+Compact non-active records while preserving active recall:
 
 ```sh
 cargo run -p mneme-cli -- compact --store /tmp/mneme.json
 ```
+
+Compaction keeps active claims and removes blocked-secret, superseded, and
+forgotten records plus events no active claim cites.
 
 Check repair readiness without mutating files:
 
@@ -97,6 +106,7 @@ The `runtime` suite checks:
 
 - export/import round trips;
 - compaction after correction;
+- guided curation before/after quality;
 - repair from backup after current-store corruption;
 - repair readiness checks in the release quality gate;
 - secret blocking after persisted import/export.

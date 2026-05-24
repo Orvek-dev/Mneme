@@ -9,9 +9,9 @@ use mneme_core::{
 use crate::error::EvalError;
 use crate::scenario::Scenario;
 use crate::target::{
-    build_quality_actual, ActualState, AuditEvent, BudgetActual, Claim, ContextItem, ContextPack,
-    EvalTarget, EvalTargetMetadata, FaultMode, OmittedItem, RecordedEvent, SessionActual,
-    StoreActual, TargetRunOptions,
+    build_curation_actual, build_curation_plan_actual, build_quality_actual, ActualState,
+    AuditEvent, BudgetActual, Claim, ContextItem, ContextPack, EvalTarget, EvalTargetMetadata,
+    FaultMode, OmittedItem, RecordedEvent, SessionActual, StoreActual, TargetRunOptions,
 };
 
 pub(crate) struct MnemeV1EvalTarget;
@@ -139,6 +139,23 @@ fn run_with_optional_persistence(
     if scenario.maintenance.compact_after_events {
         engine.compact();
         store_run.compacted = true;
+    }
+
+    let mut curation_actual = None;
+    if let Some(curation) = &scenario.maintenance.curation {
+        let actual = apply_engine_curation(
+            &mut engine,
+            curation.apply,
+            curation.compact,
+            &mut store_run,
+        )
+        .map_err(|source| {
+            EvalError::scenario(format!(
+                "scenario {} failed to apply curation: {source}",
+                scenario.id
+            ))
+        })?;
+        curation_actual = Some(actual);
     }
 
     if scenario.maintenance.export_import_roundtrip {
@@ -305,6 +322,7 @@ fn run_with_optional_persistence(
             .collect(),
         store: persistence_path.map(|path| store_actual(path, &store_run)),
         quality: None,
+        curation: curation_actual,
     };
     apply_seeded_fault(&mut actual, options.fault_mode);
     if scenario.expected.quality.is_some() {
@@ -366,6 +384,64 @@ fn export_import_roundtrip(
     })
 }
 
+fn apply_engine_curation(
+    engine: &mut MnemeEngine,
+    apply: bool,
+    compact: bool,
+    store_run: &mut StoreRunState,
+) -> Result<crate::target::CurationActual, String> {
+    let before_claims = target_claims_from_engine(engine);
+    let plan = build_curation_plan_actual(&before_claims);
+    let mut changed = false;
+    let mut compacted = false;
+
+    if apply {
+        for claim_id in &plan.duplicate_forget_ids {
+            engine
+                .ingest_event(EventInput {
+                    speaker_id: "system".to_owned(),
+                    actor_agent_id: Some("mneme-curate".to_owned()),
+                    text: format!("forget-id: {claim_id}"),
+                    scope: "private".to_owned(),
+                    trust_level: "system".to_owned(),
+                })
+                .map_err(|source| source.to_string())?;
+            changed = true;
+        }
+        if compact && plan.compact_recommended {
+            let compaction = engine.compact();
+            compacted = compaction.removed_claims > 0 || compaction.removed_events > 0;
+            store_run.compacted |= compacted;
+            changed = true;
+        }
+    }
+
+    let after_claims = target_claims_from_engine(engine);
+    Ok(build_curation_actual(
+        &before_claims,
+        &after_claims,
+        compacted,
+        changed,
+    ))
+}
+
+fn target_claims_from_engine(engine: &MnemeEngine) -> Vec<Claim> {
+    engine
+        .snapshot()
+        .claims
+        .into_iter()
+        .map(|claim| Claim {
+            id: claim.id,
+            subject: claim.subject,
+            predicate: claim.predicate,
+            object: claim.object,
+            status: claim.status.as_str().to_owned(),
+            scope: claim.scope,
+            source_event_ids: claim.source_event_ids,
+        })
+        .collect()
+}
+
 fn store_actual(path: &Path, run: &StoreRunState) -> StoreActual {
     let store = JsonFileStore::new(path.to_path_buf());
     let inspection = store.inspect();
@@ -394,6 +470,7 @@ fn needs_store(scenario: &Scenario) -> bool {
         || scenario.maintenance.export_import_roundtrip
         || scenario.maintenance.compact_after_events
         || scenario.maintenance.repair_from_backup
+        || scenario.maintenance.curation.is_some()
         || scenario.expected.store.is_some()
 }
 

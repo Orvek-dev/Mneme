@@ -47,6 +47,8 @@ mneme claims --status active --store "$STORE" --json
 mneme context "local-first" --store "$STORE" --json
 mneme remember "user prefers project launch reviews" --scope project-alpha --store "$STORE"
 mneme context "project launch" --scope project-alpha --max-items 3 --store "$STORE" --json
+mneme quality --store "$STORE" --json
+mneme curate --store "$STORE" --json
 mneme validate --store "$STORE"
 ```
 

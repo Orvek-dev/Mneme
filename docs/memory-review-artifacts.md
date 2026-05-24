@@ -33,6 +33,13 @@ Inspect the same review queue without writing an artifact:
 cargo run -p mneme-cli -- quality --store /tmp/mneme.json --json
 ```
 
+Turn the review queue into a guided cleanup plan:
+
+```sh
+cargo run -p mneme-cli -- curate --store /tmp/mneme.json --json
+cargo run -p mneme-cli -- curate --apply --compact --store /tmp/mneme.json --json
+```
+
 Export raw sensitive text only for local private inspection:
 
 ```sh
@@ -70,13 +77,18 @@ JSON artifacts carry the same fields for automation.
 - `duplicate_active`: multiple active claims have the same normalized text and
   scope. Review the IDs and forget redundant active claims by ID.
 - `blocked_secret`: secret-like claims are retained but excluded from active
-  context. Confirm they should stay blocked, or forget them by ID.
+  context. Confirm they should stay blocked, or remove them through explicit
+  curation compaction after local review.
 - `inactive_history`: superseded or forgotten claims remain for audit. Export a
   review artifact, then run `mneme compact` when that history is no longer
   needed.
 
 Quality reports redact blocked-secret text by default and include exact claim
 IDs so follow-up commands can be run without exposing sensitive values.
+
+`mneme curate` is dry-run by default. `--apply` only forgets redundant duplicate
+active claims. `--compact` is an additional explicit flag because it removes
+non-active records, including blocked-secret, superseded, and forgotten claims.
 
 ## Redaction
 
