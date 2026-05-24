@@ -201,10 +201,22 @@ pub(crate) struct AuditEvent {
 pub(crate) struct ActualState {
     pub(crate) events: Vec<RecordedEvent>,
     pub(crate) claims: Vec<Claim>,
+    pub(crate) sessions: Vec<SessionActual>,
     pub(crate) context_pack: Option<ContextPack>,
     pub(crate) budget: BudgetActual,
     pub(crate) audit: Vec<AuditEvent>,
     pub(crate) store: Option<StoreActual>,
+}
+
+#[derive(Debug, Clone)]
+pub(crate) struct SessionActual {
+    pub(crate) id: String,
+    pub(crate) task: String,
+    pub(crate) actor_agent_id: Option<String>,
+    pub(crate) status: String,
+    pub(crate) context_claim_ids: Vec<String>,
+    pub(crate) summary: Option<String>,
+    pub(crate) memory_event_ids: Vec<String>,
 }
 
 #[derive(Debug, Clone, Default)]

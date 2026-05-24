@@ -20,6 +20,14 @@ STORE="${TMP_ROOT}/mneme-quality-gate-cli.json"
 rm -f "$STORE"
 cargo run -p mneme-cli -- remember "user prefers local-first tools" --store "$STORE"
 cargo run -p mneme-cli -- context "local-first" --store "$STORE" --json | grep -q "local-first tools"
+BEGIN_REPORT="${TMP_ROOT}/mneme-quality-gate-begin.json"
+END_REPORT="${TMP_ROOT}/mneme-quality-gate-end.json"
+rm -f "$BEGIN_REPORT" "$END_REPORT"
+cargo run -p mneme-cli -- begin "Draft setup plan" --query "local-first" --agent codex --store "$STORE" --json > "$BEGIN_REPORT"
+grep -q "session-001" "$BEGIN_REPORT"
+cargo run -p mneme-cli -- end session-001 --summary "Prepared a concise setup plan" --remember "user prefers concise setup plans" --store "$STORE" --json > "$END_REPORT"
+grep -q "claim-002" "$END_REPORT"
+cargo run -p mneme-cli -- context "concise" --store "$STORE" --json | grep -q "concise setup plans"
 cargo run -p mneme-cli -- validate --store "$STORE"
 EXPORT_STORE="${TMP_ROOT}/mneme-quality-gate-export.json"
 IMPORT_STORE="${TMP_ROOT}/mneme-quality-gate-import.json"
@@ -47,6 +55,7 @@ cargo run -p mneme-cli -- context "command-backed" --store "$COMMAND_STORE" --js
 cargo run -p mneme-eval -- validate --suite core
 cargo run -p mneme-eval -- validate --suite model
 cargo run -p mneme-eval -- validate --suite runtime
+cargo run -p mneme-eval -- validate --suite agent
 
 for scenario in evals/fixtures/invalid/*.yaml; do
   if cargo run -p mneme-eval -- validate "$scenario"; then
@@ -59,6 +68,8 @@ cargo run -p mneme-eval -- run --suite core --target fake
 cargo run -p mneme-eval -- run --suite core --target mneme-v1
 cargo run -p mneme-eval -- run --suite runtime --target fake
 cargo run -p mneme-eval -- run --suite runtime --target mneme-v1
+cargo run -p mneme-eval -- run --suite agent --target fake
+cargo run -p mneme-eval -- run --suite agent --target mneme-v1
 cargo run -p mneme-eval -- run --suite model --target mneme-v1-command --extractor-command evals/fixtures/command-extractor.sh
 
 MNEME_OPENAI_DRY_RUN=1 cargo run -p mneme-eval -- run --suite model \
@@ -74,6 +85,8 @@ cargo run -p mneme-eval -- acceptance --suite core --target fake
 cargo run -p mneme-eval -- acceptance --suite core --target mneme-v1
 cargo run -p mneme-eval -- acceptance --suite runtime --target fake
 cargo run -p mneme-eval -- acceptance --suite runtime --target mneme-v1
+cargo run -p mneme-eval -- acceptance --suite agent --target fake
+cargo run -p mneme-eval -- acceptance --suite agent --target mneme-v1
 cargo run -p mneme-eval -- acceptance --suite model --target mneme-v1-command --extractor-command evals/fixtures/command-extractor.sh
 
 MNEME_OPENAI_DRY_RUN=1 cargo run -p mneme-eval -- acceptance --suite model \

@@ -24,6 +24,8 @@ The v1 core supports:
 - schema metadata, generation tracking, and migration records;
 - atomic local JSON writes with `.bak` backup creation;
 - store validation, backup repair, import/export, and compaction;
+- agent session begin/end records with task-scoped context and post-task memory
+  writes;
 - a rule-based extractor used by default for deterministic v1 behavior;
 - a command extractor protocol for opt-in model-backed experiments.
 
