@@ -22,9 +22,11 @@ ignored. The wrapper parses these lines directly and does not execute the file.
 Start from the public example:
 
 ```sh
-mkdir -p .mneme
-cp examples/mneme-agent-hook.env.example .mneme/mneme-agent-hook.env
+mneme init
 ```
+
+For manual profiles, `examples/mneme-agent-hook.env.example` remains a
+copyable template.
 
 Supported keys:
 

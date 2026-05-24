@@ -29,6 +29,7 @@ Run a local CLI smoke check with an isolated store:
 STORE=/tmp/mneme-release-smoke.json
 rm -f "$STORE"
 ./scripts/install-local.sh
+mneme init --force
 mneme remember "user prefers local-first tools" --store "$STORE"
 mneme context "local-first" --store "$STORE" --json
 mneme hook doctor --store "$STORE"
