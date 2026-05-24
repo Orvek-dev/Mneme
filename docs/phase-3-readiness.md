@@ -96,3 +96,7 @@ omission reasons, and eval/quality-gate checks for ranked capped retrieval.
 Phase 12 shipped the **Agent Hook Contract MVP** in `v0.18.0`, adding
 `mneme hook begin/end`, the `mneme.agent_hook.v1` JSON envelope, hook error
 classification, and quality-gate checks for hook success and failure paths.
+
+Phase 13 shipped the **Local Store Lock & Conflict Safety MVP** in `v0.19.0`,
+adding exclusive JSON store lock files, stable `store_lock` error
+classification, and hook/quality-gate checks for recoverable lock conflicts.

@@ -60,7 +60,9 @@ cargo run -p mneme-cli -- context "project launch" \
 ## Store Maintenance
 
 The local JSON store includes schema metadata and generation tracking. Writes
-are atomic, and replacing an existing store creates `<store>.bak`.
+create `<store>.lock`, write atomically, and replacing an existing store creates
+`<store>.bak`. If another writer holds the lock, write commands fail without
+modifying the store.
 
 Validate the current store:
 

@@ -36,6 +36,7 @@ Supported extension points:
 - `MnemeStore` for storage adapters.
 - `MnemeExtractor` for extraction adapters.
 - `ContextQuery` for scoped retrieval boundaries and context item caps.
+- `StoreErrorKind` for stable store and lock conflict classification.
 - `CommandExtractor` and the `mneme.extractor.command.v1` JSON protocol for
   provider-wrapper experiments.
 

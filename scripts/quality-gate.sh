@@ -88,6 +88,17 @@ if cargo run -p mneme-cli -- hook end session-404 --summary "Missing session" --
 fi
 grep -q '"ok": false' "$HOOK_ERROR"
 grep -q '"kind": "session"' "$HOOK_ERROR"
+LOCKED_STORE="${TMP_ROOT}/mneme-quality-gate-locked.json"
+LOCKED_ERROR="${TMP_ROOT}/mneme-quality-gate-locked-error.json"
+rm -f "$LOCKED_STORE" "$LOCKED_STORE.lock" "$LOCKED_ERROR"
+printf '%s\n' "held by quality gate" > "$LOCKED_STORE.lock"
+if cargo run -p mneme-cli -- hook begin "Draft locked plan" --store "$LOCKED_STORE" > "$LOCKED_ERROR"; then
+  echo "quality-gate: locked hook unexpectedly passed" >&2
+  exit 1
+fi
+grep -q '"kind": "store_lock"' "$LOCKED_ERROR"
+grep -q '"recoverable": true' "$LOCKED_ERROR"
+rm -f "$LOCKED_STORE.lock"
 cargo run -p mneme-cli -- validate --store "$STORE"
 EXPORT_STORE="${TMP_ROOT}/mneme-quality-gate-export.json"
 IMPORT_STORE="${TMP_ROOT}/mneme-quality-gate-import.json"

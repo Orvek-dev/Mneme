@@ -23,8 +23,8 @@ Mneme is pre-1.0. The useful surface today is local development and evaluation:
 - budget checks happen before extraction;
 - secret-like data is blocked from active context;
 - corrections and forgets are auditable lifecycle transitions;
-- local JSON stores include schema metadata, atomic writes, backups, repair,
-  import/export, and compaction;
+- local JSON stores include schema metadata, write locks, atomic writes,
+  backups, repair, import/export, and compaction;
 - agents can open and close task sessions with scoped context and post-task
   memory writes;
 - agent hooks expose a stable JSON envelope for begin/end automation;
