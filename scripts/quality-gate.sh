@@ -16,6 +16,20 @@ cargo test --workspace --all-targets
 cargo run -p mneme-cli -- doctor
 cargo run -p mneme-eval -- doctor
 
+MNEME_HELP="${TMP_ROOT}/mneme-quality-gate-help.txt"
+MNEME_EVAL_HELP="${TMP_ROOT}/mneme-quality-gate-eval-help.txt"
+rm -f "$MNEME_HELP" "$MNEME_EVAL_HELP"
+cargo run -p mneme-cli -- help > "$MNEME_HELP"
+grep -q "Usage:" "$MNEME_HELP"
+grep -q "mneme help begin" "$MNEME_HELP"
+cargo run -p mneme-cli -- begin --help > "$MNEME_HELP"
+grep -q "Usage: mneme begin" "$MNEME_HELP"
+cargo run -p mneme-eval -- help > "$MNEME_EVAL_HELP"
+grep -q "Usage:" "$MNEME_EVAL_HELP"
+grep -q "mneme-eval help baseline" "$MNEME_EVAL_HELP"
+cargo run -p mneme-eval -- baseline-gate --help > "$MNEME_EVAL_HELP"
+grep -q "Usage: mneme-eval baseline-gate" "$MNEME_EVAL_HELP"
+
 STORE="${TMP_ROOT}/mneme-quality-gate-cli.json"
 rm -f "$STORE"
 cargo run -p mneme-cli -- remember "user prefers local-first tools" --store "$STORE"

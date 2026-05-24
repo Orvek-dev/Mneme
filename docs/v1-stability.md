@@ -34,14 +34,14 @@ eval update land in the same PR.
 ## Stable Tooling Contracts
 
 - `mneme-eval` supports `doctor`, `validate`, `run`, `replay`, `acceptance`,
-  `baseline`, and `baseline-gate`.
+  `baseline`, `baseline-gate`, and command-specific help.
 - Eval reports include `report_schema_version`, target metadata, counts, and
   per-scenario results.
 - The `core`, `runtime`, and `agent` suites must pass for `fake` and
   `mneme-v1`.
 - `mneme-cli` supports `doctor`, `remember`, `correct`, `forget`, `context`,
   `snapshot`, `begin`, `end`, `validate`, `export`, `import`, `compact`,
-  `repair`, and `version`.
+  `repair`, `version`, and command-specific help.
 - `mneme-cli --store <path>` isolates local state.
 - `scripts/quality-gate.sh` is the local and release verification entry point.
 - `scripts/public-safety-check.sh` guards against known private/public-safety

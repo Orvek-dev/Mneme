@@ -20,10 +20,18 @@ From the repository root:
 
 ```sh
 cargo run -p mneme-cli -- doctor
+cargo run -p mneme-cli -- help
 cargo run -p mneme-eval -- doctor
+cargo run -p mneme-eval -- help
 ```
 
-Use an isolated store for local experiments:
+Inspect command-specific usage, then use an isolated store for local
+experiments:
+
+```sh
+cargo run -p mneme-cli -- help begin
+cargo run -p mneme-eval -- run --help
+```
 
 ```sh
 STORE=/tmp/mneme-getting-started.json
