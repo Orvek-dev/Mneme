@@ -27,6 +27,7 @@ cargo run -p mneme-cli -- context "project launch" --scope project-alpha --max-i
 cargo run -p mneme-cli -- snapshot --json
 cargo run -p mneme-cli -- begin "Draft setup plan" --query "local-first" --scope private --max-items 3 --agent codex --json
 cargo run -p mneme-cli -- end session-001 --summary "Prepared a concise setup plan" --remember "user prefers concise setup plans" --json
+cargo run -p mneme-cli -- hook doctor --json
 cargo run -p mneme-cli -- hook begin "Draft setup plan" --query "local-first" --agent codex
 cargo run -p mneme-cli -- validate --json
 cargo run -p mneme-cli -- compact
@@ -132,6 +133,8 @@ as `context`.
 intended for agents and local automations:
 
 ```sh
+cargo run -p mneme-cli -- hook doctor \
+  --store /tmp/mneme.json
 cargo run -p mneme-cli -- hook begin "Draft setup plan" \
   --query "local-first" \
   --agent codex \

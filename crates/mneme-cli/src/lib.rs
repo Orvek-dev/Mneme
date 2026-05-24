@@ -438,13 +438,15 @@ Example:
   mneme end session-001 --summary "Prepared a concise setup plan" --remember "user prefers concise setup plans" --store /tmp/mneme.json --json"#;
 
 const MNEME_HOOK_HELP: &str = r#"Usage:
+  mneme hook doctor [--store <path>]
   mneme hook begin <task> [--query <query>] [--scope <scope>]... [--max-items <n>] [--agent <id>] [--store <path>]
   mneme hook end <session-id> [--summary <text>] [--remember <claim>]... [--agent <id>] [--store <path>]
 
-Run agent begin/end hooks with the stable mneme.agent_hook.v1 JSON envelope.
+Run agent doctor/begin/end hooks with the stable mneme.agent_hook.v1 JSON envelope.
 Success and failure both write JSON to stdout. Failures exit non-zero.
 
 Examples:
+  mneme hook doctor --store /tmp/mneme.json
   mneme hook begin "Draft setup plan" --query "local-first" --agent codex --store /tmp/mneme.json
   mneme hook end session-001 --summary "Prepared a concise setup plan" --remember "user prefers concise setup plans" --store /tmp/mneme.json"#;
 
@@ -675,6 +677,20 @@ struct AgentHookEndReport {
     remembered_event_ids: Vec<String>,
     remembered_claim_ids: Vec<String>,
     report: SessionEndReport,
+}
+
+#[derive(Debug, Serialize)]
+struct AgentHookDoctorReport {
+    schema_version: &'static str,
+    ok: bool,
+    operation: &'static str,
+    recoverable: bool,
+    store: String,
+    default_store: String,
+    version: &'static str,
+    build_stage: &'static str,
+    operations: Vec<&'static str>,
+    inspection: StoreInspection,
 }
 
 #[derive(Debug, Serialize)]
@@ -974,7 +990,7 @@ fn run_agent_hook(raw_args: Vec<String>, writer: &mut impl Write) -> Result<(), 
         return print_help(Some("hook"), writer);
     }
     let operation = raw_args.first().and_then(|value| match value.as_str() {
-        "begin" | "end" => Some(value.clone()),
+        "doctor" | "begin" | "end" => Some(value.clone()),
         _ => None,
     });
     match run_agent_hook_inner(raw_args, writer) {
@@ -992,17 +1008,38 @@ fn run_agent_hook_inner(
 ) -> Result<(), CliError> {
     if raw_args.is_empty() {
         return Err(CliError::invalid_cli(
-            "usage: mneme hook <begin|end> [options]",
+            "usage: mneme hook <doctor|begin|end> [options]",
         ));
     }
     let operation = raw_args.remove(0);
     match operation.as_str() {
+        "doctor" => run_agent_hook_doctor(raw_args, writer),
         "begin" => run_agent_hook_begin(raw_args, writer),
         "end" => run_agent_hook_end(raw_args, writer),
         value => Err(CliError::invalid_cli(format!(
-            "unknown hook operation: {value}\navailable hook operations: begin, end"
+            "unknown hook operation: {value}\navailable hook operations: doctor, begin, end"
         ))),
     }
+}
+
+fn run_agent_hook_doctor(raw_args: Vec<String>, writer: &mut impl Write) -> Result<(), CliError> {
+    let options = parse_no_position_args(raw_args, "hook doctor")?;
+    let store_path = resolve_store_path(&options)?;
+    let default_store = default_store_path()?;
+    let store = JsonFileStore::new(store_path.clone());
+    let report = AgentHookDoctorReport {
+        schema_version: AGENT_HOOK_SCHEMA_VERSION,
+        ok: true,
+        operation: "doctor",
+        recoverable: false,
+        store: store_path.display().to_string(),
+        default_store: default_store.display().to_string(),
+        version: env!("CARGO_PKG_VERSION"),
+        build_stage: BuildStage::PersonalCoreV1.as_str(),
+        operations: vec!["doctor", "begin", "end"],
+        inspection: store.inspect(),
+    };
+    write_json(writer, &report)
 }
 
 fn run_agent_hook_begin(raw_args: Vec<String>, writer: &mut impl Write) -> Result<(), CliError> {
@@ -2136,6 +2173,7 @@ mod tests {
             &mut hook_output,
         )?;
         let hook_text = String::from_utf8(hook_output)?;
+        assert!(hook_text.contains("mneme hook doctor"));
         assert!(hook_text.contains("mneme hook begin"));
         assert!(hook_text.contains("mneme.agent_hook.v1"));
         Ok(())
@@ -2830,6 +2868,35 @@ mod tests {
 
         let _ = std::fs::remove_file(&path);
         let _ = std::fs::remove_file(format!("{}.bak", path.display()));
+        Ok(())
+    }
+
+    #[test]
+    fn hook_doctor_emits_runtime_installation_report() -> Result<(), Box<dyn std::error::Error>> {
+        let path = temp_store_path("hook-doctor");
+        let _ = std::fs::remove_file(&path);
+
+        let mut output = Vec::new();
+        run_cli_with_writer(
+            vec![
+                "mneme".to_owned(),
+                "hook".to_owned(),
+                "doctor".to_owned(),
+                "--store".to_owned(),
+                path.display().to_string(),
+            ],
+            &mut output,
+        )?;
+        let text = String::from_utf8(output)?;
+        assert!(text.contains("\"schema_version\": \"mneme.agent_hook.v1\""));
+        assert!(text.contains("\"ok\": true"));
+        assert!(text.contains("\"operation\": \"doctor\""));
+        assert!(text.contains("\"build_stage\": \"personal-core-v1\""));
+        assert!(text.contains("\"doctor\""));
+        assert!(text.contains("\"begin\""));
+        assert!(text.contains("\"end\""));
+
+        let _ = std::fs::remove_file(&path);
         Ok(())
     }
 

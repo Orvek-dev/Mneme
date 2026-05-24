@@ -68,6 +68,7 @@ cargo run -p mneme-cli -- hook begin "Draft setup plan" \
   --query "local-first" \
   --agent codex \
   --store "$STORE"
+scripts/mneme-agent-hook.sh doctor
 cargo run -p mneme-cli -- end session-001 \
   --summary "Prepared a concise setup plan" \
   --remember "user prefers concise setup plans" \

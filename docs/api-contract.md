@@ -11,8 +11,8 @@ for the current local-first MVP and the verification required before releases.
   tooling.
 - `mneme-eval` exposes the `mneme-eval` binary and `run_cli` for harness-bound
   local tooling.
-- `mneme hook begin/end` expose the `mneme.agent_hook.v1` JSON contract for
-  local agent automation.
+- `mneme hook doctor/begin/end` expose the `mneme.agent_hook.v1` JSON contract
+  for local agent automation.
 
 New integrations should prefer `mneme-core` unless they specifically need to
 drive the command-line contracts.
@@ -44,6 +44,11 @@ Supported extension points:
 CLI-bound integrations can use `mneme claims`, `mneme forget --claim-id`, and
 `mneme correct --claim-id` when they need an inspectable user-control surface
 without linking directly to Rust APIs.
+
+Agent runtimes can use `scripts/mneme-agent-hook.sh` as the repository-local
+installation wrapper. It delegates to an installed `MNEME_BIN`, otherwise runs
+cargo from the repository, and uses a local debug binary only when cargo is
+unavailable.
 
 Stable behavior remains defined by `docs/v1-stability.md`, public feature
 specs, eval scenarios, and the release quality gate.

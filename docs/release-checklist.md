@@ -30,6 +30,8 @@ STORE=/tmp/mneme-release-smoke.json
 rm -f "$STORE"
 cargo run -p mneme-cli -- remember "user prefers local-first tools" --store "$STORE"
 cargo run -p mneme-cli -- context "local-first" --store "$STORE" --json
+cargo run -p mneme-cli -- hook doctor --store "$STORE"
+scripts/mneme-agent-hook.sh doctor
 rm -f "$STORE"
 ```
 

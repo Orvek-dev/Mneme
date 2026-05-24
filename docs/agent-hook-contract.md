@@ -1,12 +1,26 @@
 # Agent Hook Contract
 
-`mneme hook begin` and `mneme hook end` are the automation-facing session
-commands. They use the same `mneme-core` session behavior as `begin` and `end`,
-but always write a stable JSON envelope to stdout.
+`mneme hook doctor`, `mneme hook begin`, and `mneme hook end` are the
+automation-facing runtime commands. `begin` and `end` use the same `mneme-core`
+session behavior as the direct CLI commands, but hook commands always write a
+stable JSON envelope to stdout.
 
 ## Schema
 
 The current hook envelope schema is `mneme.agent_hook.v1`.
+
+Successful `hook doctor` output includes:
+
+- `schema_version`
+- `ok: true`
+- `operation: doctor`
+- `recoverable: false`
+- `store`
+- `default_store`
+- `version`
+- `build_stage`
+- `operations`
+- `inspection`
 
 Successful `hook begin` output includes:
 
@@ -71,6 +85,9 @@ invalid CLI, JSON, and session failures.
 ## Usage
 
 ```sh
+cargo run -p mneme-cli -- hook doctor \
+  --store /tmp/mneme.json
+
 cargo run -p mneme-cli -- hook begin "Draft setup plan" \
   --query "local-first" \
   --scope private \
@@ -87,3 +104,22 @@ cargo run -p mneme-cli -- hook end session-001 \
 Agents should preserve `session_id` from begin and pass it to end. They should
 use `report.context_pack.items` as task context and treat `context_claim_ids` as
 the compact citation list for the started session.
+
+## Runtime Wrapper
+
+Repository-local automation can call `scripts/mneme-agent-hook.sh` instead of
+hard-coding cargo commands:
+
+```sh
+scripts/mneme-agent-hook.sh doctor
+MNEME_STORE=/tmp/mneme.json MNEME_AGENT_ID=codex \
+  scripts/mneme-agent-hook.sh begin "Draft setup plan" --query "local-first"
+MNEME_STORE=/tmp/mneme.json \
+  scripts/mneme-agent-hook.sh end session-001 --summary "Prepared setup plan"
+```
+
+The wrapper uses `MNEME_BIN` when set, otherwise runs
+`cargo run -q -p mneme-cli --` from the repository, and falls back to
+`target/debug/mneme` only when cargo is unavailable. `MNEME_STORE`,
+`MNEME_AGENT_ID`, `MNEME_SCOPE`, and `MNEME_MAX_ITEMS` are appended when the same
+CLI options are not already present.
