@@ -127,7 +127,14 @@ WRAPPER_DOCTOR="${TMP_ROOT}/mneme-quality-gate-wrapper-doctor.txt"
 WRAPPER_STORE="${TMP_ROOT}/mneme-quality-gate-wrapper.json"
 WRAPPER_BEGIN="${TMP_ROOT}/mneme-quality-gate-wrapper-begin.json"
 WRAPPER_END="${TMP_ROOT}/mneme-quality-gate-wrapper-end.json"
-rm -f "$WRAPPER_DOCTOR" "$WRAPPER_STORE" "$WRAPPER_STORE.bak" "$WRAPPER_STORE.lock" "$WRAPPER_BEGIN" "$WRAPPER_END"
+WRAPPER_CONFIG="${TMP_ROOT}/mneme-quality-gate-wrapper.env"
+WRAPPER_CONFIG_STORE="${TMP_ROOT}/mneme-quality-gate-wrapper-config.json"
+WRAPPER_CONFIG_DOCTOR="${TMP_ROOT}/mneme-quality-gate-wrapper-config-doctor.txt"
+WRAPPER_CONFIG_BEGIN="${TMP_ROOT}/mneme-quality-gate-wrapper-config-begin.json"
+WRAPPER_CONFIG_END="${TMP_ROOT}/mneme-quality-gate-wrapper-config-end.json"
+rm -f "$WRAPPER_DOCTOR" "$WRAPPER_STORE" "$WRAPPER_STORE.bak" "$WRAPPER_STORE.lock" "$WRAPPER_BEGIN" "$WRAPPER_END" \
+  "$WRAPPER_CONFIG" "$WRAPPER_CONFIG_STORE" "$WRAPPER_CONFIG_STORE.bak" "$WRAPPER_CONFIG_STORE.lock" \
+  "$WRAPPER_CONFIG_DOCTOR" "$WRAPPER_CONFIG_BEGIN" "$WRAPPER_CONFIG_END"
 ./scripts/mneme-agent-hook.sh doctor > "$WRAPPER_DOCTOR"
 grep -q 'mneme-agent-hook: ok' "$WRAPPER_DOCTOR"
 cargo run -p mneme-cli -- remember "user prefers wrapper workflows" --store "$WRAPPER_STORE"
@@ -138,6 +145,23 @@ grep -q '"session_id": "session-001"' "$WRAPPER_BEGIN"
 MNEME_STORE="$WRAPPER_STORE" MNEME_AGENT_ID=codex \
   ./scripts/mneme-agent-hook.sh end session-001 --summary "Prepared wrapper plan" > "$WRAPPER_END"
 grep -q '"operation": "end"' "$WRAPPER_END"
+cat > "$WRAPPER_CONFIG" <<EOF
+MNEME_STORE=$WRAPPER_CONFIG_STORE
+MNEME_AGENT_ID=codex
+MNEME_SCOPE=private
+MNEME_MAX_ITEMS=2
+EOF
+MNEME_AGENT_HOOK_CONFIG="$WRAPPER_CONFIG" ./scripts/mneme-agent-hook.sh doctor > "$WRAPPER_CONFIG_DOCTOR"
+grep -q 'mneme-agent-hook: config=' "$WRAPPER_CONFIG_DOCTOR"
+grep -q 'mneme-agent-hook: ok' "$WRAPPER_CONFIG_DOCTOR"
+cargo run -p mneme-cli -- remember "user prefers config profiles" --store "$WRAPPER_CONFIG_STORE"
+MNEME_AGENT_HOOK_CONFIG="$WRAPPER_CONFIG" \
+  ./scripts/mneme-agent-hook.sh begin "Draft config profile plan" --query "config profiles" > "$WRAPPER_CONFIG_BEGIN"
+grep -q '"operation": "begin"' "$WRAPPER_CONFIG_BEGIN"
+grep -q '"session_id": "session-001"' "$WRAPPER_CONFIG_BEGIN"
+MNEME_AGENT_HOOK_CONFIG="$WRAPPER_CONFIG" \
+  ./scripts/mneme-agent-hook.sh end session-001 --summary "Prepared config profile plan" > "$WRAPPER_CONFIG_END"
+grep -q '"operation": "end"' "$WRAPPER_CONFIG_END"
 cargo run -p mneme-cli -- validate --store "$STORE"
 EXPORT_STORE="${TMP_ROOT}/mneme-quality-gate-export.json"
 IMPORT_STORE="${TMP_ROOT}/mneme-quality-gate-import.json"

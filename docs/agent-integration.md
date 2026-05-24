@@ -1,8 +1,8 @@
 # Agent Integration
 
 Mneme v1 exposes a small local protocol that agents can call around a task.
-For automation, prefer `mneme hook begin/end`; the older `begin/end --json`
-commands remain useful for direct CLI inspection.
+For automation, prefer `mneme hook doctor/begin/end`; the older
+`begin/end --json` commands remain useful for direct CLI inspection.
 
 ## Start A Task
 
@@ -80,11 +80,18 @@ MNEME_AGENT_ID=codex \
 
 Supported environment variables:
 
+- `MNEME_AGENT_HOOK_CONFIG`: explicit runtime profile path.
+- `MNEME_CONFIG`: fallback runtime profile path.
 - `MNEME_BIN`: path to an installed `mneme` binary.
 - `MNEME_STORE`: store path appended when `--store` is absent.
 - `MNEME_AGENT_ID`: agent ID appended when `--agent` is absent.
 - `MNEME_SCOPE`: begin scope appended when `--scope` is absent.
 - `MNEME_MAX_ITEMS`: begin item cap appended when `--max-items` is absent.
+
+For persistent local configuration, copy
+`examples/mneme-agent-hook.env.example` to `.mneme/mneme-agent-hook.env`.
+Runtime values resolve as CLI flags, then environment variables, then profile
+values, then command defaults.
 
 `scripts/mneme-agent-hook.sh doctor` runs an isolated temporary-store smoke test
 covering hook doctor, begin, and end.

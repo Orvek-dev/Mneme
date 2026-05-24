@@ -53,6 +53,9 @@ eval update land in the same PR.
   success and failure, with non-zero process exits on failure.
 - `scripts/mneme-agent-hook.sh` provides the repository-local wrapper for agent
   runtime installation smoke checks and env-based hook defaults.
+- The hook wrapper reads runtime profiles from `MNEME_AGENT_HOOK_CONFIG`,
+  `MNEME_CONFIG`, or `.mneme/mneme-agent-hook.env`; CLI flags override env,
+  and env overrides profile values.
 - `mneme-cli --store <path>` isolates local state.
 - `scripts/quality-gate.sh` is the local and release verification entry point.
 - `RUSTDOCFLAGS="-D warnings" cargo doc --workspace --no-deps` must pass before

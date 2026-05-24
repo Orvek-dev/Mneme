@@ -76,6 +76,15 @@ cargo run -p mneme-cli -- end session-001 \
   --json
 ```
 
+For repeated local use, copy the public profile example to the ignored runtime
+directory:
+
+```sh
+mkdir -p .mneme
+cp examples/mneme-agent-hook.env.example .mneme/mneme-agent-hook.env
+scripts/mneme-agent-hook.sh doctor
+```
+
 ## Eval Harness
 
 Run the deterministic suites before changing behavior:
