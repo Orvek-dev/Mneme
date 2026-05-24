@@ -115,6 +115,20 @@ fn check_context_pack(expected: &ContextPackExpected, actual: &ActualState) -> V
         .map(|item| format!("{}:{}", item.claim_id, item.reason))
         .collect::<Vec<_>>()
         .join(",");
+    let item_summary = context
+        .items
+        .iter()
+        .map(|item| {
+            format!(
+                "{}:{}:{}:{}",
+                item.claim_text,
+                item.score,
+                item.match_reason,
+                item.matched_terms.join("|")
+            )
+        })
+        .collect::<Vec<_>>()
+        .join(",");
     let joined = context
         .items
         .iter()
@@ -123,6 +137,23 @@ fn check_context_pack(expected: &ContextPackExpected, actual: &ActualState) -> V
         .join("\n");
     let joined_lower = joined.to_ascii_lowercase();
     let mut checks = Vec::new();
+
+    if let Some(expected_count) = expected.item_count {
+        if context.items.len() == expected_count {
+            checks.push(CheckReport::pass(
+                "context_pack.item_count",
+                expected_count.to_string(),
+                context.items.len().to_string(),
+            ));
+        } else {
+            checks.push(CheckReport::fail(
+                "context_pack.item_count",
+                expected_count.to_string(),
+                context.items.len().to_string(),
+                format!("actual.context_pack.items={item_summary}"),
+            ));
+        }
+    }
 
     for value in &expected.must_include {
         let value_lower = value.to_ascii_lowercase();
@@ -157,6 +188,14 @@ fn check_context_pack(expected: &ContextPackExpected, actual: &ActualState) -> V
                 "absent",
             ));
         }
+    }
+    if !expected.expected_order.is_empty() {
+        checks.push(check_context_order(
+            &expected.expected_order,
+            &context,
+            &omitted_summary,
+            &item_summary,
+        ));
     }
     for value in &expected.omitted_reason_contains {
         if omitted_summary.contains(value) {
@@ -197,6 +236,45 @@ fn check_context_pack(expected: &ContextPackExpected, actual: &ActualState) -> V
         }
     }
     checks
+}
+
+fn check_context_order(
+    expected_order: &[String],
+    context: &ContextPack,
+    omitted_summary: &str,
+    item_summary: &str,
+) -> CheckReport {
+    let mut next_index = 0;
+    let mut actual_order = Vec::new();
+    for expected in expected_order {
+        let expected_lower = expected.to_ascii_lowercase();
+        let found = context
+            .items
+            .iter()
+            .enumerate()
+            .skip(next_index)
+            .find(|(_, item)| {
+                item.claim_text
+                    .to_ascii_lowercase()
+                    .contains(&expected_lower)
+            });
+        let Some((index, item)) = found else {
+            return CheckReport::fail(
+                "context_pack.expected_order",
+                expected_order.join(" > "),
+                actual_order.join(" > "),
+                format!("actual.context_pack.items={item_summary} omitted={omitted_summary}"),
+            );
+        };
+        next_index = index + 1;
+        actual_order.push(item.claim_text.clone());
+    }
+
+    CheckReport::pass(
+        "context_pack.expected_order",
+        expected_order.join(" > "),
+        actual_order.join(" > "),
+    )
 }
 
 fn check_audit(expected: &AuditExpected, actual: &ActualState) -> Vec<CheckReport> {
@@ -546,10 +624,13 @@ mod tests {
                     must_not_exist: false,
                 }],
                 context_pack: Some(ContextPackExpected {
-                    query: "preferences".to_owned(),
+                    query: "user preferences".to_owned(),
                     allowed_scopes: Vec::new(),
+                    max_items: None,
+                    item_count: None,
                     must_include: vec!["local-first".to_owned()],
                     must_not_include: Vec::new(),
+                    expected_order: Vec::new(),
                     omitted_reason_contains: Vec::new(),
                     citation_required: true,
                 }),

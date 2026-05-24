@@ -122,9 +122,13 @@ expected:
     query: "user preferences"
     allowed_scopes:
       - private
+    max_items: 8
+    item_count: 1
     must_include:
       - local-first
     must_not_include: []
+    expected_order:
+      - local-first
     omitted_reason_contains: []
     citation_required: true
   budget:
@@ -206,11 +210,17 @@ Each expected claim requires:
 - `context_pack.query`: deterministic context retrieval query.
 - `context_pack.allowed_scopes`: scopes allowed for context retrieval. Defaults
   to `private` when omitted.
+- `context_pack.max_items`: maximum ranked context items to return. Defaults to
+  the runtime cap of 8 when omitted.
+- `context_pack.item_count`: exact expected number of returned context items.
 - `context_pack.must_include`: strings that must appear in the context pack.
 - `context_pack.must_not_include`: strings that must not appear in the context
   pack.
+- `context_pack.expected_order`: strings that must appear in returned context
+  items in this relative ranking order.
 - `context_pack.omitted_reason_contains`: omission reason fragments that must
-  appear, such as `scope_denied:project-alpha`.
+  appear, such as `scope_denied:project-alpha` or
+  `context_budget_exceeded:max_items=2`.
 - `context_pack.citation_required`: requires source event citations.
 - `budget.hard_cap_violations`: expected budget hard-cap violation count.
 - `audit.read_write_events_required`: requires read/write audit evidence.

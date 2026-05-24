@@ -192,6 +192,7 @@ fn run_with_optional_persistence(
             actor_agent_id: agent_flow.begin.actor_agent_id.clone(),
             query: agent_flow.begin.query.clone(),
             allowed_scopes: effective_allowed_scopes(&agent_flow.begin.allowed_scopes),
+            max_items: mneme_core::DEFAULT_CONTEXT_MAX_ITEMS,
         });
         if let Some(end) = &agent_flow.end {
             engine
@@ -211,10 +212,17 @@ fn run_with_optional_persistence(
     }
 
     let context_pack = scenario.expected.context_pack.as_ref().map(|expected| {
-        engine.build_context_pack_with(ContextQuery::with_allowed_scopes(
-            expected.query.clone(),
-            effective_allowed_scopes(&expected.allowed_scopes),
-        ))
+        engine.build_context_pack_with(
+            ContextQuery::with_allowed_scopes(
+                expected.query.clone(),
+                effective_allowed_scopes(&expected.allowed_scopes),
+            )
+            .with_max_items(
+                expected
+                    .max_items
+                    .unwrap_or(mneme_core::DEFAULT_CONTEXT_MAX_ITEMS),
+            ),
+        )
     });
     if needs_store(scenario) {
         if let Some(path) = persistence_path {
@@ -269,6 +277,9 @@ fn run_with_optional_persistence(
                     claim_id: item.claim_id,
                     claim_text: item.claim_text,
                     source_event_ids: item.source_event_ids,
+                    score: item.score,
+                    matched_terms: item.matched_terms,
+                    match_reason: item.match_reason,
                 })
                 .collect(),
             omitted: pack
