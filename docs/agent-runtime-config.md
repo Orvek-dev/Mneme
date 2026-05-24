@@ -23,6 +23,7 @@ Start from the public example:
 
 ```sh
 mneme init
+mneme doctor
 ```
 
 For manual profiles, `examples/mneme-agent-hook.env.example` remains a
@@ -55,8 +56,11 @@ MNEME_AGENT_HOOK_CONFIG=.mneme/mneme-agent-hook.env \
 Run an installation smoke test:
 
 ```sh
+mneme doctor --json
 scripts/mneme-agent-hook.sh doctor
 ```
 
-`doctor` uses an isolated temporary store for its smoke test. It reports whether
-a profile was loaded without writing to the configured project store.
+`mneme doctor` inspects the configured store/profile pair without mutating
+files. `scripts/mneme-agent-hook.sh doctor` uses an isolated temporary store
+for its smoke test and reports whether a profile was loaded without writing to
+the configured project store.
