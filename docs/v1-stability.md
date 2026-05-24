@@ -56,6 +56,9 @@ eval update land in the same PR.
   help.
 - `mneme init` creates a valid local v1 store and an agent hook runtime profile
   without tracking `.mneme/` in git.
+- `mneme doctor` reports local workspace health for the store, backup, and
+  agent hook profile without mutating files; `--json` exposes the same report
+  for scripts.
 - `mneme hook doctor/begin/end` emit the `mneme.agent_hook.v1` JSON envelope for
   success and failure, with non-zero process exits on failure.
 - `scripts/mneme-agent-hook.sh` provides the repository-local wrapper for agent

@@ -201,7 +201,7 @@ fn run_cli_with_writer(
     let mut args = args.into_iter();
     let _program = args.next();
     let Some(command) = args.next() else {
-        print_doctor(writer)?;
+        run_doctor(Vec::new(), writer)?;
         return Ok(());
     };
     let raw_args = args.collect::<Vec<_>>();
@@ -209,13 +209,7 @@ fn run_cli_with_writer(
         "help" => run_help(raw_args, writer),
         "--help" | "-h" => print_help(None, writer),
         "init" => run_command_or_help("init", raw_args, writer, run_init),
-        "doctor" => {
-            if wants_command_help(&raw_args) {
-                print_help(Some("doctor"), writer)
-            } else {
-                print_doctor(writer)
-            }
-        }
+        "doctor" => run_command_or_help("doctor", raw_args, writer, run_doctor),
         "--version" | "version" => {
             if wants_command_help(&raw_args) {
                 print_help(Some("version"), writer)
@@ -331,7 +325,7 @@ Usage:
 
 Commands:
   init        Initialize a local .mneme store and agent hook profile.
-  doctor      Show local CLI and default store information.
+  doctor      Inspect workspace store and agent hook profile health.
   version     Print the CLI version.
   ingest      Ingest one event, optionally through a command extractor.
   remember    Save an explicit memory claim.
@@ -373,9 +367,15 @@ Examples:
   mneme init --agent codex --scope private --max-items 3
   mneme init --store /tmp/mneme.json --config /tmp/mneme-agent-hook.env --bin /usr/local/bin/mneme --json"#;
 
-const MNEME_DOCTOR_HELP: &str = r#"Usage: mneme doctor
+const MNEME_DOCTOR_HELP: &str = r#"Usage: mneme doctor [--store <path>] [--config <path>] [--json]
 
-Show local CLI build stage and the default store path."#;
+Inspect local CLI build information, workspace store health, and the agent hook
+runtime profile. The command reports health without mutating files.
+
+Examples:
+  mneme doctor
+  mneme doctor --json
+  mneme doctor --store /tmp/mneme.json --config /tmp/mneme-agent-hook.env --json"#;
 
 const MNEME_VERSION_HELP: &str = r#"Usage: mneme version
 
@@ -515,21 +515,16 @@ Restore the current store from its backup when possible.
 Example:
   mneme repair --store /tmp/mneme.json"#;
 
-fn print_doctor(writer: &mut impl Write) -> Result<(), CliError> {
-    writeln!(
-        writer,
-        "{PRODUCT_NAME} local CLI: {}",
-        BuildStage::PersonalCoreV1.as_str()
-    )
-    .map_err(|source| CliError::io("write", Path::new("<stdout>"), source))?;
-    writeln!(writer, "default store: {}", default_store_path()?.display())
-        .map_err(|source| CliError::io("write", Path::new("<stdout>"), source))
-}
-
 #[derive(Debug, Clone, Default)]
 struct CommonOptions {
     json: bool,
     store_path: Option<PathBuf>,
+}
+
+#[derive(Debug, Clone, Default)]
+struct DoctorOptions {
+    common: CommonOptions,
+    config_path: Option<PathBuf>,
 }
 
 #[derive(Debug, Clone)]
@@ -671,6 +666,45 @@ struct EventCommandReport {
     event_count: usize,
     claim_count: usize,
     latest_claim: Option<ClaimSummary>,
+}
+
+#[derive(Debug, Serialize)]
+struct DoctorReport {
+    command: &'static str,
+    ok: bool,
+    version: &'static str,
+    build_stage: &'static str,
+    workspace: String,
+    default_store: String,
+    store: StoreInspection,
+    profile: AgentHookProfileInspection,
+    checks: Vec<DoctorCheckReport>,
+    recommendations: Vec<String>,
+}
+
+#[derive(Debug, Serialize)]
+struct DoctorCheckReport {
+    name: &'static str,
+    status: &'static str,
+    detail: String,
+}
+
+#[derive(Debug, Clone, Serialize)]
+struct AgentHookProfileInspection {
+    path: String,
+    status: &'static str,
+    loaded: bool,
+    values: AgentHookProfileValues,
+    issues: Vec<String>,
+}
+
+#[derive(Debug, Clone, Default, Serialize)]
+struct AgentHookProfileValues {
+    mneme_bin: Option<String>,
+    mneme_store: Option<String>,
+    mneme_agent_id: Option<String>,
+    mneme_scope: Option<String>,
+    mneme_max_items: Option<String>,
 }
 
 #[derive(Debug, Serialize)]
@@ -949,6 +983,12 @@ enum CorrectTarget {
 enum ForgetTarget {
     Text(String),
     ClaimId(String),
+}
+
+fn run_doctor(raw_args: Vec<String>, writer: &mut impl Write) -> Result<(), CliError> {
+    let options = parse_doctor_args(raw_args)?;
+    let report = build_doctor_report(&options)?;
+    emit_doctor_report(&report, options.common.json, writer)
 }
 
 fn run_init(raw_args: Vec<String>, writer: &mut impl Write) -> Result<(), CliError> {
@@ -1498,6 +1538,36 @@ fn run_repair(raw_args: Vec<String>, writer: &mut impl Write) -> Result<(), CliE
             "store could not be repaired",
         ))
     }
+}
+
+fn parse_doctor_args(raw_args: Vec<String>) -> Result<DoctorOptions, CliError> {
+    let mut options = DoctorOptions::default();
+    let mut idx = 0;
+    while idx < raw_args.len() {
+        if parse_common_option(&raw_args, &mut idx, &mut options.common)? {
+            idx += 1;
+            continue;
+        }
+        match raw_args[idx].as_str() {
+            "--config" => {
+                idx += 1;
+                options.config_path =
+                    Some(PathBuf::from(required_arg(&raw_args, idx, "--config")?));
+            }
+            value if value.starts_with('-') => {
+                return Err(CliError::invalid_cli(format!(
+                    "unknown doctor option: {value}"
+                )));
+            }
+            value => {
+                return Err(CliError::invalid_cli(format!(
+                    "unexpected doctor argument: {value}"
+                )));
+            }
+        }
+        idx += 1;
+    }
+    Ok(options)
 }
 
 fn parse_init_args(raw_args: Vec<String>) -> Result<InitOptions, CliError> {
@@ -2226,6 +2296,279 @@ fn default_init_config_path(store_path: &Path) -> PathBuf {
         .join("mneme-agent-hook.env")
 }
 
+fn build_doctor_report(options: &DoctorOptions) -> Result<DoctorReport, CliError> {
+    let workspace = env::current_dir()
+        .map_err(|source| CliError::io("read current dir", Path::new("."), source))?;
+    let default_store = default_store_path()?;
+    let store_path = resolve_store_path(&options.common)?;
+    let config_path = options
+        .config_path
+        .clone()
+        .unwrap_or_else(|| default_init_config_path(&store_path));
+    let store = JsonFileStore::new(store_path.clone());
+    let inspection = store.inspect();
+    let profile = inspect_agent_hook_profile(&config_path, &store_path, &workspace);
+    let checks = doctor_checks(&inspection, &profile);
+    let recommendations = doctor_recommendations(&inspection, &profile);
+    let ok = checks.iter().all(|check| check.status == "pass");
+    Ok(DoctorReport {
+        command: "doctor",
+        ok,
+        version: env!("CARGO_PKG_VERSION"),
+        build_stage: BuildStage::PersonalCoreV1.as_str(),
+        workspace: workspace.display().to_string(),
+        default_store: default_store.display().to_string(),
+        store: inspection,
+        profile,
+        checks,
+        recommendations,
+    })
+}
+
+fn inspect_agent_hook_profile(
+    path: &Path,
+    store_path: &Path,
+    workspace: &Path,
+) -> AgentHookProfileInspection {
+    let mut inspection = AgentHookProfileInspection {
+        path: path.display().to_string(),
+        status: "missing",
+        loaded: false,
+        values: AgentHookProfileValues::default(),
+        issues: Vec::new(),
+    };
+    let Ok(text) = std::fs::read_to_string(path) else {
+        if path.exists() {
+            inspection.status = "invalid";
+            inspection
+                .issues
+                .push("profile exists but could not be read".to_owned());
+        }
+        return inspection;
+    };
+    inspection.loaded = true;
+    inspection.status = "valid";
+    for (line_idx, raw_line) in text.lines().enumerate() {
+        let line = raw_line.trim_end_matches('\r');
+        if line.trim().is_empty() || line.trim_start().starts_with('#') {
+            continue;
+        }
+        let Some((key, raw_value)) = line.split_once('=') else {
+            inspection
+                .issues
+                .push(format!("line {} is not KEY=VALUE", line_idx + 1));
+            continue;
+        };
+        let value = strip_optional_profile_quotes(raw_value);
+        match key {
+            "MNEME_BIN" => assign_profile_value(
+                &mut inspection.values.mneme_bin,
+                value,
+                key,
+                &mut inspection.issues,
+            ),
+            "MNEME_STORE" => assign_profile_value(
+                &mut inspection.values.mneme_store,
+                value,
+                key,
+                &mut inspection.issues,
+            ),
+            "MNEME_AGENT_ID" => assign_profile_value(
+                &mut inspection.values.mneme_agent_id,
+                value,
+                key,
+                &mut inspection.issues,
+            ),
+            "MNEME_SCOPE" => assign_profile_value(
+                &mut inspection.values.mneme_scope,
+                value,
+                key,
+                &mut inspection.issues,
+            ),
+            "MNEME_MAX_ITEMS" => assign_profile_value(
+                &mut inspection.values.mneme_max_items,
+                value,
+                key,
+                &mut inspection.issues,
+            ),
+            unknown => inspection
+                .issues
+                .push(format!("unknown profile key: {unknown}")),
+        }
+    }
+    validate_profile_values(&mut inspection, store_path, workspace);
+    if !inspection.issues.is_empty() {
+        inspection.status = "invalid";
+    }
+    inspection
+}
+
+fn strip_optional_profile_quotes(value: &str) -> String {
+    let trimmed = value.trim();
+    if trimmed.len() >= 2
+        && ((trimmed.starts_with('"') && trimmed.ends_with('"'))
+            || (trimmed.starts_with('\'') && trimmed.ends_with('\'')))
+    {
+        trimmed[1..trimmed.len() - 1].to_owned()
+    } else {
+        trimmed.to_owned()
+    }
+}
+
+fn assign_profile_value(
+    target: &mut Option<String>,
+    value: String,
+    key: &str,
+    issues: &mut Vec<String>,
+) {
+    if target.is_some() {
+        issues.push(format!("duplicate profile key: {key}"));
+    }
+    if value.trim().is_empty() {
+        issues.push(format!("{key} must not be empty"));
+    }
+    *target = Some(value);
+}
+
+fn validate_profile_values(
+    inspection: &mut AgentHookProfileInspection,
+    store_path: &Path,
+    workspace: &Path,
+) {
+    let values = &inspection.values;
+    let Some(profile_store) = &values.mneme_store else {
+        inspection.issues.push("MNEME_STORE is missing".to_owned());
+        return;
+    };
+    if values.mneme_agent_id.is_none() {
+        inspection
+            .issues
+            .push("MNEME_AGENT_ID is missing".to_owned());
+    }
+    if values.mneme_scope.is_none() {
+        inspection.issues.push("MNEME_SCOPE is missing".to_owned());
+    }
+    match &values.mneme_max_items {
+        Some(value) => match value.parse::<usize>() {
+            Ok(0) => inspection
+                .issues
+                .push("MNEME_MAX_ITEMS must be greater than zero".to_owned()),
+            Ok(_) => {}
+            Err(source) => inspection.issues.push(format!(
+                "MNEME_MAX_ITEMS is not a positive integer: {source}"
+            )),
+        },
+        None => inspection
+            .issues
+            .push("MNEME_MAX_ITEMS is missing".to_owned()),
+    }
+    let profile_store_path = profile_value_path(profile_store, workspace);
+    if !paths_equivalent_or_equal(&profile_store_path, store_path) {
+        inspection.issues.push(format!(
+            "MNEME_STORE points to {}, expected {}",
+            profile_store_path.display(),
+            store_path.display()
+        ));
+    }
+    if let Some(bin) = &values.mneme_bin {
+        let bin_path = profile_value_path(bin, workspace);
+        if !bin_path.is_file() {
+            inspection.issues.push(format!(
+                "MNEME_BIN is not an executable file: {}",
+                bin_path.display()
+            ));
+        }
+    }
+}
+
+fn profile_value_path(value: &str, workspace: &Path) -> PathBuf {
+    let path = PathBuf::from(value);
+    if path.is_absolute() {
+        path
+    } else {
+        workspace.join(path)
+    }
+}
+
+fn paths_equivalent_or_equal(left: &Path, right: &Path) -> bool {
+    if left == right {
+        return true;
+    }
+    match (std::fs::canonicalize(left), std::fs::canonicalize(right)) {
+        (Ok(left), Ok(right)) => left == right,
+        _ => left.display().to_string() == right.display().to_string(),
+    }
+}
+
+fn doctor_checks(
+    inspection: &StoreInspection,
+    profile: &AgentHookProfileInspection,
+) -> Vec<DoctorCheckReport> {
+    let store_check = match inspection.current.status {
+        StoreFileStatus::Valid => DoctorCheckReport {
+            name: "store.current",
+            status: "pass",
+            detail: "store is valid".to_owned(),
+        },
+        StoreFileStatus::Missing => DoctorCheckReport {
+            name: "store.current",
+            status: "fail",
+            detail: "store is missing".to_owned(),
+        },
+        StoreFileStatus::Invalid => DoctorCheckReport {
+            name: "store.current",
+            status: "fail",
+            detail: inspection
+                .current
+                .error
+                .clone()
+                .unwrap_or_else(|| "store is invalid".to_owned()),
+        },
+    };
+    let profile_check = match profile.status {
+        "valid" => DoctorCheckReport {
+            name: "profile.agent_hook",
+            status: "pass",
+            detail: "agent hook profile is valid".to_owned(),
+        },
+        "missing" => DoctorCheckReport {
+            name: "profile.agent_hook",
+            status: "fail",
+            detail: "agent hook profile is missing".to_owned(),
+        },
+        _ => DoctorCheckReport {
+            name: "profile.agent_hook",
+            status: "fail",
+            detail: profile.issues.join("; "),
+        },
+    };
+    vec![store_check, profile_check]
+}
+
+fn doctor_recommendations(
+    inspection: &StoreInspection,
+    profile: &AgentHookProfileInspection,
+) -> Vec<String> {
+    let mut recommendations = Vec::new();
+    if inspection.current.status == StoreFileStatus::Missing || profile.status == "missing" {
+        recommendations
+            .push("run `mneme init` to create the local store and hook profile".to_owned());
+    }
+    if inspection.current.status == StoreFileStatus::Invalid && inspection.repair_available {
+        recommendations.push("run `mneme repair` to restore the store from backup".to_owned());
+    } else if inspection.current.status == StoreFileStatus::Invalid {
+        recommendations.push(
+            "inspect the store or run `mneme init --force` only if overwriting is intentional"
+                .to_owned(),
+        );
+    }
+    if profile.status == "invalid" {
+        recommendations
+            .push("run `mneme init --force` to regenerate the agent hook profile".to_owned());
+    }
+    recommendations
+}
+
 fn resolve_init_bin_path(options: &InitOptions) -> Result<Option<PathBuf>, CliError> {
     if !options.include_bin {
         return Ok(None);
@@ -2620,6 +2963,92 @@ fn escape_markdown_cell(value: &str) -> String {
         .replace('\\', "\\\\")
         .replace('|', "\\|")
         .replace('\n', " ")
+}
+
+fn emit_doctor_report(
+    report: &DoctorReport,
+    json: bool,
+    writer: &mut impl Write,
+) -> Result<(), CliError> {
+    if json {
+        return write_json(writer, report);
+    }
+    writeln!(writer, "{PRODUCT_NAME} local CLI: {}", report.build_stage)
+        .map_err(|source| CliError::io("write", Path::new("<stdout>"), source))?;
+    writeln!(writer, "version: {}", report.version)
+        .map_err(|source| CliError::io("write", Path::new("<stdout>"), source))?;
+    writeln!(writer, "workspace: {}", report.workspace)
+        .map_err(|source| CliError::io("write", Path::new("<stdout>"), source))?;
+    writeln!(writer, "default store: {}", report.default_store)
+        .map_err(|source| CliError::io("write", Path::new("<stdout>"), source))?;
+    writeln!(
+        writer,
+        "store: {} ({})",
+        report.store.path,
+        store_file_status(report.store.current.status)
+    )
+    .map_err(|source| CliError::io("write", Path::new("<stdout>"), source))?;
+    writeln!(
+        writer,
+        "backup: {} ({}, repair_available={})",
+        report.store.backup_path,
+        store_file_status(report.store.backup.status),
+        report.store.repair_available
+    )
+    .map_err(|source| CliError::io("write", Path::new("<stdout>"), source))?;
+    writeln!(
+        writer,
+        "agent hook profile: {} ({})",
+        report.profile.path, report.profile.status
+    )
+    .map_err(|source| CliError::io("write", Path::new("<stdout>"), source))?;
+    if let Some(store) = &report.profile.values.mneme_store {
+        writeln!(writer, "profile store: {store}")
+            .map_err(|source| CliError::io("write", Path::new("<stdout>"), source))?;
+    }
+    if let Some(agent_id) = &report.profile.values.mneme_agent_id {
+        writeln!(writer, "profile agent: {agent_id}")
+            .map_err(|source| CliError::io("write", Path::new("<stdout>"), source))?;
+    }
+    if let Some(scope) = &report.profile.values.mneme_scope {
+        writeln!(writer, "profile scope: {scope}")
+            .map_err(|source| CliError::io("write", Path::new("<stdout>"), source))?;
+    }
+    if let Some(max_items) = &report.profile.values.mneme_max_items {
+        writeln!(writer, "profile max items: {max_items}")
+            .map_err(|source| CliError::io("write", Path::new("<stdout>"), source))?;
+    }
+    if let Some(bin) = &report.profile.values.mneme_bin {
+        writeln!(writer, "profile bin: {bin}")
+            .map_err(|source| CliError::io("write", Path::new("<stdout>"), source))?;
+    }
+    for issue in &report.profile.issues {
+        writeln!(writer, "profile issue: {issue}")
+            .map_err(|source| CliError::io("write", Path::new("<stdout>"), source))?;
+    }
+    writeln!(
+        writer,
+        "health: {}",
+        if report.ok {
+            "ok"
+        } else {
+            "attention_required"
+        }
+    )
+    .map_err(|source| CliError::io("write", Path::new("<stdout>"), source))?;
+    for recommendation in &report.recommendations {
+        writeln!(writer, "recommendation: {recommendation}")
+            .map_err(|source| CliError::io("write", Path::new("<stdout>"), source))?;
+    }
+    Ok(())
+}
+
+fn store_file_status(status: StoreFileStatus) -> &'static str {
+    match status {
+        StoreFileStatus::Missing => "missing",
+        StoreFileStatus::Valid => "valid",
+        StoreFileStatus::Invalid => "invalid",
+    }
 }
 
 fn emit_init_report(
@@ -3080,6 +3509,115 @@ mod tests {
         let second_text = String::from_utf8(second_output)?;
         assert!(second_text.contains("\"store_created\": false"));
         assert!(second_text.contains("\"config_written\": false"));
+
+        for path in [&store, &config] {
+            let _ = std::fs::remove_file(path);
+            let _ = std::fs::remove_file(format!("{}.bak", path.display()));
+            let _ = std::fs::remove_file(format!("{}.lock", path.display()));
+        }
+        Ok(())
+    }
+
+    #[test]
+    fn doctor_reports_workspace_health_before_and_after_init(
+    ) -> Result<(), Box<dyn std::error::Error>> {
+        let store = temp_store_path("doctor-store");
+        let config = temp_store_path("doctor-profile").with_extension("env");
+        for path in [&store, &config] {
+            let _ = std::fs::remove_file(path);
+            let _ = std::fs::remove_file(format!("{}.bak", path.display()));
+            let _ = std::fs::remove_file(format!("{}.lock", path.display()));
+        }
+
+        let mut missing_output = Vec::new();
+        run_cli_with_writer(
+            vec![
+                "mneme".to_owned(),
+                "doctor".to_owned(),
+                "--store".to_owned(),
+                store.display().to_string(),
+                "--config".to_owned(),
+                config.display().to_string(),
+                "--json".to_owned(),
+            ],
+            &mut missing_output,
+        )?;
+        let missing_text = String::from_utf8(missing_output)?;
+        assert!(missing_text.contains("\"command\": \"doctor\""));
+        assert!(missing_text.contains("\"ok\": false"));
+        assert!(missing_text.contains("\"status\": \"missing\""));
+        assert!(missing_text.contains("mneme init"));
+
+        run_cli_with_writer(
+            vec![
+                "mneme".to_owned(),
+                "init".to_owned(),
+                "--store".to_owned(),
+                store.display().to_string(),
+                "--config".to_owned(),
+                config.display().to_string(),
+                "--no-bin".to_owned(),
+            ],
+            &mut Vec::new(),
+        )?;
+
+        let mut healthy_output = Vec::new();
+        run_cli_with_writer(
+            vec![
+                "mneme".to_owned(),
+                "doctor".to_owned(),
+                "--store".to_owned(),
+                store.display().to_string(),
+                "--config".to_owned(),
+                config.display().to_string(),
+                "--json".to_owned(),
+            ],
+            &mut healthy_output,
+        )?;
+        let healthy_text = String::from_utf8(healthy_output)?;
+        assert!(healthy_text.contains("\"ok\": true"));
+        assert!(healthy_text.contains("\"status\": \"valid\""));
+        assert!(healthy_text.contains("\"mneme_agent_id\": \"codex\""));
+        assert!(healthy_text.contains("\"mneme_scope\": \"private\""));
+        assert!(healthy_text.contains("\"mneme_max_items\": \"3\""));
+
+        std::fs::write(&config, "MNEME_STORE=/tmp/other.json\nUNKNOWN=value\n")?;
+        let mut invalid_profile_output = Vec::new();
+        run_cli_with_writer(
+            vec![
+                "mneme".to_owned(),
+                "doctor".to_owned(),
+                "--store".to_owned(),
+                store.display().to_string(),
+                "--config".to_owned(),
+                config.display().to_string(),
+                "--json".to_owned(),
+            ],
+            &mut invalid_profile_output,
+        )?;
+        let invalid_profile_text = String::from_utf8(invalid_profile_output)?;
+        assert!(invalid_profile_text.contains("\"ok\": false"));
+        assert!(invalid_profile_text.contains("unknown profile key"));
+        assert!(invalid_profile_text.contains("MNEME_STORE points to"));
+
+        std::fs::write(&store, "{not-json\n")?;
+        let mut invalid_store_output = Vec::new();
+        run_cli_with_writer(
+            vec![
+                "mneme".to_owned(),
+                "doctor".to_owned(),
+                "--store".to_owned(),
+                store.display().to_string(),
+                "--config".to_owned(),
+                config.display().to_string(),
+                "--json".to_owned(),
+            ],
+            &mut invalid_store_output,
+        )?;
+        let invalid_store_text = String::from_utf8(invalid_store_output)?;
+        assert!(invalid_store_text.contains("\"ok\": false"));
+        assert!(invalid_store_text.contains("\"name\": \"store.current\""));
+        assert!(invalid_store_text.contains("\"status\": \"fail\""));
 
         for path in [&store, &config] {
             let _ = std::fs::remove_file(path);

@@ -10,6 +10,7 @@ Check the local hook runtime first:
 
 ```sh
 mneme init
+mneme doctor
 mneme hook doctor --store /tmp/mneme.json
 scripts/mneme-agent-hook.sh doctor
 ```
@@ -94,6 +95,9 @@ For persistent local configuration, run `mneme init` to create
 `examples/mneme-agent-hook.env.example` file remains available for manual
 profiles. Runtime values resolve as CLI flags, then environment variables, then
 profile values, then command defaults.
+
+Use `mneme doctor --json` when an agent installer needs a structured health
+report for the current workspace store and profile before enabling hooks.
 
 `scripts/mneme-agent-hook.sh doctor` runs an isolated temporary-store smoke test
 covering hook doctor, begin, and end.

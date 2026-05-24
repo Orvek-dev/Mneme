@@ -30,6 +30,7 @@ STORE=/tmp/mneme-release-smoke.json
 rm -f "$STORE"
 ./scripts/install-local.sh
 mneme init --force
+mneme doctor --json
 mneme remember "user prefers local-first tools" --store "$STORE"
 mneme context "local-first" --store "$STORE" --json
 mneme hook doctor --store "$STORE"

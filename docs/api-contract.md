@@ -51,6 +51,8 @@ claim text by default; raw export requires `--include-sensitive`.
 
 CLI-bound first-run workflows can use `mneme init` to create the default local
 store and `.mneme/mneme-agent-hook.env` profile before wiring an agent runtime.
+They can use `mneme doctor --json` to inspect store/profile health and
+recommendations without mutating workspace files.
 
 Agent runtimes can use `scripts/mneme-agent-hook.sh` as the repository-local
 installation wrapper. It delegates to an installed `MNEME_BIN`, otherwise runs
