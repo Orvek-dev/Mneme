@@ -130,6 +130,10 @@ grep -q -- "--include-sensitive" "$MNEME_HELP"
 cargo run -p mneme-cli -- quality --help > "$MNEME_HELP"
 grep -q "Usage: mneme quality" "$MNEME_HELP"
 grep -q "duplicate active claims" "$MNEME_HELP"
+cargo run -p mneme-cli -- curate --help > "$MNEME_HELP"
+grep -q "Usage: mneme curate" "$MNEME_HELP"
+grep -q -- "--apply" "$MNEME_HELP"
+grep -q -- "--compact" "$MNEME_HELP"
 cargo run -p mneme-eval -- help > "$MNEME_EVAL_HELP"
 grep -q "Usage:" "$MNEME_EVAL_HELP"
 grep -q "mneme-eval help baseline" "$MNEME_EVAL_HELP"
@@ -179,7 +183,10 @@ grep -q 'API_KEY=FAKE_TEST_VALUE' "$REVIEW_RAW_JSON"
 QUALITY_STORE="${TMP_ROOT}/mneme-quality-gate-quality.json"
 QUALITY_REPORT="${TMP_ROOT}/mneme-quality-gate-quality-report.json"
 QUALITY_REVIEW="${TMP_ROOT}/mneme-quality-gate-quality-review.md"
-rm -f "$QUALITY_STORE" "$QUALITY_REPORT" "$QUALITY_REVIEW"
+CURATE_REPORT="${TMP_ROOT}/mneme-quality-gate-curate-report.json"
+CURATE_APPLY="${TMP_ROOT}/mneme-quality-gate-curate-apply.json"
+CURATE_FINAL="${TMP_ROOT}/mneme-quality-gate-curate-final-quality.json"
+rm -f "$QUALITY_STORE" "$QUALITY_REPORT" "$QUALITY_REVIEW" "$CURATE_REPORT" "$CURATE_APPLY" "$CURATE_FINAL" "${QUALITY_STORE}.bak"
 cargo run -p mneme-cli -- remember "user prefers quality loops" --store "$QUALITY_STORE"
 cargo run -p mneme-cli -- remember "user prefers quality loops" --store "$QUALITY_STORE"
 cargo run -p mneme-cli -- remember "user token API_KEY=FAKE_TEST_VALUE" --store "$QUALITY_STORE"
@@ -206,6 +213,36 @@ if grep -q 'API_KEY=FAKE_TEST_VALUE' "$QUALITY_REVIEW"; then
   echo "quality-gate: quality review artifact leaked secret text" >&2
   exit 1
 fi
+cargo run -p mneme-cli -- curate --store "$QUALITY_STORE" --json > "$CURATE_REPORT"
+grep -q '"command": "curate"' "$CURATE_REPORT"
+grep -q '"mode": "dry_run"' "$CURATE_REPORT"
+grep -q '"changed": false' "$CURATE_REPORT"
+grep -q '"duplicate_forget_count": 1' "$CURATE_REPORT"
+grep -q '"blocked_secret_review_count": 1' "$CURATE_REPORT"
+grep -q '"compact_target_count": 3' "$CURATE_REPORT"
+grep -q '"kind": "forget_duplicate_active"' "$CURATE_REPORT"
+grep -q '"kind": "compact_non_active_records"' "$CURATE_REPORT"
+if grep -q 'API_KEY=FAKE_TEST_VALUE' "$CURATE_REPORT"; then
+  echo "quality-gate: curate dry-run leaked secret text" >&2
+  exit 1
+fi
+cargo run -p mneme-cli -- curate --apply --compact --store "$QUALITY_STORE" --json > "$CURATE_APPLY"
+grep -q '"mode": "apply"' "$CURATE_APPLY"
+grep -q '"changed": true' "$CURATE_APPLY"
+grep -q '"forgotten_claim_count": 1' "$CURATE_APPLY"
+grep -q '"compacted": true' "$CURATE_APPLY"
+grep -q '"health": "ok"' "$CURATE_APPLY"
+grep -q '"duplicate_active_group_count": 0' "$CURATE_APPLY"
+grep -q '"blocked_secret_claim_count": 0' "$CURATE_APPLY"
+grep -q '"inactive_claim_count": 0' "$CURATE_APPLY"
+test -f "${QUALITY_STORE}.bak"
+if grep -q 'API_KEY=FAKE_TEST_VALUE' "$CURATE_APPLY"; then
+  echo "quality-gate: curate apply leaked secret text" >&2
+  exit 1
+fi
+cargo run -p mneme-cli -- quality --store "$QUALITY_STORE" --json > "$CURATE_FINAL"
+grep -q '"health": "ok"' "$CURATE_FINAL"
+grep -q '"review_item_count": 0' "$CURATE_FINAL"
 SCOPE_STORE="${TMP_ROOT}/mneme-quality-gate-scope.json"
 SCOPE_DENIED="${TMP_ROOT}/mneme-quality-gate-scope-denied.json"
 SCOPE_ALLOWED="${TMP_ROOT}/mneme-quality-gate-scope-allowed.json"

@@ -457,7 +457,7 @@ impl MnemeEngine {
         }
     }
 
-    /// Removes inactive memory records while preserving active recall.
+    /// Removes non-active memory records while preserving active recall.
     pub fn compact(&mut self) -> CompactionReport {
         let events_before = self.events.len();
         let claims_before = self.claims.len();

@@ -28,6 +28,7 @@ mneme correct "user prefers local-first tools" "user prefers desktop IDE"
 mneme forget "user prefers desktop IDE"
 mneme claims --status active --json
 mneme quality --json
+mneme curate --json
 mneme review /tmp/mneme-review.md
 mneme context "desktop IDE"
 mneme context "project launch" --scope project-alpha --max-items 3
@@ -113,9 +114,22 @@ cargo run -p mneme-cli -- quality --store /tmp/mneme.json --json
 
 The quality report is read-only. It highlights duplicate active claims,
 blocked-secret claims, inactive lifecycle history, and suggested
-`claims`/`forget --claim-id`/`compact` commands. Markdown and JSON review
-artifacts include the same quality findings. Use `--include-sensitive` only for
-local private inspection when raw blocked-secret claim text is required.
+`claims`/`curate`/`compact` commands. Markdown and JSON review artifacts
+include the same quality findings. Use `--include-sensitive` only for local
+private inspection when raw blocked-secret claim text is required.
+
+Use `curate` when quality findings should become a guided cleanup plan:
+
+```sh
+cargo run -p mneme-cli -- curate --store /tmp/mneme.json --json
+cargo run -p mneme-cli -- curate --apply --store /tmp/mneme.json --json
+cargo run -p mneme-cli -- curate --apply --compact --store /tmp/mneme.json --json
+```
+
+`curate` is a dry run unless `--apply` is present. Applied curation forgets
+redundant duplicate active claims by stable claim ID. `--compact` is separate
+because it removes non-active records, including blocked-secret, superseded, and
+forgotten claims, after the normal store backup path has run.
 
 ## Store Maintenance
 
@@ -137,11 +151,14 @@ cargo run -p mneme-cli -- export /tmp/mneme-export.json --store /tmp/mneme.json
 cargo run -p mneme-cli -- import /tmp/mneme-export.json --store /tmp/mneme-restored.json
 ```
 
-Compact inactive lifecycle records:
+Compact non-active records:
 
 ```sh
 cargo run -p mneme-cli -- compact --store /tmp/mneme.json --json
 ```
+
+Compaction keeps active claims and removes blocked-secret, superseded, and
+forgotten records plus events no active claim cites.
 
 Check repair readiness before mutating files:
 
