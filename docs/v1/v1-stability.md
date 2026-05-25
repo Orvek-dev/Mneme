@@ -76,7 +76,8 @@ eval update land in the same PR.
 - `scripts/v1-hard-dogfood.py` runs a local-only hard-mode protocol with 100
   normal records, 150 adversarial records, 30 agent handoff workflows,
   scorecards, seeded-fault detection, regression gates, local candidate
-  artifacts, and public-safe JSON/Markdown/HTML reports.
+  artifacts, official `mneme.eval_candidate.v1` candidate-check artifacts,
+  trend history, and public-safe JSON/Markdown/HTML reports.
 - `scripts/v1-real-use-pilot.py` prepares an ignored local pilot workspace and
   sanitizes structured pilot feedback before any public issue or eval candidate
   is created.
@@ -126,8 +127,8 @@ eval update land in the same PR.
 - Full manual dogfood evidence is local-only; CI checks the dataset shape and
   script syntax to avoid unnecessary GitHub Actions cost.
 - Full hard dogfood evidence is local-only; CI checks the contract, dataset
-  shape, seeded-fault coverage, and script syntax to avoid unnecessary GitHub
-  Actions cost.
+  shape, seeded-fault coverage, official candidate bridge, trend contract, and
+  script syntax to avoid unnecessary GitHub Actions cost.
 - Full real-use pilot evidence is local-only; CI checks the feedback contract,
   example feedback, and script syntax.
 - `RUSTDOCFLAGS="-D warnings" cargo doc --workspace --no-deps` must pass before
