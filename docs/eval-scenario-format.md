@@ -21,6 +21,7 @@ Inspect available commands:
 cargo run -p mneme-eval -- help
 cargo run -p mneme-eval -- run --help
 cargo run -p mneme-eval -- help baseline-gate
+cargo run -p mneme-eval -- help baseline-summary
 ```
 
 Validate a suite without running the fake runtime:
@@ -68,6 +69,12 @@ Gate a saved provider baseline report:
 
 ```sh
 cargo run -p mneme-eval -- baseline-gate evals/reports/openai-dry-run-baseline.json
+```
+
+Summarize a saved provider baseline report for local triage:
+
+```sh
+cargo run -p mneme-eval -- baseline-summary evals/reports/openai-dry-run-baseline.json
 ```
 
 `fake` is the default target. CI passes targets explicitly so future adapters

@@ -149,6 +149,9 @@ grep -q "Usage:" "$MNEME_EVAL_HELP"
 grep -q "mneme-eval help baseline" "$MNEME_EVAL_HELP"
 cargo run -p mneme-eval -- baseline-gate --help > "$MNEME_EVAL_HELP"
 grep -q "Usage: mneme-eval baseline-gate" "$MNEME_EVAL_HELP"
+cargo run -p mneme-eval -- baseline-summary --help > "$MNEME_EVAL_HELP"
+grep -q "Usage: mneme-eval baseline-summary" "$MNEME_EVAL_HELP"
+grep -q "provider triage" "$MNEME_EVAL_HELP"
 
 STORE="${TMP_ROOT}/mneme-quality-gate-cli.json"
 rm -f "$STORE"
@@ -561,6 +564,12 @@ MNEME_OPENAI_DRY_RUN=1 cargo run -p mneme-eval -- acceptance --suite model \
 BASELINE_REPORT="${TMP_ROOT}/mneme-openai-wrapper-baseline.json"
 BASELINE_GATE_REPORT="${TMP_ROOT}/mneme-openai-wrapper-baseline-gate.json"
 BASELINE_GATE_STDOUT="${TMP_ROOT}/mneme-openai-wrapper-baseline-gate.stdout.json"
+BASELINE_SUMMARY_REPORT="${TMP_ROOT}/mneme-openai-wrapper-baseline-summary.json"
+BASELINE_SUMMARY_STDOUT="${TMP_ROOT}/mneme-openai-wrapper-baseline-summary.stdout.json"
+FAILED_BASELINE_REPORT="${TMP_ROOT}/mneme-seeded-fault-baseline.json"
+FAILED_BASELINE_STDOUT="${TMP_ROOT}/mneme-seeded-fault-baseline.stdout.json"
+FAILED_BASELINE_SUMMARY="${TMP_ROOT}/mneme-seeded-fault-baseline-summary.json"
+FAILED_BASELINE_SUMMARY_STDOUT="${TMP_ROOT}/mneme-seeded-fault-baseline-summary.stdout.json"
 MNEME_OPENAI_DRY_RUN=1 cargo run -p mneme-eval -- baseline --suite model \
   --target mneme-v1-command \
   --extractor-command wrappers/openai_extractor.py \
@@ -580,6 +589,33 @@ grep -q '"category": "no-claim"' "$BASELINE_REPORT"
 grep -q '"passed_iterations": 2' "$BASELINE_REPORT"
 grep -q '"failed_scenario_runs": 0' "$BASELINE_REPORT"
 grep -q '"failure_summary"' "$BASELINE_REPORT"
+
+cargo run -p mneme-eval -- baseline-summary "$BASELINE_REPORT" \
+  --report "$BASELINE_SUMMARY_REPORT" \
+  --json > "$BASELINE_SUMMARY_STDOUT"
+grep -q '"command": "baseline-summary"' "$BASELINE_SUMMARY_STDOUT"
+grep -q '"triage_status": "passing"' "$BASELINE_SUMMARY_REPORT"
+grep -q '"failed_category_count": 0' "$BASELINE_SUMMARY_REPORT"
+grep -q '"redaction_findings": \[\]' "$BASELINE_SUMMARY_REPORT"
+grep -q 'dry-run evidence' "$BASELINE_SUMMARY_REPORT"
+
+if cargo run -p mneme-eval -- baseline --suite core \
+  --target fake \
+  --seeded-fault skip-claims \
+  --iterations 1 \
+  --report "$FAILED_BASELINE_REPORT" \
+  --json > "$FAILED_BASELINE_STDOUT"; then
+  echo "quality-gate: seeded fault baseline unexpectedly passed" >&2
+  exit 1
+fi
+cargo run -p mneme-eval -- baseline-summary "$FAILED_BASELINE_REPORT" \
+  --report "$FAILED_BASELINE_SUMMARY" \
+  --json > "$FAILED_BASELINE_SUMMARY_STDOUT"
+grep -q '"triage_status": "failing_redaction_required"' "$FAILED_BASELINE_SUMMARY"
+grep -q '"failed_scenario_count": 11' "$FAILED_BASELINE_SUMMARY"
+grep -q 'API_KEY=' "$FAILED_BASELINE_SUMMARY"
+grep -q 'redact or keep local before sharing' "$FAILED_BASELINE_SUMMARY"
+grep -q '"top_failed_checks"' "$FAILED_BASELINE_SUMMARY"
 
 cargo run -p mneme-eval -- baseline-gate "$BASELINE_REPORT" \
   --report "$BASELINE_GATE_REPORT" \

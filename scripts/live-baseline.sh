@@ -14,6 +14,7 @@ ITERATIONS="${MNEME_LIVE_BASELINE_ITERATIONS:-3}"
 RUN_LABEL="${MNEME_LIVE_BASELINE_RUN_LABEL:-local-$(date +%Y%m%d)}"
 REPORT="${MNEME_LIVE_BASELINE_REPORT:-evals/reports/openai-live-baseline.json}"
 GATE_REPORT="${MNEME_LIVE_BASELINE_GATE_REPORT:-${REPORT}.gate.json}"
+SUMMARY_REPORT="${MNEME_LIVE_BASELINE_SUMMARY_REPORT:-${REPORT}.summary.json}"
 
 case "$RUN_LABEL" in
   *[!A-Za-z0-9._/-]*)
@@ -22,7 +23,7 @@ case "$RUN_LABEL" in
     ;;
 esac
 
-mkdir -p "$(dirname "$REPORT")" "$(dirname "$GATE_REPORT")"
+mkdir -p "$(dirname "$REPORT")" "$(dirname "$GATE_REPORT")" "$(dirname "$SUMMARY_REPORT")"
 
 set +e
 cargo run -p mneme-eval -- baseline --suite model \
@@ -47,8 +48,23 @@ cargo run -p mneme-eval -- baseline-gate "$REPORT" \
 GATE_STATUS=$?
 set -e
 
+set +e
+if [ -f "$REPORT" ]; then
+  cargo run -p mneme-eval -- baseline-summary "$REPORT" \
+    --report "$SUMMARY_REPORT" \
+    --json
+  SUMMARY_STATUS=$?
+else
+  echo "live-baseline: baseline report is missing; cannot write summary" >&2
+  SUMMARY_STATUS=1
+fi
+set -e
+
 echo "live-baseline: wrote $REPORT"
 echo "live-baseline: wrote $GATE_REPORT"
+if [ -f "$SUMMARY_REPORT" ]; then
+  echo "live-baseline: wrote $SUMMARY_REPORT"
+fi
 echo "live-baseline: run scripts/public-safety-check.sh and the redaction checklist before sharing the report"
 
 if [ "$BASELINE_STATUS" -ne 0 ]; then
@@ -57,6 +73,9 @@ fi
 if [ "$GATE_STATUS" -ne 0 ]; then
   echo "live-baseline: baseline quality gate failed" >&2
 fi
-if [ "$BASELINE_STATUS" -ne 0 ] || [ "$GATE_STATUS" -ne 0 ]; then
+if [ "$SUMMARY_STATUS" -ne 0 ]; then
+  echo "live-baseline: baseline summary failed" >&2
+fi
+if [ "$BASELINE_STATUS" -ne 0 ] || [ "$GATE_STATUS" -ne 0 ] || [ "$SUMMARY_STATUS" -ne 0 ]; then
   exit 1
 fi

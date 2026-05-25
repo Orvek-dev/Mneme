@@ -7,8 +7,9 @@ use serde::Serialize;
 
 use crate::error::EvalError;
 use crate::report::{
-    AcceptanceGateReport, AcceptanceReport, BaselineMetadata, BaselineReport, BaselineRunReport,
-    BaselineScenarioMetadata, EvalReport, ScenarioReport, ScenarioValidationReport,
+    AcceptanceGateReport, AcceptanceReport, BaselineCategorySummary, BaselineFailedCheckSummary,
+    BaselineMetadata, BaselineReport, BaselineRunReport, BaselineScenarioMetadata,
+    BaselineScenarioSummary, EvalReport, ScenarioReport, ScenarioValidationReport,
     ValidationReport,
 };
 use crate::runtime::replay_scenario;
@@ -19,6 +20,8 @@ use crate::target::{
 
 const DEFAULT_BASELINE_ITERATIONS: usize = 3;
 const MAX_BASELINE_ITERATIONS: usize = 100;
+const BASELINE_SUMMARY_SCHEMA_VERSION: u32 = 1;
+const BASELINE_SUMMARY_LIMIT: usize = 5;
 
 /// Runs the Mneme eval harness command-line interface.
 pub fn run_cli(args: impl IntoIterator<Item = String>) -> Result<(), EvalError> {
@@ -55,10 +58,13 @@ pub fn run_cli(args: impl IntoIterator<Item = String>) -> Result<(), EvalError> 
         "acceptance" => run_command_or_help("acceptance", raw_args, run_acceptance),
         "baseline" => run_command_or_help("baseline", raw_args, run_baseline),
         "baseline-gate" => run_command_or_help("baseline-gate", raw_args, run_baseline_gate),
+        "baseline-summary" => {
+            run_command_or_help("baseline-summary", raw_args, run_baseline_summary)
+        }
         "replay" => run_command_or_help("replay", raw_args, run_replay),
         "run" => run_command_or_help("run", raw_args, run_suite),
         _ => Err(EvalError::invalid_cli(format!(
-            "unknown mneme-eval command: {command}\navailable commands: doctor, version, validate, acceptance, baseline, baseline-gate, replay, run"
+            "unknown mneme-eval command: {command}\navailable commands: doctor, version, validate, acceptance, baseline, baseline-gate, baseline-summary, replay, run"
         ))),
     }
 }
@@ -98,7 +104,7 @@ fn print_help(command: Option<&str>) -> Result<(), EvalError> {
         None => MNEME_EVAL_HELP,
         Some(command) => command_help(command).ok_or_else(|| {
             EvalError::invalid_cli(format!(
-                "unknown mneme-eval help topic: {command}\navailable help topics: doctor, version, validate, acceptance, baseline, baseline-gate, replay, run"
+                "unknown mneme-eval help topic: {command}\navailable help topics: doctor, version, validate, acceptance, baseline, baseline-gate, baseline-summary, replay, run"
             ))
         })?,
     };
@@ -114,6 +120,7 @@ fn command_help(command: &str) -> Option<&'static str> {
         "acceptance" => Some(MNEME_EVAL_ACCEPTANCE_HELP),
         "baseline" => Some(MNEME_EVAL_BASELINE_HELP),
         "baseline-gate" => Some(MNEME_EVAL_BASELINE_GATE_HELP),
+        "baseline-summary" => Some(MNEME_EVAL_BASELINE_SUMMARY_HELP),
         "replay" => Some(MNEME_EVAL_REPLAY_HELP),
         "run" => Some(MNEME_EVAL_RUN_HELP),
         _ => None,
@@ -135,6 +142,8 @@ Commands:
   acceptance     Run acceptance gates for a target and suite.
   baseline       Repeat a suite and summarize pass rates.
   baseline-gate  Gate a saved baseline JSON report.
+  baseline-summary
+                 Summarize baseline failures for triage.
 
 Targets:
   fake, mneme-v1, mneme-v1-command
@@ -142,7 +151,8 @@ Targets:
 Examples:
   mneme-eval validate --suite core
   mneme-eval run --suite core --target mneme-v1
-  mneme-eval help baseline"#;
+  mneme-eval help baseline
+  mneme-eval help baseline-summary"#;
 
 const MNEME_EVAL_DOCTOR_HELP: &str = r#"Usage: mneme-eval doctor
 
@@ -183,7 +193,7 @@ Run acceptance gates for a suite and target.
 Example:
   mneme-eval acceptance --suite core --target mneme-v1"#;
 
-const MNEME_EVAL_BASELINE_HELP: &str = r#"Usage: mneme-eval baseline [--suite <name>] [--target fake|mneme-v1|mneme-v1-command] [--extractor-command <program>] [--extractor-arg <arg>]... [--iterations <n>] [--provider-label <label>] [--model-label <label>] [--run-label <label>] [--live-provider] [--json] [--report <path>]
+const MNEME_EVAL_BASELINE_HELP: &str = r#"Usage: mneme-eval baseline [--suite <name>] [--target fake|mneme-v1|mneme-v1-command] [--extractor-command <program>] [--extractor-arg <arg>]... [--seeded-fault <name>] [--iterations <n>] [--provider-label <label>] [--model-label <label>] [--run-label <label>] [--live-provider] [--json] [--report <path>]
 
 Repeat a suite and summarize aggregate, category, and per-scenario pass rates.
 
@@ -196,6 +206,15 @@ Gate a saved baseline report before treating it as usable.
 
 Example:
   mneme-eval baseline-gate evals/reports/openai-dry-run-baseline.json"#;
+
+const MNEME_EVAL_BASELINE_SUMMARY_HELP: &str = r#"Usage: mneme-eval baseline-summary <baseline-report.json> [--json] [--report <path>]
+
+Summarize a saved baseline report for provider triage. This command exits
+successfully even when the baseline failed, so failed reports can be inspected
+without bypassing baseline-gate.
+
+Example:
+  mneme-eval baseline-summary evals/reports/openai-live-baseline.json --report evals/reports/openai-live-baseline.summary.json"#;
 
 fn print_doctor() {
     println!(
@@ -232,6 +251,38 @@ struct BaselineGateOptions {
     require_provider_label: bool,
     require_model_label: bool,
     require_run_label: bool,
+}
+
+#[derive(Debug, Clone, Default)]
+struct BaselineSummaryOptions {
+    json: bool,
+    report_path: Option<PathBuf>,
+}
+
+#[derive(Debug, Clone, Serialize)]
+struct BaselineSummaryReport {
+    report_schema_version: u32,
+    command: &'static str,
+    source: String,
+    suite: String,
+    target: String,
+    ok: bool,
+    triage_status: String,
+    baseline_metadata: BaselineMetadata,
+    iterations: usize,
+    scenario_count: usize,
+    total_scenario_runs: usize,
+    pass_rate: f64,
+    failed_iterations: usize,
+    failed_scenario_runs: usize,
+    failed_category_count: usize,
+    failed_scenario_count: usize,
+    failed_check_count: usize,
+    redaction_findings: Vec<String>,
+    top_failed_categories: Vec<BaselineCategorySummary>,
+    top_failed_scenarios: Vec<BaselineScenarioSummary>,
+    top_failed_checks: Vec<BaselineFailedCheckSummary>,
+    recommended_next_actions: Vec<String>,
 }
 
 impl Default for CommandOptions {
@@ -527,6 +578,166 @@ fn run_baseline_gate(raw_args: Vec<String>) -> Result<(), EvalError> {
     } else {
         Err(EvalError::scenario("baseline gate failed"))
     }
+}
+
+fn run_baseline_summary(raw_args: Vec<String>) -> Result<(), EvalError> {
+    let (path, options) = parse_baseline_summary_args(raw_args)?;
+    let raw_json =
+        fs::read_to_string(&path).map_err(|source| EvalError::io("read", &path, source))?;
+    let baseline: BaselineReport =
+        serde_json::from_str(&raw_json).map_err(|source| EvalError::parse_json(&path, source))?;
+    let report = build_baseline_summary_report(&path, &raw_json, &baseline);
+    emit_baseline_summary_report(&report, &options)
+}
+
+fn build_baseline_summary_report(
+    path: &Path,
+    raw_json: &str,
+    baseline: &BaselineReport,
+) -> BaselineSummaryReport {
+    let redaction_findings = redaction_findings(raw_json);
+    let top_failed_categories = top_failed_categories(baseline);
+    let top_failed_scenarios = top_failed_scenarios(baseline);
+    let top_failed_checks = top_failed_checks(baseline);
+    let recommended_next_actions = recommended_baseline_actions(
+        baseline,
+        &redaction_findings,
+        &top_failed_categories,
+        &top_failed_scenarios,
+        &top_failed_checks,
+    );
+    BaselineSummaryReport {
+        report_schema_version: BASELINE_SUMMARY_SCHEMA_VERSION,
+        command: "baseline-summary",
+        source: path.display().to_string(),
+        suite: baseline.suite.clone(),
+        target: baseline.target.clone(),
+        ok: baseline.ok && redaction_findings.is_empty(),
+        triage_status: baseline_triage_status(baseline, &redaction_findings).to_owned(),
+        baseline_metadata: baseline.baseline_metadata.clone(),
+        iterations: baseline.iterations,
+        scenario_count: baseline.scenario_count,
+        total_scenario_runs: baseline.total_scenario_runs,
+        pass_rate: baseline.pass_rate,
+        failed_iterations: baseline.failed_iterations,
+        failed_scenario_runs: baseline.failed_scenario_runs,
+        failed_category_count: baseline.failure_summary.failed_categories.len(),
+        failed_scenario_count: baseline.failure_summary.failed_scenarios.len(),
+        failed_check_count: baseline
+            .failure_summary
+            .failed_checks
+            .iter()
+            .map(|check| check.count)
+            .sum(),
+        redaction_findings,
+        top_failed_categories,
+        top_failed_scenarios,
+        top_failed_checks,
+        recommended_next_actions,
+    }
+}
+
+fn baseline_triage_status(
+    baseline: &BaselineReport,
+    redaction_findings: &[String],
+) -> &'static str {
+    match (baseline.ok, redaction_findings.is_empty()) {
+        (true, true) => "passing",
+        (true, false) => "redaction_required",
+        (false, true) => "failing",
+        (false, false) => "failing_redaction_required",
+    }
+}
+
+fn top_failed_categories(baseline: &BaselineReport) -> Vec<BaselineCategorySummary> {
+    let mut categories = baseline.failure_summary.failed_categories.clone();
+    categories.sort_by(|left, right| {
+        right
+            .failed
+            .cmp(&left.failed)
+            .then_with(|| left.pass_rate.total_cmp(&right.pass_rate))
+            .then_with(|| left.category.cmp(&right.category))
+    });
+    categories.truncate(BASELINE_SUMMARY_LIMIT);
+    categories
+}
+
+fn top_failed_scenarios(baseline: &BaselineReport) -> Vec<BaselineScenarioSummary> {
+    let mut scenarios = baseline.failure_summary.failed_scenarios.clone();
+    scenarios.sort_by(|left, right| {
+        right
+            .failed
+            .cmp(&left.failed)
+            .then_with(|| left.pass_rate.total_cmp(&right.pass_rate))
+            .then_with(|| left.scenario_id.cmp(&right.scenario_id))
+    });
+    scenarios.truncate(BASELINE_SUMMARY_LIMIT);
+    scenarios
+}
+
+fn top_failed_checks(baseline: &BaselineReport) -> Vec<BaselineFailedCheckSummary> {
+    let mut checks = baseline.failure_summary.failed_checks.clone();
+    checks.sort_by(|left, right| {
+        right
+            .count
+            .cmp(&left.count)
+            .then_with(|| left.check.cmp(&right.check))
+    });
+    checks.truncate(BASELINE_SUMMARY_LIMIT);
+    checks
+}
+
+fn recommended_baseline_actions(
+    baseline: &BaselineReport,
+    redaction_findings: &[String],
+    categories: &[BaselineCategorySummary],
+    scenarios: &[BaselineScenarioSummary],
+    checks: &[BaselineFailedCheckSummary],
+) -> Vec<String> {
+    let mut actions = Vec::new();
+    if !redaction_findings.is_empty() {
+        actions.push(format!(
+            "redact or keep local before sharing: {}",
+            redaction_findings.join(", ")
+        ));
+    }
+    if !baseline.baseline_metadata.live_provider {
+        actions.push(
+            "treat this as dry-run evidence; run a local live baseline before provider calibration"
+                .to_owned(),
+        );
+    }
+    if let Some(category) = categories.first() {
+        actions.push(format!(
+            "start with category `{}` ({}/{} failed attempts, pass_rate={:.2}%)",
+            category.category,
+            category.failed,
+            category.attempts,
+            category.pass_rate * 100.0
+        ));
+    }
+    if let Some(scenario) = scenarios.first() {
+        actions.push(format!(
+            "replay scenario `{}` against the same target and extractor",
+            scenario.scenario_id
+        ));
+    }
+    if let Some(check) = checks.first() {
+        actions.push(format!(
+            "inspect failed check `{}` across {} occurrence(s)",
+            check.check, check.count
+        ));
+    }
+    if baseline.failed_iterations > 0 {
+        actions.push(format!(
+            "compare failed iteration artifacts before changing wrapper prompts (failed_iterations={})",
+            baseline.failed_iterations
+        ));
+    }
+    if baseline.ok && redaction_findings.is_empty() {
+        actions.push("baseline passed; keep this summary with the baseline report".to_owned());
+    }
+    actions
 }
 
 fn build_baseline_gate_report(
@@ -1174,6 +1385,15 @@ fn parse_baseline_args(raw_args: Vec<String>) -> Result<(String, CommandOptions)
                 };
                 options.extractor_args.push(value.clone());
             }
+            "--seeded-fault" => {
+                idx += 1;
+                let Some(value) = raw_args.get(idx) else {
+                    return Err(EvalError::invalid_cli("--seeded-fault requires a value"));
+                };
+                options.fault_mode = FaultMode::parse(value).ok_or_else(|| {
+                    EvalError::invalid_cli(format!("unknown seeded fault: {value}"))
+                })?;
+            }
             "--iterations" => {
                 idx += 1;
                 let Some(value) = raw_args.get(idx) else {
@@ -1289,6 +1509,46 @@ fn parse_baseline_gate_args(
     let Some(path) = path else {
         return Err(EvalError::invalid_cli(
             "usage: mneme-eval baseline-gate <baseline-report.json> [--min-pass-rate <0..1>] [--min-category-pass-rate <0..1>] [--max-failed-iterations <n>] [--max-failed-scenario-runs <n>] [--require-live-provider] [--allow-missing-provider-label] [--allow-missing-model-label] [--require-run-label] [--json] [--report <path>]",
+        ));
+    };
+    Ok((path, options))
+}
+
+fn parse_baseline_summary_args(
+    raw_args: Vec<String>,
+) -> Result<(PathBuf, BaselineSummaryOptions), EvalError> {
+    let mut path = None;
+    let mut options = BaselineSummaryOptions::default();
+    let mut idx = 0;
+    while idx < raw_args.len() {
+        match raw_args[idx].as_str() {
+            "--json" => options.json = true,
+            "--report" => {
+                idx += 1;
+                let Some(value) = raw_args.get(idx) else {
+                    return Err(EvalError::invalid_cli("--report requires a path"));
+                };
+                options.report_path = Some(PathBuf::from(value));
+            }
+            value if value.starts_with('-') => {
+                return Err(EvalError::invalid_cli(format!(
+                    "unknown baseline-summary option: {value}"
+                )));
+            }
+            value => {
+                if path.is_some() {
+                    return Err(EvalError::invalid_cli(
+                        "baseline-summary accepts one baseline report path",
+                    ));
+                }
+                path = Some(PathBuf::from(value));
+            }
+        }
+        idx += 1;
+    }
+    let Some(path) = path else {
+        return Err(EvalError::invalid_cli(
+            "usage: mneme-eval baseline-summary <baseline-report.json> [--json] [--report <path>]",
         ));
     };
     Ok((path, options))
@@ -1484,6 +1744,23 @@ fn emit_baseline_gate_report(
     Ok(())
 }
 
+fn emit_baseline_summary_report(
+    report: &BaselineSummaryReport,
+    options: &BaselineSummaryOptions,
+) -> Result<(), EvalError> {
+    if let Some(path) = &options.report_path {
+        write_report(path, report)?;
+    }
+    if options.json {
+        let json = serde_json::to_string_pretty(report)
+            .map_err(|source| EvalError::json(Path::new("<stdout>"), source))?;
+        println!("{json}");
+    } else {
+        print_baseline_summary_report(report);
+    }
+    Ok(())
+}
+
 fn write_report<T: Serialize>(path: &Path, report: &T) -> Result<(), EvalError> {
     if let Some(parent) = path
         .parent()
@@ -1574,6 +1851,92 @@ fn print_baseline_report(report: &BaselineReport) {
     }
 }
 
+fn print_baseline_summary_report(report: &BaselineSummaryReport) {
+    println!(
+        "baseline-summary: source={}, suite={}, target={}, status={}, pass_rate={:.2}%, failed_iterations={}, failed_scenario_runs={}",
+        report.source,
+        report.suite,
+        report.target,
+        report.triage_status,
+        report.pass_rate * 100.0,
+        report.failed_iterations,
+        report.failed_scenario_runs
+    );
+    println!(
+        "metadata: live_provider={} provider={} model={} run={}",
+        report.baseline_metadata.live_provider,
+        option_label(report.baseline_metadata.provider_label.as_deref()),
+        option_label(report.baseline_metadata.model_label.as_deref()),
+        option_label(report.baseline_metadata.run_label.as_deref())
+    );
+    if report.redaction_findings.is_empty() {
+        println!("redaction: ok");
+    } else {
+        println!(
+            "redaction: findings={}",
+            report.redaction_findings.join(", ")
+        );
+    }
+    print_summary_categories(&report.top_failed_categories);
+    print_summary_scenarios(&report.top_failed_scenarios);
+    print_summary_checks(&report.top_failed_checks);
+    println!("next:");
+    for action in &report.recommended_next_actions {
+        println!("- {action}");
+    }
+}
+
+fn option_label(value: Option<&str>) -> &str {
+    value
+        .filter(|value| !value.trim().is_empty())
+        .unwrap_or("<missing>")
+}
+
+fn print_summary_categories(categories: &[BaselineCategorySummary]) {
+    if categories.is_empty() {
+        println!("top failed categories: none");
+        return;
+    }
+    println!("top failed categories:");
+    for category in categories {
+        println!(
+            "- {}: failed={}/{} pass_rate={:.2}%",
+            category.category,
+            category.failed,
+            category.attempts,
+            category.pass_rate * 100.0
+        );
+    }
+}
+
+fn print_summary_scenarios(scenarios: &[BaselineScenarioSummary]) {
+    if scenarios.is_empty() {
+        println!("top failed scenarios: none");
+        return;
+    }
+    println!("top failed scenarios:");
+    for scenario in scenarios {
+        println!(
+            "- {}: failed={}/{} pass_rate={:.2}%",
+            scenario.scenario_id,
+            scenario.failed,
+            scenario.attempts,
+            scenario.pass_rate * 100.0
+        );
+    }
+}
+
+fn print_summary_checks(checks: &[BaselineFailedCheckSummary]) {
+    if checks.is_empty() {
+        println!("top failed checks: none");
+        return;
+    }
+    println!("top failed checks:");
+    for check in checks {
+        println!("- {}: count={}", check.check, check.count);
+    }
+}
+
 fn print_scenario_report(scenario: &ScenarioReport) {
     let status = if scenario.ok { "PASS" } else { "FAIL" };
     println!("- {status} {}", scenario.scenario_id);
@@ -1600,6 +1963,10 @@ mod tests {
         let help = command_help("baseline-gate").expect("baseline-gate help");
         assert!(help.contains("Usage: mneme-eval baseline-gate"));
         assert!(help.contains("baseline-report.json"));
+
+        let summary_help = command_help("baseline-summary").expect("baseline-summary help");
+        assert!(summary_help.contains("Usage: mneme-eval baseline-summary"));
+        assert!(summary_help.contains("--report <path>"));
 
         let general = command_help("run").expect("run help");
         assert!(general.contains("mneme-eval run"));
@@ -1722,6 +2089,8 @@ mod tests {
             "--run-label".to_owned(),
             "local-baseline".to_owned(),
             "--live-provider".to_owned(),
+            "--seeded-fault".to_owned(),
+            "skip-claims".to_owned(),
             "--json".to_owned(),
         ])?;
         assert_eq!(suite, "model");
@@ -1731,6 +2100,7 @@ mod tests {
         assert_eq!(options.provider_label.as_deref(), Some("openai"));
         assert_eq!(options.model_label.as_deref(), Some("gpt-5.4-mini"));
         assert_eq!(options.run_label.as_deref(), Some("local-baseline"));
+        assert_eq!(options.fault_mode, FaultMode::SkipClaims);
         assert!(options.json);
         assert_eq!(
             options.extractor_command.as_deref(),
@@ -1794,6 +2164,26 @@ mod tests {
             "1.5".to_owned(),
         ]);
         assert!(result.is_err());
+    }
+
+    #[test]
+    fn parse_baseline_summary_accepts_report_options() -> Result<(), EvalError> {
+        let (path, options) = parse_baseline_summary_args(vec![
+            "evals/reports/openai-live-baseline.json".to_owned(),
+            "--report".to_owned(),
+            "evals/reports/openai-live-baseline.summary.json".to_owned(),
+            "--json".to_owned(),
+        ])?;
+        assert_eq!(
+            path,
+            PathBuf::from("evals/reports/openai-live-baseline.json")
+        );
+        assert_eq!(
+            options.report_path.as_deref(),
+            Some(Path::new("evals/reports/openai-live-baseline.summary.json"))
+        );
+        assert!(options.json);
+        Ok(())
     }
 
     #[test]
@@ -1877,6 +2267,45 @@ mod tests {
     }
 
     #[test]
+    fn baseline_summary_reports_failed_triage() -> Result<(), Box<dyn std::error::Error>> {
+        let report = failing_baseline_report(true);
+        let raw_json = serde_json::to_string(&report)?;
+        let summary = build_baseline_summary_report(Path::new("baseline.json"), &raw_json, &report);
+        assert_eq!(summary.command, "baseline-summary");
+        assert_eq!(summary.triage_status, "failing");
+        assert_eq!(summary.failed_category_count, 1);
+        assert_eq!(summary.failed_scenario_count, 1);
+        assert_eq!(summary.failed_check_count, 1);
+        assert_eq!(summary.top_failed_categories[0].category, "recall");
+        assert_eq!(summary.top_failed_scenarios[0].scenario_id, "scenario-a");
+        assert_eq!(summary.top_failed_checks[0].check, "check");
+        assert!(summary
+            .recommended_next_actions
+            .iter()
+            .any(|action| action.contains("replay scenario `scenario-a`")));
+        Ok(())
+    }
+
+    #[test]
+    fn baseline_summary_reports_redaction_findings() -> Result<(), Box<dyn std::error::Error>> {
+        let report = passing_baseline_report(true);
+        let raw_json = format!(
+            "{}\n{}{}example\n",
+            serde_json::to_string(&report)?,
+            "s",
+            "k-"
+        );
+        let summary = build_baseline_summary_report(Path::new("baseline.json"), &raw_json, &report);
+        assert_eq!(summary.triage_status, "redaction_required");
+        assert_eq!(summary.redaction_findings, vec!["sk-"]);
+        assert!(summary
+            .recommended_next_actions
+            .iter()
+            .any(|action| action.contains("redact or keep local")));
+        Ok(())
+    }
+
+    #[test]
     fn parse_validate_requires_a_target() {
         let result = parse_validate_args(vec!["--json".to_owned()]);
         assert!(result.is_err());
@@ -1946,6 +2375,36 @@ mod tests {
                 vec!["category-recall".to_owned()],
             )],
             vec![BaselineRunReport::from_eval_report(1, passed)],
+        )
+    }
+
+    fn failing_baseline_report(live_provider: bool) -> BaselineReport {
+        let failed = EvalReport::from_results(
+            TargetKind::MnemeV1Command.as_str(),
+            crate::target::EvalTargetMetadata::command(true),
+            vec![ScenarioReport::new(
+                "scenario-a".to_owned(),
+                vec!["category-recall".to_owned()],
+                vec![crate::report::CheckReport::fail(
+                    "check", "expected", "actual", "artifact",
+                )],
+            )],
+        );
+        BaselineReport::from_runs(
+            "model",
+            TargetKind::MnemeV1Command.as_str(),
+            crate::target::EvalTargetMetadata::command(true),
+            BaselineMetadata::new(
+                live_provider,
+                Some("openai".to_owned()),
+                Some("dry-run".to_owned()),
+                Some("test-run".to_owned()),
+            ),
+            vec![BaselineScenarioMetadata::new(
+                "scenario-a",
+                vec!["category-recall".to_owned()],
+            )],
+            vec![BaselineRunReport::from_eval_report(1, failed)],
         )
     }
 }

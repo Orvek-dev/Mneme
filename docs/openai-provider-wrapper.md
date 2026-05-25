@@ -70,6 +70,12 @@ Gate the saved baseline report before treating it as usable:
 cargo run -p mneme-eval -- baseline-gate evals/reports/openai-dry-run-baseline.json
 ```
 
+Summarize the saved baseline report for local triage:
+
+```sh
+cargo run -p mneme-eval -- baseline-summary evals/reports/openai-dry-run-baseline.json
+```
+
 ## Live Local Use
 
 Keep credentials in the local shell or an untracked `.env` file:

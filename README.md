@@ -201,6 +201,12 @@ Gate a saved baseline report before treating it as usable:
 cargo run -p mneme-eval -- baseline-gate evals/reports/openai-dry-run-baseline.json
 ```
 
+Summarize a saved baseline report for local triage:
+
+```sh
+cargo run -p mneme-eval -- baseline-summary evals/reports/openai-dry-run-baseline.json
+```
+
 Run the acceptance gate:
 
 ```sh
@@ -216,6 +222,7 @@ Use `help` or `<command> --help` to inspect command-specific usage:
 ```sh
 cargo run -p mneme-cli -- help begin
 cargo run -p mneme-eval -- baseline-gate --help
+cargo run -p mneme-eval -- baseline-summary --help
 ```
 
 ## Development Checks

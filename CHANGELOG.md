@@ -4,6 +4,20 @@ This project follows the spirit of Keep a Changelog.
 
 ## Unreleased
 
+## [0.36.0] - 2026-05-25
+
+### Added
+
+- Added `mneme-eval baseline-summary <baseline-report.json>` for local provider
+  baseline triage with human and JSON output.
+- Added summary fields for triage status, redaction findings, top failed
+  categories, scenarios, checks, and recommended next actions.
+- Updated `scripts/live-baseline.sh` to write a local summary artifact next to
+  the baseline and gate reports.
+- Expanded the release quality gate to verify passing dry-run and failing
+  seeded-fault baseline summaries.
+- Added the Phase 30 live provider baseline triage feature spec.
+
 ## [0.35.0] - 2026-05-25
 
 ### Added
