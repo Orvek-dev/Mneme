@@ -4,6 +4,20 @@ This project follows the spirit of Keep a Changelog.
 
 ## Unreleased
 
+## [0.39.0] - 2026-05-25
+
+### Added
+
+- Added a public `dogfood` eval suite for realistic v1 readiness workflows:
+  preference correction, agent session memory, curation/restore, and scope
+  isolation.
+- Added `mneme-eval v1-readiness` to validate and replay `core`, `runtime`,
+  `agent`, and `dogfood` against `mneme-v1` and report
+  `ready_for_v1_dogfood`.
+- Expanded the release quality gate to validate, run, and acceptance-test the
+  dogfood suite and require the v1 readiness report.
+- Added the Phase 33 v1 dogfood readiness feature spec and public docs.
+
 ## [0.38.0] - 2026-05-25
 
 ### Added

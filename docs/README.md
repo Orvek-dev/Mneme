@@ -6,7 +6,7 @@ document was written.
 ```text
 docs/v1/             current personal-memory runtime and local CLI
 docs/v2/             future team/shared-memory product scope
-docs/eval-harness/   scenario, baseline, candidate, and provider eval workflow
+docs/eval-harness/   scenario, baseline, dogfood, candidate, and provider eval workflow
 docs/project/        roadmap, release, packaging, and policy material
 ```
 

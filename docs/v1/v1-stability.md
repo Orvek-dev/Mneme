@@ -51,8 +51,8 @@ eval update land in the same PR.
 
 - `mneme-eval` supports `doctor`, `validate`, `run`, `replay`, `acceptance`,
   `baseline`, `baseline-gate`, `baseline-summary`, `baseline-compare`,
-  `candidate`, `candidate-check`, `candidate-promote`, and command-specific
-  help.
+  `candidate`, `candidate-check`, `candidate-promote`, `v1-readiness`, and
+  command-specific help.
 - Eval reports include `report_schema_version`, target metadata, counts, and
   per-scenario results.
 - Baseline summary reports include triage status, redaction findings, top
@@ -64,10 +64,13 @@ eval update land in the same PR.
   post-sanitization redaction status before sharing or promotion.
 - `candidate-promote` validates a reviewed candidate and writes only the nested
   scenario block into a public suite when explicitly run with `--apply`.
+- `v1-readiness` validates and replays `core`, `runtime`, `agent`, and
+  `dogfood` against `mneme-v1` and reports `ready_for_v1_dogfood` only when all
+  deterministic product-readiness criteria pass.
 - The opt-in `model` suite covers command-backed extraction quality for durable
   preferences, no-claim cases, secret blocking, and lifecycle correction.
-- The `core`, `runtime`, and `agent` suites must pass for `fake` and
-  `mneme-v1`.
+- The `core`, `runtime`, `agent`, and `dogfood` suites must pass for `fake`
+  and `mneme-v1`.
 - `mneme-cli` supports `init`, `doctor`, `remember`, `correct`, `forget`,
   `claims`, `quality`, `curate`, `context`, `snapshot`, `begin`, `end`, `validate`,
   `export`, `review`, `import`, `compact`, `repair`, `restore`, `version`, and
