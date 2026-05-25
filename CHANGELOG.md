@@ -4,6 +4,20 @@ This project follows the spirit of Keep a Changelog.
 
 ## Unreleased
 
+## [0.38.0] - 2026-05-25
+
+### Added
+
+- Added `mneme-eval candidate-promote <candidate.yaml>` to validate and
+  promote reviewed candidate scenarios into public eval suites.
+- Added `mneme-eval baseline-compare <before.json> <after.json>` to compare
+  aggregate, category, scenario, and failed-check baseline deltas.
+- Added `--fail-on-regression` support for baseline comparison release gates.
+- Expanded the quality gate to validate promoted candidate scenarios and
+  seeded-fault baseline regression detection.
+- Added the Phase 32 candidate promotion and regression intelligence feature
+  spec.
+
 ### Changed
 
 - Reorganized public docs into `docs/v1`, `docs/v2`, `docs/eval-harness`,

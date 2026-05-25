@@ -53,6 +53,20 @@ cargo run -p mneme-eval -- baseline-summary evals/reports/openai-live-baseline.j
 The summary is local triage evidence. Do not share it until the redaction
 checklist below has passed.
 
+When comparing a new wrapper prompt or runtime change against a previous local
+baseline, run:
+
+```sh
+cargo run -p mneme-eval -- baseline-compare \
+  evals/reports/openai-before.json \
+  evals/reports/openai-live-baseline.json \
+  --fail-on-regression
+```
+
+Keep the comparison report with release evidence when it passes. If it fails,
+inspect newly failed scenarios and newly increased failed checks before making
+more provider calls.
+
 ## Success Criteria
 
 For the current suite, treat a live baseline as usable only when:
@@ -75,6 +89,7 @@ summary triage:
 ```sh
 cargo run -p mneme-eval -- candidate evals/reports/openai-live-baseline.json --out-dir evals/candidates/openai --limit 3
 cargo run -p mneme-eval -- candidate-check evals/candidates/openai
+cargo run -p mneme-eval -- candidate-promote evals/candidates/openai/dogfood-example.candidate.yaml --suite model --filename dogfood-example.yaml
 ```
 
 Candidate files are ignored by git and must be reviewed before any nested

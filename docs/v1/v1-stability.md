@@ -50,15 +50,20 @@ eval update land in the same PR.
 ## Stable Tooling Contracts
 
 - `mneme-eval` supports `doctor`, `validate`, `run`, `replay`, `acceptance`,
-  `baseline`, `baseline-gate`, `baseline-summary`, `candidate`,
-  `candidate-check`, and command-specific help.
+  `baseline`, `baseline-gate`, `baseline-summary`, `baseline-compare`,
+  `candidate`, `candidate-check`, `candidate-promote`, and command-specific
+  help.
 - Eval reports include `report_schema_version`, target metadata, counts, and
   per-scenario results.
 - Baseline summary reports include triage status, redaction findings, top
   failed categories, scenarios, checks, and recommended local next actions.
+- Baseline comparison reports include aggregate, category, scenario, and failed
+  check deltas so release candidates can fail on regressions before promotion.
 - Candidate artifacts generated from failed eval or baseline reports are local
   review files; `candidate-check` validates their schema, nested scenario, and
   post-sanitization redaction status before sharing or promotion.
+- `candidate-promote` validates a reviewed candidate and writes only the nested
+  scenario block into a public suite when explicitly run with `--apply`.
 - The opt-in `model` suite covers command-backed extraction quality for durable
   preferences, no-claim cases, secret blocking, and lifecycle correction.
 - The `core`, `runtime`, and `agent` suites must pass for `fake` and

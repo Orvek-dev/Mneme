@@ -26,7 +26,9 @@ cargo run -p mneme-eval -- help
 cargo run -p mneme-eval -- run --help
 cargo run -p mneme-eval -- help baseline-gate
 cargo run -p mneme-eval -- help baseline-summary
+cargo run -p mneme-eval -- help baseline-compare
 cargo run -p mneme-eval -- help candidate
+cargo run -p mneme-eval -- help candidate-promote
 ```
 
 Validate a suite without running the fake runtime:
@@ -82,11 +84,18 @@ Summarize a saved provider baseline report for local triage:
 cargo run -p mneme-eval -- baseline-summary evals/reports/openai-dry-run-baseline.json
 ```
 
+Compare two saved provider baseline reports for regressions:
+
+```sh
+cargo run -p mneme-eval -- baseline-compare evals/reports/before.json evals/reports/after.json --fail-on-regression
+```
+
 Create and validate local scenario candidates from a failed report:
 
 ```sh
 cargo run -p mneme-eval -- candidate evals/reports/openai-live-baseline.json --out-dir evals/candidates/openai --limit 3
 cargo run -p mneme-eval -- candidate-check evals/candidates/openai
+cargo run -p mneme-eval -- candidate-promote evals/candidates/openai/dogfood-example.candidate.yaml --suite model --filename dogfood-example.yaml
 ```
 
 `fake` is the default target. CI passes targets explicitly so future adapters

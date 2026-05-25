@@ -22,6 +22,15 @@ pub(crate) struct CandidateGenerateConfig {
     pub(crate) suite_override: Option<String>,
 }
 
+#[derive(Debug, Clone)]
+pub(crate) struct CandidatePromoteConfig {
+    pub(crate) source_path: PathBuf,
+    pub(crate) scenario_root: PathBuf,
+    pub(crate) suite_override: Option<String>,
+    pub(crate) filename: Option<String>,
+    pub(crate) apply: bool,
+}
+
 #[derive(Debug, Clone, Serialize)]
 pub(crate) struct CandidateReport {
     pub(crate) report_schema_version: u32,
@@ -71,6 +80,46 @@ pub(crate) struct CandidateCheckResult {
     pub(crate) candidate_id: Option<String>,
     pub(crate) ok: bool,
     pub(crate) errors: Vec<String>,
+}
+
+#[derive(Debug, Clone, Serialize)]
+pub(crate) struct CandidatePromoteReport {
+    pub(crate) report_schema_version: u32,
+    pub(crate) command: &'static str,
+    pub(crate) source: String,
+    pub(crate) candidate_id: String,
+    pub(crate) source_scenario_id: String,
+    pub(crate) target_suite: String,
+    pub(crate) destination: String,
+    pub(crate) applied: bool,
+    pub(crate) ok: bool,
+    pub(crate) gates: Vec<CandidatePromotionGate>,
+    pub(crate) recommended_next_actions: Vec<String>,
+}
+
+#[derive(Debug, Clone, Serialize)]
+pub(crate) struct CandidatePromotionGate {
+    pub(crate) name: String,
+    pub(crate) status: CheckStatus,
+    pub(crate) detail: String,
+}
+
+impl CandidatePromotionGate {
+    fn pass(name: impl Into<String>, detail: impl Into<String>) -> Self {
+        Self {
+            name: name.into(),
+            status: CheckStatus::Pass,
+            detail: detail.into(),
+        }
+    }
+
+    fn fail(name: impl Into<String>, detail: impl Into<String>) -> Self {
+        Self {
+            name: name.into(),
+            status: CheckStatus::Fail,
+            detail: detail.into(),
+        }
+    }
 }
 
 #[derive(Debug, Clone, Deserialize, Serialize)]
@@ -239,6 +288,182 @@ pub(crate) fn check_candidates(path: &Path) -> Result<CandidateCheckReport, Eval
         invalid,
         results,
     })
+}
+
+pub(crate) fn promote_candidate(
+    config: &CandidatePromoteConfig,
+) -> Result<CandidatePromoteReport, EvalError> {
+    let raw = fs::read_to_string(&config.source_path)
+        .map_err(|source| EvalError::io("read", &config.source_path, source))?;
+    let candidate: CandidateFile = serde_yaml::from_str(&raw)
+        .map_err(|source| EvalError::parse(&config.source_path, source))?;
+    let target_suite = config
+        .suite_override
+        .clone()
+        .or(candidate.source.suite.clone())
+        .ok_or_else(|| {
+            EvalError::invalid_cli(
+                "candidate-promote requires --suite when candidate source has no suite",
+            )
+        })?;
+    validate_public_component("--suite", &target_suite)?;
+    let filename = match &config.filename {
+        Some(filename) => normalize_public_filename(filename)?,
+        None => format!("{}.yaml", sanitize_identifier(&candidate.id)),
+    };
+    let destination = config.scenario_root.join(&target_suite).join(filename);
+    let mut gates = Vec::new();
+
+    let raw_findings = redaction::findings(&raw);
+    if raw_findings.is_empty() {
+        gates.push(CandidatePromotionGate::pass(
+            "candidate.redaction",
+            "candidate artifact has no obvious sensitive pattern",
+        ));
+    } else {
+        gates.push(CandidatePromotionGate::fail(
+            "candidate.redaction",
+            format!(
+                "candidate artifact still has redaction findings: {}",
+                redaction::finding_codes(&raw_findings).join(",")
+            ),
+        ));
+    }
+
+    let mut candidate_errors = Vec::new();
+    validate_candidate(&candidate, &config.source_path, &mut candidate_errors);
+    if candidate_errors.is_empty() {
+        gates.push(CandidatePromotionGate::pass(
+            "candidate.schema",
+            "candidate-check validation passed",
+        ));
+    } else {
+        gates.push(CandidatePromotionGate::fail(
+            "candidate.schema",
+            candidate_errors.join("; "),
+        ));
+    }
+
+    let Some(mut scenario) = candidate.scenario.clone() else {
+        gates.push(CandidatePromotionGate::fail(
+            "candidate.scenario",
+            "candidate has no nested scenario block to promote",
+        ));
+        return Ok(candidate_promote_report(
+            config,
+            candidate,
+            target_suite,
+            destination,
+            false,
+            gates,
+        ));
+    };
+    clean_promoted_scenario_tags(&mut scenario.tags);
+    gates.push(CandidatePromotionGate::pass(
+        "candidate.scenario",
+        "nested scenario block is present",
+    ));
+
+    if destination.exists() {
+        gates.push(CandidatePromotionGate::fail(
+            "destination.exists",
+            format!(
+                "destination already exists: {}",
+                safe_display_path(&destination)
+            ),
+        ));
+    } else {
+        gates.push(CandidatePromotionGate::pass(
+            "destination.exists",
+            "destination does not exist",
+        ));
+    }
+
+    if duplicate_scenario_id_exists(&config.scenario_root, &target_suite, &scenario.id)? {
+        gates.push(CandidatePromotionGate::fail(
+            "destination.duplicate-id",
+            format!(
+                "scenario id `{}` already exists in suite `{target_suite}`",
+                scenario.id
+            ),
+        ));
+    } else {
+        gates.push(CandidatePromotionGate::pass(
+            "destination.duplicate-id",
+            "scenario id is not already present in target suite",
+        ));
+    }
+
+    match validate_scenario(&scenario, &destination) {
+        Ok(()) => gates.push(CandidatePromotionGate::pass(
+            "scenario.validation",
+            "promoted scenario is valid",
+        )),
+        Err(error) => gates.push(CandidatePromotionGate::fail(
+            "scenario.validation",
+            error.to_string(),
+        )),
+    }
+
+    let scenario_yaml = serde_yaml::to_string(&scenario).map_err(|source| {
+        EvalError::scenario(format!(
+            "serialize promoted scenario {}: {source}",
+            destination.display()
+        ))
+    })?;
+    let scenario_findings = redaction::findings(&scenario_yaml);
+    if scenario_findings.is_empty() {
+        gates.push(CandidatePromotionGate::pass(
+            "scenario.redaction",
+            "promoted scenario has no obvious sensitive pattern",
+        ));
+    } else {
+        gates.push(CandidatePromotionGate::fail(
+            "scenario.redaction",
+            format!(
+                "promoted scenario still has redaction findings: {}",
+                redaction::finding_codes(&scenario_findings).join(",")
+            ),
+        ));
+    }
+
+    let ok_to_write = gates.iter().all(|gate| gate.status == CheckStatus::Pass);
+    let mut applied = false;
+    if ok_to_write && config.apply {
+        let parent = destination.parent().ok_or_else(|| {
+            EvalError::scenario(format!(
+                "destination {} has no parent directory",
+                destination.display()
+            ))
+        })?;
+        fs::create_dir_all(parent).map_err(|source| EvalError::io("create dir", parent, source))?;
+        fs::write(&destination, format!("{scenario_yaml}\n"))
+            .map_err(|source| EvalError::io("write", &destination, source))?;
+        applied = true;
+        gates.push(CandidatePromotionGate::pass(
+            "write.apply",
+            "promoted scenario was written",
+        ));
+    } else if ok_to_write {
+        gates.push(CandidatePromotionGate::pass(
+            "write.dry-run",
+            "promotion validated; rerun with --apply to write the scenario",
+        ));
+    } else {
+        gates.push(CandidatePromotionGate::fail(
+            "write.blocked",
+            "promotion was not written because one or more gates failed",
+        ));
+    }
+
+    Ok(candidate_promote_report(
+        config,
+        candidate,
+        target_suite,
+        destination,
+        applied,
+        gates,
+    ))
 }
 
 fn parse_source_report(
@@ -462,6 +687,12 @@ fn push_unique_tag(tags: &mut Vec<String>, tag: &str) {
     }
 }
 
+fn clean_promoted_scenario_tags(tags: &mut Vec<String>) {
+    tags.retain(|tag| !matches!(tag.as_str(), "candidate" | "needs-review"));
+    push_unique_tag(tags, "dogfood");
+    push_unique_tag(tags, "promoted-candidate");
+}
+
 fn promotion_checklist(suite: Option<&str>) -> Vec<String> {
     let target_suite = suite.unwrap_or("<suite>");
     vec![
@@ -485,6 +716,67 @@ fn candidate_next_actions(candidate_count: usize) -> Vec<String> {
         "copy only the reviewed `scenario` block into evals/scenarios/<suite>/".to_owned(),
         "run `mneme-eval candidate-check <dir>` before sharing candidates".to_owned(),
     ]
+}
+
+fn candidate_promote_report(
+    config: &CandidatePromoteConfig,
+    candidate: CandidateFile,
+    target_suite: String,
+    destination: PathBuf,
+    applied: bool,
+    gates: Vec<CandidatePromotionGate>,
+) -> CandidatePromoteReport {
+    let ok = gates.iter().all(|gate| gate.status == CheckStatus::Pass);
+    CandidatePromoteReport {
+        report_schema_version: REPORT_SCHEMA_VERSION,
+        command: "candidate-promote",
+        source: safe_display_path(&config.source_path),
+        candidate_id: candidate.id,
+        source_scenario_id: candidate.source.scenario_id,
+        target_suite,
+        destination: safe_display_path(&destination),
+        applied,
+        ok,
+        recommended_next_actions: candidate_promote_next_actions(applied, ok),
+        gates,
+    }
+}
+
+fn candidate_promote_next_actions(applied: bool, ok: bool) -> Vec<String> {
+    match (applied, ok) {
+        (true, true) => vec![
+            "run `mneme-eval validate <promoted-scenario.yaml>`".to_owned(),
+            "run the target suite and baseline comparison before release".to_owned(),
+        ],
+        (false, true) => vec![
+            "review the destination path and rerun with --apply".to_owned(),
+            "commit only the promoted scenario file, not local candidate artifacts".to_owned(),
+        ],
+        (_, false) => vec![
+            "fix failed promotion gates before writing a public scenario".to_owned(),
+            "rerun `mneme-eval candidate-check` after editing the candidate".to_owned(),
+        ],
+    }
+}
+
+fn duplicate_scenario_id_exists(
+    scenario_root: &Path,
+    suite: &str,
+    scenario_id: &str,
+) -> Result<bool, EvalError> {
+    let suite_dir = scenario_root.join(suite);
+    if !suite_dir.is_dir() {
+        return Ok(false);
+    }
+    let mut paths = Vec::new();
+    collect_yaml_paths(&suite_dir, &mut paths)?;
+    for path in paths {
+        let scenario = load_scenario(&path)?;
+        if scenario.id == scenario_id {
+            return Ok(true);
+        }
+    }
+    Ok(false)
 }
 
 fn check_candidate_file(path: &Path) -> CandidateCheckResult {
@@ -627,6 +919,42 @@ fn sanitize_identifier(value: &str) -> String {
     }
 }
 
+fn validate_public_component(label: &str, value: &str) -> Result<(), EvalError> {
+    let trimmed = value.trim();
+    if trimmed.is_empty() {
+        return Err(EvalError::invalid_cli(format!("{label} must not be empty")));
+    }
+    if trimmed == "." || trimmed == ".." || trimmed.contains('/') || trimmed.contains('\\') {
+        return Err(EvalError::invalid_cli(format!(
+            "{label} must be a single public path component"
+        )));
+    }
+    if !trimmed
+        .chars()
+        .all(|ch| ch.is_ascii_alphanumeric() || matches!(ch, '-' | '_' | '.'))
+    {
+        return Err(EvalError::invalid_cli(format!(
+            "{label} may contain only ASCII letters, digits, '-', '_', or '.'"
+        )));
+    }
+    Ok(())
+}
+
+fn normalize_public_filename(value: &str) -> Result<String, EvalError> {
+    validate_public_component("--filename", value)?;
+    let filename = if value.ends_with(".yaml") || value.ends_with(".yml") {
+        value.to_owned()
+    } else {
+        format!("{value}.yaml")
+    };
+    if filename.starts_with('.') {
+        return Err(EvalError::invalid_cli(
+            "--filename must not create a hidden file",
+        ));
+    }
+    Ok(filename)
+}
+
 fn safe_display_path(path: &Path) -> String {
     let display = match env::current_dir()
         .ok()
@@ -644,6 +972,7 @@ mod tests {
     use crate::report::{
         BaselineMetadata, BaselineRunReport, BaselineScenarioMetadata, CheckReport, ScenarioReport,
     };
+    use crate::scenario::{Budget, EventAppendExpected, Expected, InputEvent, Maintenance};
     use crate::target::{EvalTargetMetadata, TargetKind};
 
     #[test]
@@ -678,6 +1007,87 @@ mod tests {
         let check = check_candidates(&out_dir)?;
         assert!(check.ok);
         assert_eq!(check.valid, 1);
+        let _ = fs::remove_dir_all(root);
+        Ok(())
+    }
+
+    #[test]
+    fn promotes_candidate_scenario_to_suite() -> Result<(), Box<dyn std::error::Error>> {
+        let root = env::temp_dir().join(format!(
+            "mneme-candidate-promote-test-{}",
+            std::process::id()
+        ));
+        let _ = fs::remove_dir_all(&root);
+        fs::create_dir_all(&root)?;
+        let candidate_path = root.join("example.candidate.yaml");
+        let scenario_root = root.join("scenarios");
+        let candidate = CandidateFile {
+            schema_version: CANDIDATE_SCHEMA_VERSION.to_owned(),
+            id: "dogfood-scenario-a".to_owned(),
+            status: "proposed".to_owned(),
+            source: CandidateSource {
+                report_kind: "baseline".to_owned(),
+                report: "baseline.json".to_owned(),
+                target: TargetKind::MnemeV1Command.as_str().to_owned(),
+                suite: Some("core".to_owned()),
+                scenario_id: "scenario-a".to_owned(),
+                scenario_path: Some("evals/scenarios/core/scenario-a.yaml".to_owned()),
+            },
+            failure: CandidateFailure {
+                failed_attempts: 1,
+                failed_checks: vec![CandidateFailedCheck {
+                    check: "claim.user.prefers.example".to_owned(),
+                    count: 1,
+                }],
+            },
+            redaction: CandidateRedaction {
+                sanitized: false,
+                finding_codes: Vec::new(),
+            },
+            promotion_checklist: vec!["reviewed".to_owned()],
+            scenario: Some(Scenario {
+                id: "dogfood-scenario-a".to_owned(),
+                tags: vec![
+                    "candidate".to_owned(),
+                    "needs-review".to_owned(),
+                    "category-recall".to_owned(),
+                ],
+                budget: Budget::default(),
+                persistence: None,
+                maintenance: Maintenance::default(),
+                agent_flow: None,
+                events: vec![InputEvent {
+                    speaker_id: "user".to_owned(),
+                    actor_agent_id: None,
+                    text: "remember that the user prefers example workflows".to_owned(),
+                    scope: "private".to_owned(),
+                    trust_level: "trusted".to_owned(),
+                }],
+                expected: Expected {
+                    event_append: Some(EventAppendExpected { count: 1 }),
+                    ..Expected::default()
+                },
+            }),
+        };
+        fs::write(&candidate_path, serde_yaml::to_string(&candidate)?)?;
+
+        let report = promote_candidate(&CandidatePromoteConfig {
+            source_path: candidate_path,
+            scenario_root: scenario_root.clone(),
+            suite_override: Some("dogfood".to_owned()),
+            filename: Some("dogfood-scenario-a.yaml".to_owned()),
+            apply: true,
+        })?;
+
+        assert!(report.ok);
+        assert!(report.applied);
+        let promoted_path = scenario_root
+            .join("dogfood")
+            .join("dogfood-scenario-a.yaml");
+        let promoted_yaml = fs::read_to_string(&promoted_path)?;
+        assert!(promoted_yaml.contains("promoted-candidate"));
+        assert!(!promoted_yaml.contains("needs-review"));
+        load_scenario(&promoted_path)?;
         let _ = fs::remove_dir_all(root);
         Ok(())
     }
