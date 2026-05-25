@@ -103,11 +103,12 @@ INSTALL_WORKSPACE_STORE="${INSTALL_WORKSPACE}/.mneme/mneme-v1.json"
 INSTALL_WRAPPER_DOCTOR="${TMP_ROOT}/mneme-quality-gate-installed-wrapper-doctor.txt"
 INSTALL_WRAPPER_BEGIN="${TMP_ROOT}/mneme-quality-gate-installed-wrapper-begin.json"
 INSTALL_WRAPPER_END="${TMP_ROOT}/mneme-quality-gate-installed-wrapper-end.json"
+QUICKSTART_SMOKE="${TMP_ROOT}/mneme-quality-gate-quickstart-smoke.txt"
 rm -rf "$INSTALL_ROOT" "$INSTALL_WORKSPACE"
 rm -f "$INSTALL_STDOUT" "$INSTALL_DOCTOR" "$INSTALL_HELP" "$INSTALL_CONTEXT" "$INSTALL_STORE" "$INSTALL_REVIEW" \
   "$INSTALL_INIT" "$INSTALL_DOCTOR_PRE" "$INSTALL_DOCTOR_POST" "$INSTALL_DOCTOR_BAD_PROFILE" \
   "$INSTALL_DOCTOR_BAD_STORE" "$INSTALL_REPAIR_CHECK_VALID" "$INSTALL_REPAIR_CHECK_BAD" \
-  "$INSTALL_WRAPPER_DOCTOR" "$INSTALL_WRAPPER_BEGIN" "$INSTALL_WRAPPER_END"
+  "$INSTALL_WRAPPER_DOCTOR" "$INSTALL_WRAPPER_BEGIN" "$INSTALL_WRAPPER_END" "$QUICKSTART_SMOKE"
 ./scripts/install-local.sh --root "$INSTALL_ROOT" --debug > "$INSTALL_STDOUT"
 grep -q 'mneme-install: ok' "$INSTALL_STDOUT"
 INSTALL_BIN="${INSTALL_ROOT}/bin/mneme"
@@ -172,6 +173,8 @@ grep -q '"session_id": "session-001"' "$INSTALL_WRAPPER_BEGIN"
 MNEME_AGENT_HOOK_CONFIG="$INSTALL_PROFILE" \
   ./scripts/mneme-agent-hook.sh end session-001 --summary "Prepared bootstrap plan" > "$INSTALL_WRAPPER_END"
 grep -q '"operation": "end"' "$INSTALL_WRAPPER_END"
+MNEME_BIN="$INSTALL_BIN" scripts/quickstart-smoke.sh > "$QUICKSTART_SMOKE"
+grep -q 'quickstart-smoke: ok' "$QUICKSTART_SMOKE"
 
 MNEME_HELP="${TMP_ROOT}/mneme-quality-gate-help.txt"
 MNEME_EVAL_HELP="${TMP_ROOT}/mneme-quality-gate-eval-help.txt"

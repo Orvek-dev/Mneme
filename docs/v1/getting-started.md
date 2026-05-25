@@ -3,6 +3,13 @@
 This guide is for a new developer using the public repository without private
 planning notes or local templates.
 
+For the shortest public first run, use [Quickstart](quickstart.md):
+
+```sh
+./scripts/install-local.sh
+scripts/quickstart-smoke.sh
+```
+
 ## Prerequisites
 
 - Rust stable with `cargo`, `rustfmt`, and `clippy`.

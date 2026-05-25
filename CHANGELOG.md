@@ -4,6 +4,15 @@ This project follows the spirit of Keep a Changelog.
 
 ## Unreleased
 
+## [0.50.0] - 2026-05-25
+
+### Added
+
+- Added a public quickstart guide and `scripts/quickstart-smoke.sh` so the
+  first local memory workflow can be verified with one command.
+- Added a GitHub-native Markdown evidence scorecard and removed the README SVG
+  dependency for public metric visualization.
+
 ## [0.49.0] - 2026-05-25
 
 ### Added
