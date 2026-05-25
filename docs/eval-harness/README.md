@@ -31,6 +31,7 @@ Useful commands:
 - [V1 Manual Dogfood](v1-manual-dogfood.md)
 - [V1 Hard Dogfood](v1-hard-dogfood.md)
 - [V1 Real-Use Pilot](v1-real-use-pilot.md)
+- [V1 Ontology Benchmark](v1-ontology-benchmark.md)
 
 Useful commands:
 
@@ -43,3 +44,4 @@ Useful commands:
 - `scripts/v1-manual-dogfood.py`
 - `scripts/v1-hard-dogfood.py`
 - `scripts/v1-real-use-pilot.py`
+- `scripts/v1-ontology-benchmark.py`

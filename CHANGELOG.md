@@ -4,6 +4,22 @@ This project follows the spirit of Keep a Changelog.
 
 ## Unreleased
 
+## [0.46.0] - 2026-05-25
+
+### Added
+
+- Added `scripts/v1-ontology-benchmark.py` for measuring current v1 against a
+  public-safe natural-language and complex-ontology benchmark before ontology
+  implementation changes.
+- Added a golden ontology fixture with 13 cases covering entities, relations,
+  attributes, scope, temporal state, provenance, context recall, privacy traps,
+  attribution traps, alias resolution, and explicit v1 anchor triples.
+- Added scorer fault detection for dropped relations, context recall misses,
+  secret leaks, and missing provenance.
+- Added lightweight quality-gate checks for the ontology benchmark contract,
+  fixture validation, and scorer detection.
+- Added Phase 40 ontology benchmark docs and spec coverage.
+
 ## [0.45.0] - 2026-05-25
 
 ### Added

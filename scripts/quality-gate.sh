@@ -17,6 +17,7 @@ python3 -m py_compile wrappers/openai_extractor.py
 python3 -m py_compile scripts/v1-manual-dogfood.py
 python3 -m py_compile scripts/v1-hard-dogfood.py
 python3 -m py_compile scripts/v1-real-use-pilot.py
+python3 -m py_compile scripts/v1-ontology-benchmark.py
 MANUAL_DOGFOOD_DATASET="${TMP_ROOT}/mneme-quality-gate-manual-dogfood-dataset.json"
 scripts/v1-manual-dogfood.py --check-dataset > "$MANUAL_DOGFOOD_DATASET"
 grep -q '"mock_record_count": 100' "$MANUAL_DOGFOOD_DATASET"
@@ -50,6 +51,18 @@ scripts/v1-real-use-pilot.py --check-contract > "$REAL_USE_CONTRACT"
 grep -q '"command": "v1-real-use-pilot-contract"' "$REAL_USE_CONTRACT"
 scripts/v1-real-use-pilot.py --check-feedback examples/v1-real-use-feedback.example.json > "$REAL_USE_FEEDBACK"
 grep -q '"decision_status": "pilot_feedback_triaged"' "$REAL_USE_FEEDBACK"
+ONTOLOGY_CONTRACT="${TMP_ROOT}/mneme-quality-gate-ontology-contract.json"
+ONTOLOGY_FIXTURE="${TMP_ROOT}/mneme-quality-gate-ontology-fixture.json"
+ONTOLOGY_SCORER="${TMP_ROOT}/mneme-quality-gate-ontology-scorer.json"
+scripts/v1-ontology-benchmark.py --check-contract > "$ONTOLOGY_CONTRACT"
+grep -q '"command": "v1-ontology-benchmark-contract"' "$ONTOLOGY_CONTRACT"
+scripts/v1-ontology-benchmark.py --check-fixture > "$ONTOLOGY_FIXTURE"
+grep -q '"case_count": 13' "$ONTOLOGY_FIXTURE"
+grep -q '"natural_language": 10' "$ONTOLOGY_FIXTURE"
+grep -q '"relation_count": 17' "$ONTOLOGY_FIXTURE"
+scripts/v1-ontology-benchmark.py --check-scorer > "$ONTOLOGY_SCORER"
+grep -q '"ok": true' "$ONTOLOGY_SCORER"
+grep -q '"dropped_relation"' "$ONTOLOGY_SCORER"
 
 cargo run -p mneme-cli -- doctor
 cargo run -p mneme-eval -- doctor
