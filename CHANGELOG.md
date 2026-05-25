@@ -4,6 +4,18 @@ This project follows the spirit of Keep a Changelog.
 
 ## Unreleased
 
+## [0.40.0] - 2026-05-25
+
+### Added
+
+- Added `scripts/v1-dogfood.sh` to run deterministic v1 dogfood evals,
+  readiness checks, and isolated CLI smoke flows into an ignored evidence
+  bundle.
+- Added public docs for v1 dogfood execution and evidence bundle layout.
+- Expanded the release quality gate to execute the v1 dogfood script and verify
+  its summary, readiness, and dogfood run reports.
+- Added the Phase 34 v1 dogfood execution evidence feature spec.
+
 ## [0.39.0] - 2026-05-25
 
 ### Added
