@@ -9,6 +9,7 @@ use crate::candidate::{
     check_candidates, generate_candidates, promote_candidate, CandidateCheckReport,
     CandidateGenerateConfig, CandidatePromoteConfig, CandidatePromoteReport, CandidateReport,
 };
+use crate::dogfood::{build_dogfood_summary_report, DogfoodSummaryReport};
 use crate::error::EvalError;
 use crate::redaction;
 use crate::report::{
@@ -79,10 +80,11 @@ pub fn run_cli(args: impl IntoIterator<Item = String>) -> Result<(), EvalError> 
             run_command_or_help("candidate-promote", raw_args, run_candidate_promote)
         }
         "v1-readiness" => run_command_or_help("v1-readiness", raw_args, run_v1_readiness),
+        "dogfood-summary" => run_command_or_help("dogfood-summary", raw_args, run_dogfood_summary),
         "replay" => run_command_or_help("replay", raw_args, run_replay),
         "run" => run_command_or_help("run", raw_args, run_suite),
         _ => Err(EvalError::invalid_cli(format!(
-            "unknown mneme-eval command: {command}\navailable commands: doctor, version, validate, acceptance, baseline, baseline-gate, baseline-summary, baseline-compare, candidate, candidate-check, candidate-promote, v1-readiness, replay, run"
+            "unknown mneme-eval command: {command}\navailable commands: doctor, version, validate, acceptance, baseline, baseline-gate, baseline-summary, baseline-compare, candidate, candidate-check, candidate-promote, v1-readiness, dogfood-summary, replay, run"
         ))),
     }
 }
@@ -122,7 +124,7 @@ fn print_help(command: Option<&str>) -> Result<(), EvalError> {
         None => MNEME_EVAL_HELP,
         Some(command) => command_help(command).ok_or_else(|| {
             EvalError::invalid_cli(format!(
-                "unknown mneme-eval help topic: {command}\navailable help topics: doctor, version, validate, acceptance, baseline, baseline-gate, baseline-summary, baseline-compare, candidate, candidate-check, candidate-promote, v1-readiness, replay, run"
+                "unknown mneme-eval help topic: {command}\navailable help topics: doctor, version, validate, acceptance, baseline, baseline-gate, baseline-summary, baseline-compare, candidate, candidate-check, candidate-promote, v1-readiness, dogfood-summary, replay, run"
             ))
         })?,
     };
@@ -144,6 +146,7 @@ fn command_help(command: &str) -> Option<&'static str> {
         "candidate-check" => Some(MNEME_EVAL_CANDIDATE_CHECK_HELP),
         "candidate-promote" => Some(MNEME_EVAL_CANDIDATE_PROMOTE_HELP),
         "v1-readiness" => Some(MNEME_EVAL_V1_READINESS_HELP),
+        "dogfood-summary" => Some(MNEME_EVAL_DOGFOOD_SUMMARY_HELP),
         "replay" => Some(MNEME_EVAL_REPLAY_HELP),
         "run" => Some(MNEME_EVAL_RUN_HELP),
         _ => None,
@@ -175,6 +178,8 @@ Commands:
   candidate-promote
                  Promote a reviewed candidate into a scenario suite.
   v1-readiness  Run deterministic v1 product-readiness gates.
+  dogfood-summary
+                 Summarize a v1 dogfood evidence bundle.
 
 Targets:
   fake, mneme-v1, mneme-v1-command
@@ -186,7 +191,8 @@ Examples:
   mneme-eval help baseline-summary
   mneme-eval help baseline-compare
   mneme-eval help candidate
-  mneme-eval v1-readiness --json --report evals/reports/v1-readiness.json"#;
+  mneme-eval v1-readiness --json --report evals/reports/v1-readiness.json
+  mneme-eval dogfood-summary evals/runs/v1-dogfood/local-20260525 --json"#;
 
 const MNEME_EVAL_DOCTOR_HELP: &str = r#"Usage: mneme-eval doctor
 
@@ -294,6 +300,15 @@ requiring provider credentials.
 Example:
   mneme-eval v1-readiness --json --report evals/reports/v1-readiness.json"#;
 
+const MNEME_EVAL_DOGFOOD_SUMMARY_HELP: &str = r#"Usage: mneme-eval dogfood-summary <bundle-dir> [--json] [--report <path>]
+
+Summarize and gate an evidence bundle produced by scripts/v1-dogfood.sh. The
+report verifies required dogfood eval, readiness, and CLI smoke artifacts and
+returns ready_for_manual_dogfood only when all required evidence passes.
+
+Example:
+  mneme-eval dogfood-summary evals/runs/v1-dogfood/local-20260525 --json"#;
+
 fn print_doctor() {
     println!(
         "{PRODUCT_NAME} eval harness: {}",
@@ -374,6 +389,12 @@ struct CandidatePromoteOptions {
 
 #[derive(Debug, Clone, Default)]
 struct V1ReadinessOptions {
+    json: bool,
+    report_path: Option<PathBuf>,
+}
+
+#[derive(Debug, Clone, Default)]
+struct DogfoodSummaryOptions {
     json: bool,
     report_path: Option<PathBuf>,
 }
@@ -866,6 +887,17 @@ fn run_v1_readiness(raw_args: Vec<String>) -> Result<(), EvalError> {
         Ok(())
     } else {
         Err(EvalError::scenario("v1 readiness gate failed"))
+    }
+}
+
+fn run_dogfood_summary(raw_args: Vec<String>) -> Result<(), EvalError> {
+    let (bundle_dir, options) = parse_dogfood_summary_args(raw_args)?;
+    let report = build_dogfood_summary_report(&bundle_dir);
+    emit_dogfood_summary_report(&report, &options)?;
+    if report.ok {
+        Ok(())
+    } else {
+        Err(EvalError::scenario("dogfood evidence summary failed"))
     }
 }
 
@@ -2152,6 +2184,46 @@ fn parse_v1_readiness_args(raw_args: Vec<String>) -> Result<V1ReadinessOptions, 
     Ok(options)
 }
 
+fn parse_dogfood_summary_args(
+    raw_args: Vec<String>,
+) -> Result<(PathBuf, DogfoodSummaryOptions), EvalError> {
+    let mut bundle_dir = None;
+    let mut options = DogfoodSummaryOptions::default();
+    let mut idx = 0;
+    while idx < raw_args.len() {
+        match raw_args[idx].as_str() {
+            "--json" => options.json = true,
+            "--report" => {
+                idx += 1;
+                let Some(value) = raw_args.get(idx) else {
+                    return Err(EvalError::invalid_cli("--report requires a path"));
+                };
+                options.report_path = Some(PathBuf::from(value));
+            }
+            value if value.starts_with('-') => {
+                return Err(EvalError::invalid_cli(format!(
+                    "unknown dogfood-summary option: {value}"
+                )));
+            }
+            value => {
+                if bundle_dir.is_some() {
+                    return Err(EvalError::invalid_cli(
+                        "dogfood-summary accepts one bundle directory path",
+                    ));
+                }
+                bundle_dir = Some(PathBuf::from(value));
+            }
+        }
+        idx += 1;
+    }
+    let Some(bundle_dir) = bundle_dir else {
+        return Err(EvalError::invalid_cli(
+            "usage: mneme-eval dogfood-summary <bundle-dir> [--json] [--report <path>]",
+        ));
+    };
+    Ok((bundle_dir, options))
+}
+
 fn parse_candidate_args(raw_args: Vec<String>) -> Result<(PathBuf, CandidateOptions), EvalError> {
     let mut path = None;
     let mut options = CandidateOptions::default();
@@ -2616,6 +2688,23 @@ fn emit_v1_readiness_report(
     Ok(())
 }
 
+fn emit_dogfood_summary_report(
+    report: &DogfoodSummaryReport,
+    options: &DogfoodSummaryOptions,
+) -> Result<(), EvalError> {
+    if let Some(path) = &options.report_path {
+        write_report(path, report)?;
+    }
+    if options.json {
+        let json = serde_json::to_string_pretty(report)
+            .map_err(|source| EvalError::json(Path::new("<stdout>"), source))?;
+        println!("{json}");
+    } else {
+        print_dogfood_summary_report(report);
+    }
+    Ok(())
+}
+
 fn write_report<T: Serialize>(path: &Path, report: &T) -> Result<(), EvalError> {
     if let Some(parent) = path
         .parent()
@@ -2996,6 +3085,38 @@ fn print_v1_readiness_report(report: &V1ReadinessReport) {
     }
 }
 
+fn print_dogfood_summary_report(report: &DogfoodSummaryReport) {
+    println!(
+        "dogfood-summary: status={}, source={}, artifacts={}/{}, gates={}/{}",
+        report.decision_status,
+        report.source,
+        report.passed_artifacts,
+        report.artifact_count,
+        report.passed_gates,
+        report.gate_count
+    );
+    for artifact in &report.artifacts {
+        let status = if artifact.ok { "PASS" } else { "FAIL" };
+        println!("- {status} {}: {}", artifact.name, artifact.detail);
+        if !artifact.present {
+            println!("  - missing {}", artifact.path);
+        }
+    }
+    println!("gates:");
+    for gate in &report.gates {
+        let status = if gate.status == CheckStatus::Pass {
+            "PASS"
+        } else {
+            "FAIL"
+        };
+        println!("- {status} {}: {}", gate.name, gate.detail);
+    }
+    println!("next:");
+    for action in &report.recommended_next_actions {
+        println!("- {action}");
+    }
+}
+
 fn print_scenario_report(scenario: &ScenarioReport) {
     let status = if scenario.ok { "PASS" } else { "FAIL" };
     println!("- {status} {}", scenario.scenario_id);
@@ -3047,6 +3168,10 @@ mod tests {
         let v1_readiness_help = command_help("v1-readiness").expect("v1-readiness help");
         assert!(v1_readiness_help.contains("Usage: mneme-eval v1-readiness"));
         assert!(v1_readiness_help.contains("core, runtime, agent, and dogfood"));
+
+        let dogfood_summary_help = command_help("dogfood-summary").expect("dogfood-summary help");
+        assert!(dogfood_summary_help.contains("Usage: mneme-eval dogfood-summary"));
+        assert!(dogfood_summary_help.contains("ready_for_manual_dogfood"));
 
         let general = command_help("run").expect("run help");
         assert!(general.contains("mneme-eval run"));
@@ -3169,6 +3294,29 @@ mod tests {
     #[test]
     fn parse_v1_readiness_rejects_positional_args() {
         let result = parse_v1_readiness_args(vec!["core".to_owned()]);
+        assert!(result.is_err());
+    }
+
+    #[test]
+    fn parse_dogfood_summary_accepts_report_options() -> Result<(), EvalError> {
+        let (bundle_dir, options) = parse_dogfood_summary_args(vec![
+            "evals/runs/v1-dogfood/local".to_owned(),
+            "--json".to_owned(),
+            "--report".to_owned(),
+            "evals/reports/dogfood-summary.json".to_owned(),
+        ])?;
+        assert_eq!(bundle_dir, PathBuf::from("evals/runs/v1-dogfood/local"));
+        assert!(options.json);
+        assert_eq!(
+            options.report_path.as_deref(),
+            Some(Path::new("evals/reports/dogfood-summary.json"))
+        );
+        Ok(())
+    }
+
+    #[test]
+    fn parse_dogfood_summary_requires_bundle_dir() {
+        let result = parse_dogfood_summary_args(vec!["--json".to_owned()]);
         assert!(result.is_err());
     }
 
