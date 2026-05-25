@@ -6,7 +6,7 @@ cd "$ROOT"
 
 echo "distribution-policy: verifying license and registry publication guardrails"
 
-POLICY_FILE="docs/distribution-policy.md"
+POLICY_FILE="docs/project/distribution-policy.md"
 if [ ! -f "$POLICY_FILE" ]; then
   echo "distribution-policy: missing $POLICY_FILE" >&2
   exit 1

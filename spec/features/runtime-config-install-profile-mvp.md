@@ -36,4 +36,4 @@ ignored by default.
 | REQ-PROFILE-004 | docs and quality-gate config smoke | verified |
 | REQ-PROFILE-005 | public-safety check and profile example | verified |
 | REQ-PROFILE-006 | `scripts/quality-gate.sh` | verified |
-| REQ-PROFILE-007 | `docs/agent-runtime-config.md` | verified |
+| REQ-PROFILE-007 | `docs/v1/agent-runtime-config.md` | verified |

@@ -20,7 +20,7 @@ adding live credentials to CI.
 
 | Requirement | Evidence target | Status |
 | --- | --- | --- |
-| REQ-LIVE-RUNBOOK-001 | `docs/live-provider-baseline-runbook.md` | verified |
+| REQ-LIVE-RUNBOOK-001 | `docs/eval-harness/live-provider-baseline-runbook.md` | verified |
 | REQ-LIVE-RUNBOOK-002 | `baseline_metadata` report fields | verified |
 | REQ-LIVE-RUNBOOK-003 | runbook redaction checklist | verified |
 | REQ-LIVE-RUNBOOK-004 | CI and release dry-run metadata checks | verified |

@@ -58,14 +58,14 @@ Mneme is pre-1.0. The useful surface today is local development and evaluation:
 - workspace crates are package-checked locally but marked `publish = false`
   until the public license and distribution policy are finalized.
 
-See [docs/v1-stability.md](docs/v1-stability.md) for the current stability
+See [Mneme v1 Stability](docs/v1/v1-stability.md) for the current stability
 contract.
-See [docs/api-contract.md](docs/api-contract.md) for the current Rust API
+See [API Contract](docs/project/api-contract.md) for the current Rust API
 surface and documentation gate.
-See [docs/distribution-policy.md](docs/distribution-policy.md) for the current
+See [Distribution Policy](docs/project/distribution-policy.md) for the current
 license and registry publication policy.
 
-For a step-by-step first run, see [Getting Started](docs/getting-started.md).
+For a step-by-step first run, see [Getting Started](docs/v1/getting-started.md).
 
 ## Quickstart
 
@@ -272,39 +272,23 @@ the full gate, which keeps action usage aligned with phase-sized work.
 ## Repository Layout
 
 ```text
-crates/mneme-core   v1 engine, storage port, extraction port
-crates/mneme-cli    local developer CLI
-crates/mneme-eval   scenario replay, target adapters, acceptance gates
-docs/               public contracts and usage docs
-evals/              public scenario fixtures
-scripts/            local quality, safety, and live-baseline helpers
-spec/               feature specs and verification maps
+README.md             main public entry point
+crates/mneme-core     shared v1 personal-memory engine
+crates/mneme-cli      local v1 CLI
+crates/mneme-eval     reusable eval harness CLI
+docs/v1/              Mneme v1 personal-memory docs
+docs/v2/              future Mneme v2 team-memory scope
+docs/eval-harness/    scenario, baseline, candidate, and provider eval docs
+docs/project/         roadmap, release, packaging, and policy docs
+evals/                public scenario fixtures
+scripts/              local quality, safety, and live-baseline helpers
+spec/                 feature specs and verification maps
 ```
 
 ## Documentation
 
-- [Local CLI](docs/local-cli.md)
-- [Local Install](docs/local-install.md)
-- [Getting Started](docs/getting-started.md)
-- [API Contract](docs/api-contract.md)
-- [Distribution Policy](docs/distribution-policy.md)
-- [Personal Runtime](docs/personal-runtime.md)
-- [Memory Review Artifacts](docs/memory-review-artifacts.md)
-- [Agent Integration](docs/agent-integration.md)
-- [Agent Hook Contract](docs/agent-hook-contract.md)
-- [Agent Runtime Config](docs/agent-runtime-config.md)
-- [Eval Scenario Format](docs/eval-scenario-format.md)
-- [Eval Candidate Workflow](docs/eval-candidate-workflow.md)
-- [Eval Acceptance Gate](docs/eval-harness-acceptance.md)
-- [Eval Target Adapter Contract](docs/eval-target-adapter-contract.md)
-- [Extraction Adapter Contract](docs/extraction-adapter-contract.md)
-- [Model Extraction Adapter](docs/model-extraction-adapter.md)
-- [OpenAI Provider Wrapper](docs/openai-provider-wrapper.md)
-- [Live Provider Baseline](docs/live-provider-baseline.md)
-- [Live Provider Baseline Runbook](docs/live-provider-baseline-runbook.md)
-- [Package Readiness](docs/package-readiness.md)
-- [CI Cost Policy](docs/ci-cost-policy.md)
-- [Phase 3 Readiness](docs/phase-3-readiness.md)
-- [Mneme v1 Personal Core](docs/mneme-v1-personal-core.md)
-- [Mneme v1 Stability](docs/v1-stability.md)
-- [Release Checklist](docs/release-checklist.md)
+- [Documentation Map](docs/README.md)
+- [Mneme v1](docs/v1/README.md)
+- [Mneme v2](docs/v2/README.md)
+- [Eval Harness](docs/eval-harness/README.md)
+- [Project and Release](docs/project/README.md)

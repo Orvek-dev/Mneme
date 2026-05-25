@@ -35,4 +35,4 @@ wrapper that agents can call with environment-based defaults.
 | REQ-RUNTIME-004 | wrapper quality-gate smoke with env defaults | verified |
 | REQ-RUNTIME-005 | wrapper `doctor` smoke in quality gate | verified |
 | REQ-RUNTIME-006 | `scripts/quality-gate.sh` | verified |
-| REQ-RUNTIME-007 | `docs/agent-integration.md` and hook contract docs | verified |
+| REQ-RUNTIME-007 | `docs/v1/agent-integration.md` and hook contract docs | verified |

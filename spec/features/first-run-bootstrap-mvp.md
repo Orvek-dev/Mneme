@@ -34,4 +34,4 @@ wire the agent hook wrapper without hand-authoring `.mneme` runtime files.
 | REQ-BOOT-004 | `init_creates_store_and_agent_hook_profile` | verified |
 | REQ-BOOT-005 | `scripts/quality-gate.sh` installed workspace init smoke | verified |
 | REQ-BOOT-006 | `scripts/quality-gate.sh` generated profile wrapper smoke | verified |
-| REQ-BOOT-007 | README and `docs/local-install.md` | verified |
+| REQ-BOOT-007 | README and `docs/v1/local-install.md` | verified |

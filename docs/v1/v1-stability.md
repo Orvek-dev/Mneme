@@ -114,7 +114,7 @@ eval update land in the same PR.
 ## Unstable Areas
 
 - Rust type names and module placement are not semver-stable before 1.0; the
-  intended current API surface is documented in `docs/api-contract.md`.
+  intended current API surface is documented in `docs/project/api-contract.md`.
 - JSON store schema migration is minimal and limited to v1 local state
   normalization.
 - Extraction is deterministic by default; production LLM extraction is not

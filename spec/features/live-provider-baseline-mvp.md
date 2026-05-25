@@ -31,6 +31,6 @@ adding live provider calls to public CI.
 | REQ-LIVE-BASE-002 | `--iterations` parser with max bound | verified |
 | REQ-LIVE-BASE-003 | `BaselineReport` JSON contract and category summaries | verified |
 | REQ-LIVE-BASE-004 | CI uses `MNEME_OPENAI_DRY_RUN=1` | verified |
-| REQ-LIVE-BASE-005 | `docs/live-provider-baseline.md` | verified |
+| REQ-LIVE-BASE-005 | `docs/eval-harness/live-provider-baseline.md` | verified |
 | REQ-LIVE-BASE-006 | CI and release workflow baseline steps | verified |
 | REQ-LIVE-BASE-007 | `baseline_metadata` report fields | verified |

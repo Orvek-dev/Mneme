@@ -106,8 +106,8 @@ gate.
 Mneme v1 implementation can start when all are true:
 
 - CI passes `cargo run -p mneme-eval -- acceptance --suite core --target fake`.
-- `docs/eval-scenario-format.md` describes the public fixture contract.
-- `docs/eval-target-adapter-contract.md` describes how a v1 target plugs into
+- `docs/eval-harness/eval-scenario-format.md` describes the public fixture contract.
+- `docs/eval-harness/eval-target-adapter-contract.md` describes how a v1 target plugs into
   the harness.
 - generated reports and local harness files remain ignored.
 
