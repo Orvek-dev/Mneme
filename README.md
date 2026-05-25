@@ -57,6 +57,8 @@ Mneme is pre-1.0. The useful surface today is local development and evaluation:
   scenario candidate artifacts for dogfood feedback review;
 - reviewed v1 behavior can be checked with a deterministic dogfood readiness
   gate that validates and replays core, runtime, agent, and dogfood suites;
+- v1 manual dogfood can be run locally with 100 public-safe synthetic records
+  and 25 workflow checks before product promotion;
 - workspace crates are package-checked locally but marked `publish = false`
   until the public license and distribution policy are finalized.
 
@@ -178,6 +180,7 @@ cargo run -p mneme-eval -- run --suite dogfood --target mneme-v1
 cargo run -p mneme-eval -- v1-readiness --json --report evals/reports/v1-readiness.json
 scripts/v1-dogfood.sh
 cargo run -p mneme-eval -- dogfood-summary evals/runs/v1-dogfood/<run-label>
+scripts/v1-manual-dogfood.py
 ```
 
 Run the opt-in command extraction suite:
