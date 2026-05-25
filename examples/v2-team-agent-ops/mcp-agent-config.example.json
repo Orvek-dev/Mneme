@@ -1,0 +1,31 @@
+{
+  "mcpServers": {
+    "mneme-v2-team": {
+      "command": "python3",
+      "args": [
+        "./scripts/mneme-mcp-stdio.py"
+      ],
+      "env": {
+        "MNEME_STORE": ".mneme/mneme-team-v2.json"
+      }
+    }
+  },
+  "agentPolicy": {
+    "beforeWork": [
+      "Call mneme_team_context for scoped context before using memory."
+    ],
+    "duringWork": [
+      "Use mneme_team_run_begin at task start.",
+      "Use mneme_team_run_note for durable project findings."
+    ],
+    "afterWork": [
+      "Use mneme_team_run_end with summary and next steps.",
+      "Use mneme_team_run_handoff before another agent continues the task."
+    ],
+    "reviewBlockers": [
+      "Do not consume handoff packages when firewall.high_count is greater than 0.",
+      "Treat quality conflict findings as review-required.",
+      "Do not apply sync imports unless checksum_verified is true."
+    ]
+  }
+}

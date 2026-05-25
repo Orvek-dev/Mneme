@@ -4,6 +4,25 @@ This project follows the spirit of Keep a Changelog.
 
 ## Unreleased
 
+## [0.64.0] - 2026-05-25
+
+### Added
+
+- Added a complete public v2 documentation package: quickstart, team-agent
+  workflow, security model, and evaluation guide.
+- Added a public-safe `examples/v2-team-agent-ops` demo that generates a
+  run-anchored handoff package, quality report, firewall report, sync checksum
+  dry-run, ontology projection, and readiness summary.
+- Added an MCP-style local agent configuration example for v2 team workflows.
+- Added static public-safe v2 demo report artifacts for quick repository
+  inspection.
+
+### Changed
+
+- Extended the release quality gate to run the v2 team-agent ops demo and check
+  private redaction, quarantine omission, checksum verification, quality
+  conflict detection, and project access denial.
+
 ## [0.63.0] - 2026-05-25
 
 ### Added

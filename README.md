@@ -20,6 +20,8 @@ Mneme currently provides:
   onboarding.
 - `scripts/quality-gate.sh`: the single local gate used before PRs and
   releases.
+- `examples/v2-team-agent-ops`: a public-safe v2 demo for scoped team-agent
+  handoff, quality, firewall, sync, and MCP-style integration.
 
 ## 5-Minute Quickstart
 
@@ -167,6 +169,16 @@ For local CLI details, see [Local CLI](docs/v1/local-cli.md). Without
 
 For v2 team-memory details, see [Mneme v2](docs/v2/README.md). Without
 `--store`, `mneme team ...` writes to `.mneme/mneme-team-v2.json`.
+
+To see the complete v2 team-agent workflow in one command:
+
+```sh
+examples/v2-team-agent-ops/run-demo.sh
+```
+
+The demo produces a run-anchored handoff package, quality report, firewall
+report, sync checksum dry-run, ontology projection, and a public-safe readiness
+summary.
 
 ## Eval Harness
 
@@ -326,7 +338,7 @@ cargo run -p mneme-eval -- dogfood-summary --help
 
 ## Evaluation Evidence
 
-The latest public-safe local evidence snapshot was measured for `v0.63.0` on
+The latest public-safe local evidence snapshot was measured for `v0.64.0` on
 2026-05-25. These numbers are reproducible development evidence for Mneme,
 not claims against external production workloads. Full run bundles are ignored
 by git; the committed fixtures and scripts are safe to inspect and rerun.

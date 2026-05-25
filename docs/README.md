@@ -15,6 +15,8 @@ Start here:
 - [Mneme v1](v1/README.md) for the usable personal-memory runtime.
 - [Mneme v2](v2/README.md) for the usable local team-memory policy core and
   connector-ready workflow.
+- [V2 Team Agent Ops Example](../examples/v2-team-agent-ops/README.md) for a
+  public-safe end-to-end handoff demo.
 - [Eval Harness](eval-harness/README.md) for deterministic and provider evals.
 - [Project and Release](project/README.md) for roadmap, policy, and release
   process.

@@ -3,7 +3,7 @@
 This scorecard uses GitHub-native Markdown so the public evidence summary stays
 readable without generated images or renderer-specific SVG behavior.
 
-Measured for `v0.63.0` on 2026-05-25.
+Measured for `v0.64.0` on 2026-05-25.
 
 ## Summary
 

@@ -53,6 +53,7 @@ evals/candidates/*
 evals/runs/
 benchmarks/results/*
 !benchmarks/results/.gitkeep
+examples/v2-team-agent-ops/out/
 
 # Local AI / vibe-coding harness files. These are development control-plane
 # files, not public Mneme product source.

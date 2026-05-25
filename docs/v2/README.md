@@ -6,8 +6,9 @@ inspectable idea as v1, but the core question changes:
 > Which memories can safely move from one person or agent to a team?
 
 The current v2 implementation is a local team policy core plus connector-ready
-boundary. It is ready for deterministic dogfood and public inspection, while
-hosted sync, server deployment, and UI are still future work.
+boundary. It is ready for deterministic dogfood, public inspection, and local
+team-agent workflow demos, while hosted sync, server deployment, and UI are
+still future work.
 
 ## What v2 Adds
 
@@ -23,8 +24,8 @@ hosted sync, server deployment, and UI are still future work.
 - Memory-poisoning-like text quarantine before context retrieval or sync.
 - Connector-safe sync envelopes that omit private, agent-private, blocked, and
   quarantined memory.
-- Agent handoff packages with context, sync payload, firewall report, and
-- quality report, and ontology projection.
+- Agent handoff packages with context, sync payload, firewall report, quality
+  report, and ontology projection.
 - Task-run lifecycle for `begin`, `note`, `end`, and run-anchored handoff.
 - Quality reports for duplicate memory, active conflicts, pending promotions,
   promoted-source cleanup, and run state.
@@ -35,7 +36,20 @@ hosted sync, server deployment, and UI are still future work.
   review, citation coverage, revoked-agent denial, sync privacy, handoff, run
   lifecycle, quality checks, checksum verification, and quarantine behavior.
 
-## Quick Start
+## Public Package
+
+Start with the focused docs:
+
+- [Quickstart](quickstart.md): one local flow from team setup to handoff.
+- [Team Agent Workflow](team-agent-workflow.md): how planner, builder, and
+  reviewer agents should use v2.
+- [Security Model](security-model.md): the boundary rules and non-claims.
+- [Evaluation](evaluation.md): the suite, dogfood contract, and scorecard
+  signals.
+- [Team Agent Ops Example](../../examples/v2-team-agent-ops/README.md): a
+  public-safe runnable demo with sample reports and MCP-style config.
+
+## CLI Quick Start
 
 ```sh
 cargo run -p mneme-cli -- team init --admin alice
@@ -89,6 +103,7 @@ cargo run -p mneme-eval -- v2-readiness --json --report evals/reports/v2-readine
 scripts/v2-team-dogfood.py --check-contract
 scripts/v2-team-dogfood.py --check-dataset
 scripts/v2-team-dogfood.py --check-seeded-faults
+examples/v2-team-agent-ops/run-demo.sh --out-dir /tmp/mneme-v2-team-agent-ops
 ```
 
 The readiness gate currently requires ten public-safe team scenarios and
@@ -112,6 +127,7 @@ Implemented:
 - `mneme-v2` eval target;
 - team scenario suite and v2 readiness gate;
 - v2 team dogfood evidence script.
+- public-safe v2 team-agent ops demo and MCP-style config example.
 
 Not implemented yet:
 
@@ -124,3 +140,4 @@ Not implemented yet:
 See [Team Memory Core](team-memory-core.md) for the API and policy surface.
 See [Use Cases](use-cases.md) for onboarding, handoff, promotion, sync,
 firewall, and ontology recipes.
+See [Evaluation](evaluation.md) for the public readiness and seeded-fault gates.

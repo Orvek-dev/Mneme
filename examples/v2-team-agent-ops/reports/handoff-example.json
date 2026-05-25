@@ -1,0 +1,23 @@
+{
+  "schema_version": "mneme.v2_team_agent_ops_summary.v1",
+  "ok": true,
+  "run_id": "team-run-001",
+  "context_item_count": 2,
+  "context_memory_ids": [
+    "team-memory-004",
+    "team-memory-001"
+  ],
+  "private_memory_redacted": true,
+  "quarantined_memory_omitted": true,
+  "sync_memory_count": 2,
+  "sync_omitted_count": 2,
+  "sync_checksum_verified": true,
+  "quality_ok": false,
+  "quality_health": "needs_resolution",
+  "quality_duplicate_group_count": 1,
+  "quality_conflict_group_count": 1,
+  "firewall_ok": true,
+  "firewall_high_count": 0,
+  "denied_context_item_count": 0,
+  "validation_ok": true
+}
