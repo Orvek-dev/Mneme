@@ -204,3 +204,9 @@ Phase 35 shipped the **V1 Dogfood Evidence Triage MVP** in `v0.41.0`, adding
 `mneme-eval dogfood-summary` so dogfood evidence bundles can be checked for
 missing, malformed, or failing artifacts and promoted to manual v1 dogfood only
 when the decision status is `ready_for_manual_dogfood`.
+
+Phase 36 shipped the **V1 Manual Dogfood Protocol MVP** in `v0.42.0`, adding
+`scripts/v1-manual-dogfood.py` so v1 can be tested locally with 100 public-safe
+synthetic memory records and 25 realistic workflow checks. This phase also
+hardened v1 ID generation so compaction and restore cannot cause new event or
+claim IDs to collide with retained source references.

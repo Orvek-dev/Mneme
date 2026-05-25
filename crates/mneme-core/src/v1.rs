@@ -86,7 +86,7 @@ impl MnemeEngine {
         extractor: &(impl MnemeExtractor + ?Sized),
     ) -> Result<(), ExtractorError> {
         let event = EventRecord {
-            id: next_id("event", self.events.len() + 1),
+            id: next_id("event", self.next_event_number()),
             speaker_id: input.speaker_id,
             actor_agent_id: input.actor_agent_id,
             text: input.text,
@@ -124,7 +124,7 @@ impl MnemeEngine {
         if let Some(extracted) = extractor.extract(&event)? {
             let claim = claim_from_extracted(
                 &event,
-                self.claims.len() + 1,
+                self.next_claim_number(),
                 extracted,
                 vec![event.id.clone()],
             );
@@ -207,7 +207,8 @@ impl MnemeEngine {
         dedupe_ids(&mut source_event_ids);
 
         let extracted = extracted_claim_from_text(event, new_text);
-        let claim = claim_from_extracted(event, self.claims.len() + 1, extracted, source_event_ids);
+        let claim =
+            claim_from_extracted(event, self.next_claim_number(), extracted, source_event_ids);
         self.audit.push(AuditRecord {
             kind: AuditKind::ClaimWrite,
             target_id: claim.id.clone(),
@@ -235,7 +236,8 @@ impl MnemeEngine {
         dedupe_ids(&mut source_event_ids);
 
         let extracted = extracted_claim_from_text(event, new_text);
-        let claim = claim_from_extracted(event, self.claims.len() + 1, extracted, source_event_ids);
+        let claim =
+            claim_from_extracted(event, self.next_claim_number(), extracted, source_event_ids);
         self.audit.push(AuditRecord {
             kind: AuditKind::ClaimWrite,
             target_id: claim.id.clone(),
@@ -335,7 +337,7 @@ impl MnemeEngine {
                 .with_max_items(input.max_items),
         );
         let session = SessionRecord {
-            id: next_id("session", self.sessions.len() + 1),
+            id: next_id("session", self.next_session_number()),
             task: input.task,
             actor_agent_id: input.actor_agent_id,
             status: SessionStatus::Active,
@@ -404,7 +406,7 @@ impl MnemeEngine {
                 SessionMemoryInputMode::ExplicitClaim => format!("remember: {claim}"),
                 SessionMemoryInputMode::RawEvent => claim,
             };
-            let event_number = self.events.len() + 1;
+            let event_id = next_id("event", self.next_event_number());
             self.ingest_event_with_extractor(
                 EventInput {
                     speaker_id: "agent".to_owned(),
@@ -416,7 +418,6 @@ impl MnemeEngine {
                 extractor,
             )
             .map_err(|source| SessionError::new(format!("record session memory: {source}")))?;
-            let event_id = next_id("event", event_number);
             remembered_event_ids.push(event_id.clone());
             remembered_claim_ids.extend(
                 self.claims
@@ -513,6 +514,21 @@ impl MnemeEngine {
             ),
         });
         report
+    }
+
+    fn next_event_number(&self) -> usize {
+        next_number_for_prefix("event", self.events.iter().map(|event| event.id.as_str()))
+    }
+
+    fn next_claim_number(&self) -> usize {
+        next_number_for_prefix("claim", self.claims.iter().map(|claim| claim.id.as_str()))
+    }
+
+    fn next_session_number(&self) -> usize {
+        next_number_for_prefix(
+            "session",
+            self.sessions.iter().map(|session| session.id.as_str()),
+        )
     }
 }
 
@@ -2262,6 +2278,15 @@ fn next_id(prefix: &str, number: usize) -> String {
     format!("{prefix}-{number:03}")
 }
 
+fn next_number_for_prefix<'a>(prefix: &str, ids: impl Iterator<Item = &'a str>) -> usize {
+    let marker = format!("{prefix}-");
+    ids.filter_map(|id| id.strip_prefix(&marker))
+        .filter_map(|suffix| suffix.parse::<usize>().ok())
+        .max()
+        .unwrap_or(0)
+        .saturating_add(1)
+}
+
 fn unix_timestamp() -> u64 {
     SystemTime::now()
         .duration_since(UNIX_EPOCH)
@@ -2863,6 +2888,66 @@ mod tests {
             .audit
             .iter()
             .any(|event| event.kind == AuditKind::StateCompact));
+        Ok(())
+    }
+
+    #[test]
+    fn compaction_keeps_new_event_and_claim_ids_collision_free(
+    ) -> Result<(), Box<dyn std::error::Error>> {
+        let mut engine = MnemeEngine::new(MnemeConfig::default());
+        for text in [
+            "remember: user prefers alpha notes",
+            "remember: user prefers beta notes",
+            "remember: user prefers gamma notes",
+        ] {
+            engine.ingest_event(EventInput {
+                speaker_id: "user".to_owned(),
+                actor_agent_id: None,
+                text: text.to_owned(),
+                scope: "private".to_owned(),
+                trust_level: "trusted_user".to_owned(),
+            })?;
+        }
+        engine.ingest_event(EventInput {
+            speaker_id: "user".to_owned(),
+            actor_agent_id: None,
+            text: "forget-id: claim-002".to_owned(),
+            scope: "private".to_owned(),
+            trust_level: "trusted_user".to_owned(),
+        })?;
+
+        let report = engine.compact();
+        assert_eq!(report.events_after, 2);
+        assert_eq!(report.claims_after, 2);
+
+        engine.ingest_event(EventInput {
+            speaker_id: "user".to_owned(),
+            actor_agent_id: None,
+            text: "remember: user prefers delta notes".to_owned(),
+            scope: "private".to_owned(),
+            trust_level: "trusted_user".to_owned(),
+        })?;
+        let snapshot = engine.snapshot();
+        let event_ids = snapshot
+            .events
+            .iter()
+            .map(|event| event.id.as_str())
+            .collect::<BTreeSet<_>>();
+        let claim_ids = snapshot
+            .claims
+            .iter()
+            .map(|claim| claim.id.as_str())
+            .collect::<BTreeSet<_>>();
+
+        assert_eq!(event_ids.len(), snapshot.events.len());
+        assert_eq!(claim_ids.len(), snapshot.claims.len());
+        assert!(event_ids.contains("event-004"));
+        assert!(claim_ids.contains("claim-004"));
+        assert!(snapshot
+            .claims
+            .iter()
+            .any(|claim| claim.text() == "user prefers delta notes"
+                && claim.source_event_ids == vec!["event-004"]));
         Ok(())
     }
 
