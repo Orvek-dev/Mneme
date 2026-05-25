@@ -4,6 +4,22 @@ This project follows the spirit of Keep a Changelog.
 
 ## Unreleased
 
+## [0.37.0] - 2026-05-25
+
+### Added
+
+- Added `mneme-eval candidate <report.json>` to create local, sanitized
+  scenario candidate artifacts from failed eval or baseline reports.
+- Added `mneme-eval candidate-check <candidate.yaml|dir>` to validate candidate
+  artifacts before sharing or promotion.
+- Added redaction sanitization utilities for generated candidate YAML so
+  test-only key strings and local user paths do not survive in artifacts.
+- Ignored generated `evals/candidates/` content by default while preserving a
+  tracked `.gitkeep`.
+- Expanded the release quality gate to generate, sanitize, and validate
+  candidate artifacts from a seeded-fault baseline.
+- Added the Phase 31 dogfood scenario candidate feature spec.
+
 ## [0.36.0] - 2026-05-25
 
 ### Added

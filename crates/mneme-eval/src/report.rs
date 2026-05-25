@@ -5,7 +5,7 @@ use crate::target::EvalTargetMetadata;
 
 const REPORT_SCHEMA_VERSION: u32 = 1;
 
-#[derive(Debug, Clone, Serialize)]
+#[derive(Debug, Clone, Deserialize, Serialize)]
 pub(crate) struct EvalReport {
     pub(crate) report_schema_version: u32,
     pub(crate) target: String,
@@ -511,7 +511,7 @@ impl ScenarioValidationReport {
     }
 }
 
-#[derive(Debug, Clone, Serialize)]
+#[derive(Debug, Clone, Deserialize, Serialize)]
 pub(crate) struct ScenarioReport {
     pub(crate) scenario_id: String,
     pub(crate) tags: Vec<String>,
@@ -531,7 +531,7 @@ impl ScenarioReport {
     }
 }
 
-#[derive(Debug, Clone, Serialize)]
+#[derive(Debug, Clone, Deserialize, Serialize)]
 pub(crate) struct CheckReport {
     pub(crate) name: String,
     pub(crate) status: CheckStatus,
@@ -572,7 +572,7 @@ impl CheckReport {
     }
 }
 
-#[derive(Debug, Clone, Copy, Eq, PartialEq, Serialize)]
+#[derive(Debug, Clone, Copy, Eq, PartialEq, Deserialize, Serialize)]
 #[serde(rename_all = "snake_case")]
 pub(crate) enum CheckStatus {
     Pass,
