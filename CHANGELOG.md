@@ -4,6 +4,19 @@ This project follows the spirit of Keep a Changelog.
 
 ## Unreleased
 
+## [0.52.0] - 2026-05-25
+
+### Added
+
+- Added an MIT `LICENSE` file and workspace crate license metadata.
+
+### Changed
+
+- Updated distribution policy checks and public docs for the selected MIT
+  license while keeping registry publication disabled.
+- Removed private template-specific strings from current public safety and
+  ontology benchmark checks in favor of generic local template patterns.
+
 ## [0.51.0] - 2026-05-25
 
 ### Changed

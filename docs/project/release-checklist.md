@@ -56,8 +56,8 @@ Before pushing a release tag, confirm:
 - no token, key, or secret file is tracked;
 - package manifests still have `publish = false` unless a public registry
   release is intentionally being prepared;
-- no license metadata is added unless a matching committed license file and
-  updated distribution policy are included in the same PR;
+- MIT license metadata still matches the committed `LICENSE` file and
+  distribution policy;
 - `scripts/install-local.sh` still installs and smokes the local `mneme`
   binary;
 - `CHANGELOG.md` describes the release-relevant changes;

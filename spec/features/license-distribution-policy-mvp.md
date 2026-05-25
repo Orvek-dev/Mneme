@@ -3,13 +3,13 @@
 ## Scope
 
 This phase makes Mneme's current public distribution state explicit and
-machine-checked without choosing a license on behalf of the owner.
+machine-checked after the owner selects the MIT License.
 
 ## Authority
 
-- The project owner must select the public license.
-- Until a license is committed, registry publication must remain disabled.
-- Package manifests must not imply a license that is not present in the repo.
+- The project owner has selected the MIT License.
+- Registry publication must remain disabled until explicitly prepared.
+- Package manifests must match the committed license in the repo.
 - Release checks must catch accidental publication guard removal.
 
 ## Requirements
@@ -17,15 +17,15 @@ machine-checked without choosing a license on behalf of the owner.
 - [REQ-DIST-001][Ubiquitous] The repository shall document the current license
   status and registry publication status.
 - [REQ-DIST-002][Privacy] The repository shall keep crates unpublished with
-  `publish = false` while no license file exists.
+  `publish = false` while registry publication is disabled.
 - [REQ-DIST-003][Release] Package checks shall run a distribution policy guard
   before assembling package contents.
-- [REQ-DIST-004][Ubiquitous] Public docs shall explain that license selection is
-  an owner decision and list the release work required after that decision.
+- [REQ-DIST-004][Ubiquitous] Public docs shall explain the selected license and
+  list the release work required before registry publication.
 - [REQ-DIST-005][Release] Release and package readiness docs shall include the
   distribution policy check.
-- [REQ-DIST-006][Release] The policy guard shall fail if license metadata is
-  declared without a committed license file.
+- [REQ-DIST-006][Release] The policy guard shall fail if license metadata and
+  the committed license file disagree.
 
 ## Verification Map
 

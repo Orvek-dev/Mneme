@@ -132,8 +132,9 @@ Mneme is pre-1.0. The useful surface today is local development and evaluation:
   priorities;
 - the default v1 rule extractor now captures a conservative natural-language
   ontology layer for the public benchmark and is checked by the quality gate;
-- workspace crates are package-checked locally but marked `publish = false`
-  until the public license and distribution policy are finalized.
+- Mneme is MIT licensed for source use, while workspace crates remain marked
+  `publish = false` until a registry publication path is intentionally
+  prepared.
 
 See [Mneme v1 Stability](docs/v1/v1-stability.md) for the current stability
 contract.
@@ -142,7 +143,7 @@ public v1 readiness gate.
 See [API Contract](docs/project/api-contract.md) for the current Rust API
 surface and documentation gate.
 See [Distribution Policy](docs/project/distribution-policy.md) for the current
-license and registry publication policy.
+MIT license and registry publication policy.
 
 For local CLI details, see [Local CLI](docs/v1/local-cli.md). Without
 `--store`, the CLI writes to `.mneme/mneme-v1.json` in the current directory.

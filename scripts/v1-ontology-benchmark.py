@@ -28,8 +28,8 @@ EXPECTED_CASE_COUNT = 13
 RUN_LABEL_RE = re.compile(r"^[A-Za-z0-9._/-]+$")
 SECRET_RE = re.compile(r"(?i)\b(api_key|token|access_token|password)\s*=")
 KEY_LIKE_RE = "sk" + r"-[A-Za-z0-9_-]{16,}"
-PRIVATE_TEMPLATE_NAME = "private" + "_" + "template"
-PRIVATE_RE = re.compile(r"(/Users/|" + KEY_LIKE_RE + r"|99_" + PRIVATE_TEMPLATE_NAME + r"|" + PRIVATE_TEMPLATE_NAME + r")")
+PRIVATE_TEMPLATE_RE = r"(?:^|[/\\])(?:99_[^/\\]*_template|[^/\\]*_harness)(?:[/\\]|$)"
+PRIVATE_RE = re.compile(r"(/Users/|" + KEY_LIKE_RE + r"|" + PRIVATE_TEMPLATE_RE + r")")
 STATUS_VALUES = {"active", "blocked_secret", "superseded", "forgotten"}
 ONTOLOGY_TARGETS = {
     "entity_f1": 0.8,

@@ -42,9 +42,9 @@ The script blocks known private or generated paths such as local stores, eval
 reports, eval candidates, private planning files, and local harness/template
 copies.
 
-Cargo will warn that the manifests have no `license` or `license-file`. That
-warning is expected until the project owner chooses a public license; do not add
-a license field just to silence the warning.
+Cargo manifests declare the MIT license through workspace package metadata.
+Registry publication still stays disabled with `publish = false` until the
+owner intentionally prepares a registry release path.
 
 The full quality gate also runs this check:
 
@@ -80,11 +80,10 @@ applied curation, and verifies the generated agent hook profile through
 
 Do not remove `publish = false` until all of the following are true:
 
-- a public license has been selected and committed;
 - the crate API surfaces have an explicit stability policy;
 - Rustdoc verification is part of CI or the release quality gate;
-- `scripts/distribution-policy-check.sh` has been updated for the selected
-  license and publication target;
+- `scripts/distribution-policy-check.sh` has been updated for the intended
+  registry publication target;
 - package contents are reviewed against `scripts/package-check.sh`;
 - `docs/project/release-checklist.md` includes registry publication steps;
 - CI verifies the exact package or publish dry-run command intended for release.
