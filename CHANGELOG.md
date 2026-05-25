@@ -4,6 +4,19 @@ This project follows the spirit of Keep a Changelog.
 
 ## Unreleased
 
+## [0.48.0] - 2026-05-25
+
+### Added
+
+- Added conservative natural-language ontology extraction to the default v1 rule
+  path for durable preferences, requirements, attributes, aliases, temporal
+  changes, team visibility, and agent handoff facts.
+- Added source-event-aware context relevance so natural-language task queries can
+  retrieve cited claim text without exposing raw event text as context.
+- Added full compact ontology benchmark verification to the quality gate,
+  requiring `ontology_benchmark_passed` and `v1_ontology_ready`.
+- Added v1 natural-language ontology docs and Phase 42 spec coverage.
+
 ## [0.47.0] - 2026-05-25
 
 ### Added

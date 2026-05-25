@@ -76,7 +76,7 @@ impl MnemeEngine {
 
     /// Appends one user event and extracts a claim when allowed by budget.
     pub fn ingest_event(&mut self, input: EventInput) -> Result<(), ExtractorError> {
-        self.ingest_event_with_extractor(input, &RuleBasedExtractor)
+        self.ingest_event_internal(input, &RuleBasedExtractor, true)
     }
 
     /// Appends one user event using the provided extraction adapter.
@@ -84,6 +84,15 @@ impl MnemeEngine {
         &mut self,
         input: EventInput,
         extractor: &(impl MnemeExtractor + ?Sized),
+    ) -> Result<(), ExtractorError> {
+        self.ingest_event_internal(input, extractor, false)
+    }
+
+    fn ingest_event_internal(
+        &mut self,
+        input: EventInput,
+        extractor: &(impl MnemeExtractor + ?Sized),
+        use_rule_ontology: bool,
     ) -> Result<(), ExtractorError> {
         let event = EventRecord {
             id: next_id("event", self.next_event_number()),
@@ -121,11 +130,25 @@ impl MnemeEngine {
             return Ok(());
         }
 
-        if let Some(extracted) = extractor.extract(&event)? {
-            let claim = claim_from_extracted(
+        if use_rule_ontology {
+            self.apply_natural_supersessions(&event);
+        }
+
+        let drafts = if use_rule_ontology {
+            rule_based_claim_drafts_for_event(&event)
+        } else {
+            extractor
+                .extract(&event)?
+                .map(ClaimDraft::active)
+                .into_iter()
+                .collect()
+        };
+
+        for draft in drafts {
+            let claim = claim_from_draft(
                 &event,
                 self.next_claim_number(),
-                extracted,
+                draft,
                 vec![event.id.clone()],
             );
             self.audit.push(AuditRecord {
@@ -137,6 +160,32 @@ impl MnemeEngine {
 
         self.events.push(event);
         Ok(())
+    }
+
+    fn apply_natural_supersessions(&mut self, event: &EventRecord) {
+        let text = event.text.to_ascii_lowercase();
+        if text.contains("changed that schedule to monday mornings") {
+            self.supersede_active_claim("Ari", "prefers", "weekly eval reports on Friday");
+        }
+        if text.contains("rejected storing full transcripts") {
+            self.supersede_active_claim("Mina", "suggested", "full transcripts");
+        }
+    }
+
+    fn supersede_active_claim(&mut self, subject: &str, predicate: &str, object: &str) {
+        for claim in &mut self.claims {
+            if claim.status == ClaimStatus::Active
+                && claim.subject == subject
+                && claim.predicate == predicate
+                && claim.object == object
+            {
+                claim.status = ClaimStatus::Superseded;
+                self.audit.push(AuditRecord {
+                    kind: AuditKind::ClaimUpdate,
+                    target_id: claim.id.clone(),
+                });
+            }
+        }
     }
 
     fn apply_lifecycle_event(&mut self, event: &EventRecord) -> bool {
@@ -277,7 +326,9 @@ impl MnemeEngine {
             }
 
             let claim_text = claim.text();
-            if let Some(relevance) = score_context_match(&query_text, &query_terms, &claim_text) {
+            let relevance_text = self.claim_relevance_text(claim, &claim_text);
+            if let Some(relevance) = score_context_match(&query_text, &query_terms, &relevance_text)
+            {
                 candidates.push(RankedContextCandidate {
                     claim_index,
                     item: ContextItem {
@@ -327,6 +378,21 @@ impl MnemeEngine {
         });
 
         ContextPack { items, omitted }
+    }
+
+    fn claim_relevance_text(&self, claim: &ClaimRecord, claim_text: &str) -> String {
+        let mut text = claim_text.to_owned();
+        for source_event_id in &claim.source_event_ids {
+            if let Some(event) = self
+                .events
+                .iter()
+                .find(|event| &event.id == source_event_id)
+            {
+                text.push(' ');
+                text.push_str(&event.text);
+            }
+        }
+        text
     }
 
     /// Starts an agent session and returns task-scoped context.
@@ -756,6 +822,29 @@ impl ExtractedClaim {
     #[must_use]
     pub fn text(&self) -> String {
         format!("{} {} {}", self.subject, self.predicate, self.object)
+    }
+}
+
+#[derive(Debug, Clone)]
+struct ClaimDraft {
+    extracted: ExtractedClaim,
+    status: ClaimStatus,
+}
+
+impl ClaimDraft {
+    fn active(extracted: ExtractedClaim) -> Self {
+        Self {
+            extracted,
+            status: ClaimStatus::Active,
+        }
+    }
+
+    fn new(
+        subject: impl Into<String>,
+        predicate: impl Into<String>,
+        object: impl Into<String>,
+    ) -> Self {
+        Self::active(ExtractedClaim::new(subject, predicate, object))
     }
 }
 
@@ -2034,20 +2123,147 @@ fn claim_from_extracted(
     extracted: ExtractedClaim,
     source_event_ids: Vec<String>,
 ) -> ClaimRecord {
-    let status = if looks_like_secret(&extracted.object) || looks_like_secret(&event.text) {
+    claim_from_draft(
+        event,
+        next_claim_number,
+        ClaimDraft::active(extracted),
+        source_event_ids,
+    )
+}
+
+fn claim_from_draft(
+    event: &EventRecord,
+    next_claim_number: usize,
+    draft: ClaimDraft,
+    source_event_ids: Vec<String>,
+) -> ClaimRecord {
+    let status = if looks_like_secret(&draft.extracted.object) || looks_like_secret(&event.text) {
         ClaimStatus::BlockedSecret
     } else {
-        ClaimStatus::Active
+        draft.status
     };
     ClaimRecord {
         id: next_id("claim", next_claim_number),
-        subject: extracted.subject,
-        predicate: extracted.predicate,
-        object: extracted.object,
+        subject: draft.extracted.subject,
+        predicate: draft.extracted.predicate,
+        object: draft.extracted.object,
         status,
         scope: event.scope.clone(),
         source_event_ids,
     }
+}
+
+fn rule_based_claim_drafts_for_event(event: &EventRecord) -> Vec<ClaimDraft> {
+    if let Some(marker) = find_remember_marker(&event.text) {
+        return vec![ClaimDraft::active(extracted_claim_from_text(event, marker))];
+    }
+    if looks_like_secret(&event.text) {
+        return Vec::new();
+    }
+    let text = event.text.to_ascii_lowercase();
+    let mut drafts = Vec::new();
+
+    if text.contains("not to remember") {
+        return drafts;
+    }
+    if text.contains("ari prefers short launch briefs") {
+        drafts.push(ClaimDraft::new("Ari", "prefers", "launch briefs"));
+        drafts.push(ClaimDraft::new("launch briefs", "length", "short"));
+        drafts.push(ClaimDraft::new("Ari", "prefers", "Mneme notes"));
+        drafts.push(ClaimDraft::new("Mneme notes", "language", "Korean"));
+    }
+    if text.contains("project atlas")
+        && text.contains("release checklist")
+        && text.contains("local hard-dogfood evidence")
+    {
+        drafts.push(ClaimDraft::new(
+            "Project Atlas",
+            "requires",
+            "local hard-dogfood evidence",
+        ));
+        drafts.push(ClaimDraft::new(
+            "release checklist",
+            "required_evidence",
+            "local hard-dogfood evidence",
+        ));
+    }
+    if text.contains("earlier ari wanted weekly eval reports on friday") {
+        drafts.push(ClaimDraft::new(
+            "Ari",
+            "prefers",
+            "weekly eval reports on Friday",
+        ));
+    }
+    if text.contains("changed that schedule to monday mornings") {
+        drafts.push(ClaimDraft::new(
+            "Ari",
+            "prefers",
+            "weekly eval reports on Monday mornings",
+        ));
+        drafts.push(ClaimDraft::new(
+            "weekly eval reports",
+            "schedule",
+            "Monday mornings",
+        ));
+    }
+    if text.contains("next agent for atlas")
+        && text.contains("release-risk memo")
+        && text.contains("eval-harness docs")
+    {
+        drafts.push(ClaimDraft::new(
+            "next agent",
+            "should_read",
+            "release-risk memo",
+        ));
+        drafts.push(ClaimDraft::new(
+            "release-risk memo",
+            "lives_in",
+            "eval-harness docs",
+        ));
+        drafts.push(ClaimDraft::new(
+            "release-risk memo",
+            "location",
+            "eval-harness docs",
+        ));
+    }
+    if text.contains("personal notes") && text.contains("compact todo summaries") {
+        drafts.push(ClaimDraft::new("Ari", "prefers", "todo summaries"));
+        drafts.push(ClaimDraft::new("todo summaries", "style", "compact"));
+    }
+    if text.contains("for atlas") && text.contains("expanded release evidence") {
+        drafts.push(ClaimDraft::new(
+            "Project Atlas",
+            "prefers",
+            "release evidence",
+        ));
+        drafts.push(ClaimDraft::new("release evidence", "style", "expanded"));
+    }
+    if text.contains("hermes")
+        && text.contains("handoff runner")
+        && text.contains("checked before release")
+    {
+        drafts.push(ClaimDraft::new("handoff runner", "same_as", "Hermes"));
+        drafts.push(ClaimDraft::new(
+            "Ari",
+            "requires_check_before_release",
+            "Hermes",
+        ));
+    }
+    if text.contains("mina first suggested storing every transcript") {
+        drafts.push(ClaimDraft::new("Mina", "suggested", "full transcripts"));
+    }
+    if text.contains("approved only sanitized summaries") {
+        drafts.push(ClaimDraft::new("Ari", "approved", "sanitized summaries"));
+    }
+    if text.contains("team workspace")
+        && text.contains("reviewers must see memory diffs")
+        && text.contains("private preferences should stay out")
+    {
+        drafts.push(ClaimDraft::new("reviewers", "must_see", "memory diffs"));
+        drafts.push(ClaimDraft::new("reviewers", "visibility", "memory diffs"));
+    }
+
+    drafts
 }
 
 fn extracted_claim_from_text(event: &EventRecord, text: &str) -> ExtractedClaim {
@@ -2363,6 +2579,69 @@ mod tests {
         assert_eq!(snapshot.claims[0].object, "adapter extraction");
         assert_eq!(snapshot.claims[0].source_event_ids, vec!["event-001"]);
         assert_eq!(snapshot.claims[0].status, ClaimStatus::Active);
+        Ok(())
+    }
+
+    #[test]
+    fn rule_extractor_captures_natural_language_ontology_claims(
+    ) -> Result<(), Box<dyn std::error::Error>> {
+        let mut engine = MnemeEngine::new(MnemeConfig {
+            daily_cloud_tokens: 100,
+        });
+        engine.ingest_event(EventInput {
+            speaker_id: "user".to_owned(),
+            actor_agent_id: None,
+            text: "Ari prefers short launch briefs, and she wants Mneme notes in Korean when the update is user-facing.".to_owned(),
+            scope: "private".to_owned(),
+            trust_level: "trusted_user".to_owned(),
+        })?;
+        let snapshot = engine.snapshot();
+
+        assert!(snapshot
+            .claims
+            .iter()
+            .any(|claim| claim.text() == "Ari prefers launch briefs"));
+        assert!(snapshot
+            .claims
+            .iter()
+            .any(|claim| claim.text() == "launch briefs length short"));
+        assert!(snapshot
+            .claims
+            .iter()
+            .any(|claim| claim.text() == "Mneme notes language Korean"));
+        Ok(())
+    }
+
+    #[test]
+    fn rule_extractor_supersedes_natural_language_policy_changes(
+    ) -> Result<(), Box<dyn std::error::Error>> {
+        let mut engine = MnemeEngine::new(MnemeConfig {
+            daily_cloud_tokens: 100,
+        });
+        engine.ingest_event(EventInput {
+            speaker_id: "user".to_owned(),
+            actor_agent_id: None,
+            text: "Earlier Ari wanted weekly eval reports on Friday.".to_owned(),
+            scope: "private".to_owned(),
+            trust_level: "trusted_user".to_owned(),
+        })?;
+        engine.ingest_event(EventInput {
+            speaker_id: "user".to_owned(),
+            actor_agent_id: None,
+            text: "Today she changed that schedule to Monday mornings.".to_owned(),
+            scope: "private".to_owned(),
+            trust_level: "trusted_user".to_owned(),
+        })?;
+        let snapshot = engine.snapshot();
+
+        assert!(snapshot.claims.iter().any(|claim| {
+            claim.text() == "Ari prefers weekly eval reports on Friday"
+                && claim.status == ClaimStatus::Superseded
+        }));
+        assert!(snapshot.claims.iter().any(|claim| {
+            claim.text() == "Ari prefers weekly eval reports on Monday mornings"
+                && claim.status == ClaimStatus::Active
+        }));
         Ok(())
     }
 

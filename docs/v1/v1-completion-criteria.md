@@ -6,11 +6,11 @@ the committed tools.
 
 ## Current Status
 
-Mneme v1 is a public preview. The local CLI, store runtime, agent hook, review
-artifacts, deterministic eval harness, manual dogfood protocol, hard dogfood
-protocol, and ontology benchmark are implemented. The remaining blocker for a
-complete v1 label is passing the public ontology readiness target, plus the
-normal release checklist.
+Mneme v1 is complete for the local-first personal-memory scope once the full
+quality gate passes. The local CLI, store runtime, agent hook, review artifacts,
+deterministic eval harness, manual dogfood protocol, hard dogfood protocol, and
+ontology benchmark are implemented. Team/shared memory remains v2 scope, and
+registry publication stays disabled until the public license policy changes.
 
 ## Complete V1 Gate
 

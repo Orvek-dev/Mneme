@@ -72,6 +72,17 @@ grep -q '"capability": "relation_mapping"' "$ONTOLOGY_GAP_ANALYSIS"
 cargo run -p mneme-cli -- doctor
 cargo run -p mneme-eval -- doctor
 
+ONTOLOGY_RUN_DIR="${TMP_ROOT}/mneme-quality-gate-ontology-run"
+ONTOLOGY_RUN_STDOUT="${TMP_ROOT}/mneme-quality-gate-ontology-run.txt"
+rm -rf "$ONTOLOGY_RUN_DIR"
+scripts/v1-ontology-benchmark.py --run-label quality-gate --out-dir "$ONTOLOGY_RUN_DIR" --force --no-build > "$ONTOLOGY_RUN_STDOUT"
+grep -q 'decision ontology_benchmark_passed' "$ONTOLOGY_RUN_STDOUT"
+grep -q '"decision_status": "ontology_benchmark_passed"' "$ONTOLOGY_RUN_DIR/summary.json"
+grep -q '"readiness_status": "v1_ontology_ready"' "$ONTOLOGY_RUN_DIR/summary.json"
+grep -q '"entity_f1": 1.0' "$ONTOLOGY_RUN_DIR/scorecard.json"
+grep -q '"relation_f1": 1.0' "$ONTOLOGY_RUN_DIR/scorecard.json"
+grep -q '"attribute_f1": 1.0' "$ONTOLOGY_RUN_DIR/scorecard.json"
+
 INSTALL_ROOT="${TMP_ROOT}/mneme-quality-gate-install"
 INSTALL_STDOUT="${TMP_ROOT}/mneme-quality-gate-install.txt"
 INSTALL_DOCTOR="${TMP_ROOT}/mneme-quality-gate-installed-doctor.txt"

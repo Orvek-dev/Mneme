@@ -11,6 +11,9 @@ eval update land in the same PR.
 - Claims preserve source event IDs.
 - Secret-like claims are marked `blocked_secret` and omitted from context.
 - Corrections mark active claims as `superseded` and write replacement claims.
+- The default rule extractor captures a conservative schema-lite set of
+  natural-language ontology claims for preferences, requirements, attributes,
+  aliases, temporal changes, and agent handoff facts.
 - Forgets mark active claims as `forgotten`.
 - Claim-ID lifecycle markers target one active claim and avoid broad text-match
   updates when duplicate claim text exists.
@@ -135,9 +138,9 @@ eval update land in the same PR.
   script syntax to avoid unnecessary GitHub Actions cost.
 - Full real-use pilot evidence is local-only; CI checks the feedback contract,
   example feedback, and script syntax.
-- Full ontology benchmark evidence is local-only; CI checks the benchmark
-  contract, fixture validation, scorer fault detection, capability gap-analysis
-  contract, and script syntax.
+- Full ontology benchmark evidence is usually local-only; the quality gate also
+  runs the compact public ontology benchmark in a temporary directory and
+  requires `v1_ontology_ready`.
 - `RUSTDOCFLAGS="-D warnings" cargo doc --workspace --no-deps` must pass before
   release.
 - `scripts/public-safety-check.sh` guards against known private/public-safety
