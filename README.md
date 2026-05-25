@@ -283,6 +283,28 @@ cargo run -p mneme-eval -- v1-readiness --help
 cargo run -p mneme-eval -- dogfood-summary --help
 ```
 
+## Evaluation Evidence
+
+The latest public-safe local evidence snapshot was measured for `v0.46.0` on
+2026-05-25. These numbers are reproducible development evidence for Mneme v1,
+not claims against external production workloads. Full run bundles are ignored
+by git; the committed fixtures and scripts are safe to inspect and rerun.
+
+| Surface | Public-safe data | Latest result |
+| --- | --- | --- |
+| Scenario suites | 36 public scenarios across `core`, `runtime`, `agent`, `dogfood`, and `model` | validation, replay, acceptance, baseline, regression, and candidate gates passed in `quality-gate` |
+| Manual dogfood | 100 synthetic records and 25 workflow checks | fixture shape verified in CI; full evidence remains local-only |
+| Hard dogfood | 100 normal records, 150 adversarial records, 30 agent handoff workflows | `30/30` workflows passed; `Recall@K=1.0`, `Precision@K=1.0`, `citation_coverage=1.0`, `handoff_success=1.0`, `scope_leak=0`, `secret_leak=0` |
+| Seeded faults | dropped citation, scope leak, secret leak, stale reuse, handoff miss | `5/5` detected |
+| Candidate bridge | hard-mode findings mirrored into official candidate YAML | `5/5` candidates valid with `mneme-eval candidate-check` |
+| Ontology benchmark | 13 golden ontology cases: 10 natural-language, 3 explicit-marker anchors | current v1 reports `ontology_design_needed`: `entity_f1=0.3429`, `relation_f1=0.3000`, `attribute_f1=0.0000`, `provenance_coverage=1.0`, `context_recall_at_k=0.2143`, `scope_leak=0`, `secret_leak=0` |
+
+The ontology benchmark intentionally exposes current v1 gaps before ontology
+implementation changes. It is useful because it separates what v1 already does
+well, such as provenance and safety, from what still needs design work, such as
+natural-language entity resolution, attributes, temporal state, and multi-hop
+relations.
+
 ## Development Checks
 
 Before opening a PR, run:
