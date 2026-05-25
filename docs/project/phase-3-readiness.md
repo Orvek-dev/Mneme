@@ -194,3 +194,8 @@ Phase 33 shipped the **V1 Dogfood Readiness MVP** in `v0.39.0`, adding the
 public `dogfood` suite and `mneme-eval v1-readiness` so the current v1 runtime
 can be judged as `ready_for_v1_dogfood` through one deterministic product gate
 before manual dogfood or provider-backed experiments.
+
+Phase 34 shipped the **V1 Dogfood Execution Evidence MVP** in `v0.40.0`, adding
+`scripts/v1-dogfood.sh` so each v1 dogfood candidate can produce an ignored
+evidence bundle with dogfood evals, readiness output, and local CLI smoke
+reports before promotion to the next product phase.

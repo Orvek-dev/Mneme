@@ -605,8 +605,9 @@ CANDIDATE_PROMOTE_REPORT="${TMP_ROOT}/mneme-quality-gate-candidate-promote.json"
 CANDIDATE_PROMOTE_STDOUT="${TMP_ROOT}/mneme-quality-gate-candidate-promote.stdout.json"
 V1_READINESS_REPORT="${TMP_ROOT}/mneme-quality-gate-v1-readiness.json"
 V1_READINESS_STDOUT="${TMP_ROOT}/mneme-quality-gate-v1-readiness.stdout.json"
+DOGFOOD_OUT_DIR="${TMP_ROOT}/mneme-quality-gate-v1-dogfood"
 PROMOTED_SCENARIO="${CANDIDATE_PROMOTE_ROOT}/dogfood/dogfood-curation-restore-from-backup.yaml"
-rm -rf "$CANDIDATE_DIR" "$CANDIDATE_PROMOTE_ROOT"
+rm -rf "$CANDIDATE_DIR" "$CANDIDATE_PROMOTE_ROOT" "$DOGFOOD_OUT_DIR"
 rm -f "$CANDIDATE_REPORT" "$CANDIDATE_STDOUT" "$CANDIDATE_CHECK_REPORT" "$CANDIDATE_CHECK_STDOUT" \
   "$CANDIDATE_PROMOTE_REPORT" "$CANDIDATE_PROMOTE_STDOUT" \
   "$CORE_BASELINE_REPORT" "$CORE_BASELINE_STDOUT" "$BASELINE_COMPARE_REPORT" \
@@ -727,6 +728,14 @@ grep -q '"command": "v1-readiness"' "$V1_READINESS_STDOUT"
 grep -q '"readiness_status": "ready_for_v1_dogfood"' "$V1_READINESS_REPORT"
 grep -q '"suite": "dogfood"' "$V1_READINESS_REPORT"
 grep -q '"scenario_count": 22' "$V1_READINESS_REPORT"
+
+MNEME_DOGFOOD_RUN_LABEL="quality-gate" \
+MNEME_DOGFOOD_OUT_DIR="$DOGFOOD_OUT_DIR" \
+  ./scripts/v1-dogfood.sh
+grep -q '"command": "v1-dogfood"' "$DOGFOOD_OUT_DIR/summary.json"
+grep -q '"status": "passed"' "$DOGFOOD_OUT_DIR/summary.json"
+grep -q '"readiness_status": "ready_for_v1_dogfood"' "$DOGFOOD_OUT_DIR/v1-readiness.json"
+grep -q '"ok": true' "$DOGFOOD_OUT_DIR/dogfood.run.mneme-v1.json"
 
 cargo run -p mneme-eval -- baseline-gate "$BASELINE_REPORT" \
   --report "$BASELINE_GATE_REPORT" \
