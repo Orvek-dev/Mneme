@@ -114,6 +114,8 @@ cargo run -p mneme-eval -- run --suite core --target fake
 cargo run -p mneme-eval -- run --suite core --target mneme-v1
 cargo run -p mneme-eval -- run --suite runtime --target mneme-v1
 cargo run -p mneme-eval -- run --suite agent --target mneme-v1
+cargo run -p mneme-eval -- run --suite dogfood --target mneme-v1
+cargo run -p mneme-eval -- v1-readiness --json --report evals/reports/v1-readiness.json
 ```
 
 Run the model suite with the deterministic command fixture:

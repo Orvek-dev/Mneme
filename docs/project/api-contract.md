@@ -74,7 +74,7 @@ the repository-local `mneme-cli` package as the `mneme` binary and runs a small
 doctor/help/review smoke check.
 
 Stable behavior remains defined by `docs/v1/v1-stability.md`, public feature
-specs, eval scenarios, and the release quality gate.
+specs, eval scenarios, `mneme-eval v1-readiness`, and the release quality gate.
 
 ## Example
 

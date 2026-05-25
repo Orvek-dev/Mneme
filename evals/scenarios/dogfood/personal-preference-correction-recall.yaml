@@ -1,0 +1,48 @@
+id: dogfood-personal-preference-correction-recall
+tags:
+  - dogfood
+  - v1-readiness
+  - lifecycle
+  - correction
+  - context-pack
+  - category-dogfood
+  - category-recall
+budget:
+  daily_cloud_tokens: 100
+events:
+  - speaker_id: user
+    actor_agent_id: codex
+    scope: private
+    trust_level: trusted_user
+    text: "remember: user prefers concise implementation briefs"
+  - speaker_id: user
+    actor_agent_id: codex
+    scope: private
+    trust_level: trusted_user
+    text: "correct: user prefers concise implementation briefs -> user prefers detailed release briefs"
+expected:
+  event_append:
+    count: 2
+  claims:
+    - subject: user
+      predicate: prefers
+      object: concise implementation briefs
+      status: superseded
+      scope: private
+    - subject: user
+      predicate: prefers
+      object: detailed release briefs
+      status: active
+      scope: private
+  context_pack:
+    query: "release briefs"
+    must_include:
+      - detailed release briefs
+    must_not_include:
+      - concise implementation briefs
+    citation_required: true
+  budget:
+    hard_cap_violations: 0
+  audit:
+    read_write_events_required: true
+    claim_update_required: true

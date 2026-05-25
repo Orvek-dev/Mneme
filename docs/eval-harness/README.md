@@ -25,9 +25,11 @@ Useful commands:
 ## Dogfood Workflow
 
 - [Eval Candidate Workflow](eval-candidate-workflow.md)
+- [V1 Dogfood Readiness](v1-dogfood-readiness.md)
 
 Useful commands:
 
 - `mneme-eval candidate <report.json>`
 - `mneme-eval candidate-check <candidate.yaml|dir>`
 - `mneme-eval candidate-promote <candidate.yaml>`
+- `mneme-eval v1-readiness`

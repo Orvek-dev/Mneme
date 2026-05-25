@@ -55,6 +55,8 @@ Mneme is pre-1.0. The useful surface today is local development and evaluation:
   with CI using deterministic dry-run mode;
 - failed eval or baseline reports can be converted into ignored, sanitized
   scenario candidate artifacts for dogfood feedback review;
+- reviewed v1 behavior can be checked with a deterministic dogfood readiness
+  gate that validates and replays core, runtime, agent, and dogfood suites;
 - workspace crates are package-checked locally but marked `publish = false`
   until the public license and distribution policy are finalized.
 
@@ -167,6 +169,15 @@ cargo run -p mneme-eval -- validate --suite agent
 cargo run -p mneme-eval -- run --suite agent --target mneme-v1
 ```
 
+Run the v1 dogfood readiness gate before treating a build as a v1 product
+candidate:
+
+```sh
+cargo run -p mneme-eval -- validate --suite dogfood
+cargo run -p mneme-eval -- run --suite dogfood --target mneme-v1
+cargo run -p mneme-eval -- v1-readiness --json --report evals/reports/v1-readiness.json
+```
+
 Run the opt-in command extraction suite:
 
 ```sh
@@ -251,6 +262,7 @@ cargo run -p mneme-eval -- baseline-gate --help
 cargo run -p mneme-eval -- baseline-summary --help
 cargo run -p mneme-eval -- baseline-compare --help
 cargo run -p mneme-eval -- candidate-promote --help
+cargo run -p mneme-eval -- v1-readiness --help
 ```
 
 ## Development Checks
