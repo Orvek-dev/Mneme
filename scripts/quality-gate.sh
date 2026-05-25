@@ -17,8 +17,10 @@ python3 -m py_compile wrappers/openai_extractor.py
 python3 -m py_compile scripts/v1-manual-dogfood.py
 python3 -m py_compile scripts/v1-hard-dogfood.py
 python3 -m py_compile scripts/v2-team-dogfood.py
+python3 -m py_compile scripts/mneme-mcp-stdio.py
 python3 -m py_compile scripts/v1-real-use-pilot.py
 python3 -m py_compile scripts/v1-ontology-benchmark.py
+scripts/mneme-mcp-stdio.py --self-test | grep -q '"tool_count": 7'
 MANUAL_DOGFOOD_DATASET="${TMP_ROOT}/mneme-quality-gate-manual-dogfood-dataset.json"
 scripts/v1-manual-dogfood.py --check-dataset > "$MANUAL_DOGFOOD_DATASET"
 grep -q '"mock_record_count": 100' "$MANUAL_DOGFOOD_DATASET"
@@ -265,8 +267,15 @@ grep -q '"id": "claim-001"' "$CLAIMS_REPORT"
 cargo run -p mneme-cli -- context "local-first" --store "$STORE" --json | grep -q "local-first tools"
 TEAM_STORE="${TMP_ROOT}/mneme-quality-gate-team-v2.json"
 TEAM_CONTEXT="${TMP_ROOT}/mneme-quality-gate-team-context.json"
+TEAM_HANDOFF="${TMP_ROOT}/mneme-quality-gate-team-handoff.json"
+TEAM_SYNC="${TMP_ROOT}/mneme-quality-gate-team-sync.json"
+TEAM_SYNC_EXPORT="${TMP_ROOT}/mneme-quality-gate-team-sync-export.json"
+TEAM_FIREWALL="${TMP_ROOT}/mneme-quality-gate-team-firewall.json"
+TEAM_ONTOLOGY="${TMP_ROOT}/mneme-quality-gate-team-ontology.json"
+TEAM_ADAPTER="${TMP_ROOT}/mneme-quality-gate-team-adapter.json"
 TEAM_VALIDATE="${TMP_ROOT}/mneme-quality-gate-team-validate.json"
-rm -f "$TEAM_STORE" "$TEAM_CONTEXT" "$TEAM_VALIDATE"
+rm -f "$TEAM_STORE" "$TEAM_CONTEXT" "$TEAM_HANDOFF" "$TEAM_SYNC" "$TEAM_SYNC_EXPORT" \
+  "$TEAM_FIREWALL" "$TEAM_ONTOLOGY" "$TEAM_ADAPTER" "$TEAM_VALIDATE"
 cargo run -p mneme-cli -- team init --admin alice --store "$TEAM_STORE" --json | grep -q '"command": "team.init"'
 cargo run -p mneme-cli -- team user add bob --role member --store "$TEAM_STORE" --json | grep -q '"command": "team.user.add"'
 cargo run -p mneme-cli -- team agent add codex-bob --owner bob --store "$TEAM_STORE" --json | grep -q '"command": "team.agent.add"'
@@ -277,6 +286,22 @@ cargo run -p mneme-cli -- team review team-promotion-001 --actor alice --approve
 cargo run -p mneme-cli -- team context "rollback notes" --actor alice --store "$TEAM_STORE" --json > "$TEAM_CONTEXT"
 grep -q '"item_count": 1' "$TEAM_CONTEXT"
 grep -q 'rollback notes' "$TEAM_CONTEXT"
+cargo run -p mneme-cli -- team handoff "rollback notes" --actor bob --agent codex-bob --store "$TEAM_STORE" --json > "$TEAM_HANDOFF"
+grep -q '"command": "team.handoff"' "$TEAM_HANDOFF"
+grep -q '"schema_version": "mneme.team_handoff.v1"' "$TEAM_HANDOFF"
+cargo run -p mneme-cli -- team sync export "$TEAM_SYNC" --actor bob --agent codex-bob --include-projects --store "$TEAM_STORE" --json > "$TEAM_SYNC_EXPORT"
+grep -q '"command": "team.sync.export"' "$TEAM_SYNC_EXPORT"
+grep -q '"schema_version": "mneme.team_sync.v1"' "$TEAM_SYNC"
+cargo run -p mneme-cli -- team sync import "$TEAM_SYNC" --store "$TEAM_STORE" --json | grep -q '"mode": "dry_run"'
+cargo run -p mneme-cli -- team firewall --store "$TEAM_STORE" --json > "$TEAM_FIREWALL"
+grep -q '"command": "team.firewall"' "$TEAM_FIREWALL"
+grep -q '"ok": true' "$TEAM_FIREWALL"
+cargo run -p mneme-cli -- team ontology --store "$TEAM_STORE" --json > "$TEAM_ONTOLOGY"
+grep -q '"command": "team.ontology"' "$TEAM_ONTOLOGY"
+grep -q '"relation_count"' "$TEAM_ONTOLOGY"
+cargo run -p mneme-cli -- team adapter manifest --json > "$TEAM_ADAPTER"
+grep -q '"command": "team.adapter.manifest"' "$TEAM_ADAPTER"
+grep -q 'mneme.team.handoff' "$TEAM_ADAPTER"
 cargo run -p mneme-cli -- team validate --store "$TEAM_STORE" --json > "$TEAM_VALIDATE"
 grep -q '"ok": true' "$TEAM_VALIDATE"
 REVIEW_STORE="${TMP_ROOT}/mneme-quality-gate-review.json"
@@ -847,7 +872,7 @@ cargo run -p mneme-eval -- v2-readiness \
 grep -q '"command": "v2-readiness"' "$V2_READINESS_STDOUT"
 grep -q '"readiness_status": "ready_for_team_v2_dogfood"' "$V2_READINESS_REPORT"
 grep -q '"suite": "team"' "$V2_READINESS_REPORT"
-grep -q '"scenario_count": 6' "$V2_READINESS_REPORT"
+grep -q '"scenario_count": 9' "$V2_READINESS_REPORT"
 
 MNEME_DOGFOOD_RUN_LABEL="quality-gate" \
 MNEME_DOGFOOD_OUT_DIR="$DOGFOOD_OUT_DIR" \

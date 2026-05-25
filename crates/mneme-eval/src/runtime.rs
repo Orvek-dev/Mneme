@@ -800,6 +800,14 @@ fn check_team(expected: &TeamExpected, actual: &ActualState) -> Vec<CheckReport>
             "actual.team",
         ));
     }
+    if let Some(count) = expected.quarantined_count {
+        checks.push(check_quality_count(
+            "team.quarantined_count",
+            count,
+            team.quarantined_count,
+            "actual.team",
+        ));
+    }
     if let Some(count) = expected.promotion_count {
         checks.push(check_quality_count(
             "team.promotion_count",
@@ -853,6 +861,70 @@ fn check_team(expected: &TeamExpected, actual: &ActualState) -> Vec<CheckReport>
             "team.secret_leak_count",
             count,
             team.secret_leak_count,
+            "actual.team",
+        ));
+    }
+    if let Some(count) = expected.sync_memory_count {
+        checks.push(check_quality_count(
+            "team.sync_memory_count",
+            count,
+            team.sync_memory_count,
+            "actual.team",
+        ));
+    }
+    if let Some(count) = expected.sync_omitted_count {
+        checks.push(check_quality_count(
+            "team.sync_omitted_count",
+            count,
+            team.sync_omitted_count,
+            "actual.team",
+        ));
+    }
+    if let Some(count) = expected.handoff_context_item_count {
+        checks.push(check_quality_count(
+            "team.handoff_context_item_count",
+            count,
+            team.handoff_context_item_count,
+            "actual.team",
+        ));
+    }
+    if let Some(value) = expected.firewall_ok {
+        checks.push(check_bool(
+            "team.firewall_ok",
+            value,
+            team.firewall_ok,
+            "actual.team",
+        ));
+    }
+    if let Some(count) = expected.firewall_high_count {
+        checks.push(check_quality_count(
+            "team.firewall_high_count",
+            count,
+            team.firewall_high_count,
+            "actual.team",
+        ));
+    }
+    if let Some(count) = expected.ontology_entity_count {
+        checks.push(check_quality_count(
+            "team.ontology_entity_count",
+            count,
+            team.ontology_entity_count,
+            "actual.team",
+        ));
+    }
+    if let Some(count) = expected.ontology_relation_count {
+        checks.push(check_quality_count(
+            "team.ontology_relation_count",
+            count,
+            team.ontology_relation_count,
+            "actual.team",
+        ));
+    }
+    if let Some(count) = expected.ontology_attribute_count {
+        checks.push(check_quality_count(
+            "team.ontology_attribute_count",
+            count,
+            team.ontology_attribute_count,
             "actual.team",
         ));
     }

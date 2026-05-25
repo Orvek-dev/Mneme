@@ -358,3 +358,7 @@ Current seeded fault modes:
 - `skip-claims`: suppresses claim extraction.
 - `leak-secrets`: marks blocked secrets as active claims.
 - `drop-citations`: removes source event citations from context-pack items.
+- `bypass-acl`: injects a team memory the actor should not read.
+- `unapproved-promotion`: treats a pending team promotion as approved.
+- `ignore-revocation`: lets a revoked team actor receive context.
+- `leak-quarantined`: returns quarantined memory in team context.

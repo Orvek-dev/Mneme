@@ -52,14 +52,20 @@ pub use v1::{
     DEFAULT_CONTEXT_MAX_ITEMS, EXTRACTOR_COMMAND_SCHEMA_VERSION, MNEME_STATE_SCHEMA_VERSION,
 };
 pub use v2::{
-    validate_team_state, JsonTeamFileStore, TeamActor, TeamAgentInput, TeamAgentRecord,
-    TeamAuditKind, TeamAuditRecord, TeamContextItem, TeamContextPack, TeamContextQuery,
-    TeamEventRecord, TeamMemoryConfig, TeamMemoryEngine, TeamMemoryRecord, TeamMemoryState,
-    TeamMemoryStatus, TeamMemoryStore, TeamOmittedContextItem, TeamPolicyError, TeamProjectInput,
-    TeamProjectRecord, TeamPromotionCreateInput, TeamPromotionRecord, TeamPromotionReviewInput,
-    TeamPromotionStatus, TeamRememberInput, TeamRole, TeamStateValidationIssue,
-    TeamStateValidationReport, TeamStoreError, TeamUserInput, TeamUserRecord,
-    TeamValidationSeverity, DEFAULT_TEAM_CONTEXT_MAX_ITEMS, MNEME_TEAM_STATE_SCHEMA_VERSION,
+    validate_team_state, JsonTeamFileStore, TeamActor, TeamAdapterManifest, TeamAdapterTool,
+    TeamAgentInput, TeamAgentRecord, TeamAuditKind, TeamAuditRecord, TeamContextItem,
+    TeamContextPack, TeamContextQuery, TeamEventRecord, TeamFirewallFinding, TeamFirewallReport,
+    TeamFirewallSeverity, TeamHandoffPackage, TeamMemoryConfig, TeamMemoryEngine, TeamMemoryRecord,
+    TeamMemoryState, TeamMemoryStatus, TeamMemoryStore, TeamOmittedContextItem,
+    TeamOntologyAttribute, TeamOntologyEntity, TeamOntologyRelation, TeamOntologyReport,
+    TeamPolicyError, TeamProjectInput, TeamProjectRecord, TeamPromotionCreateInput,
+    TeamPromotionRecord, TeamPromotionReviewInput, TeamPromotionStatus, TeamRememberInput,
+    TeamRole, TeamStateValidationIssue, TeamStateValidationReport, TeamStoreError,
+    TeamSyncApplyCounts, TeamSyncApplyReport, TeamSyncEnvelope, TeamSyncExportInput,
+    TeamSyncExportPolicy, TeamSyncOmittedRecord, TeamSyncReject, TeamUserInput, TeamUserRecord,
+    TeamValidationSeverity, DEFAULT_TEAM_CONTEXT_MAX_ITEMS,
+    MNEME_TEAM_ADAPTER_MANIFEST_SCHEMA_VERSION, MNEME_TEAM_HANDOFF_SCHEMA_VERSION,
+    MNEME_TEAM_STATE_SCHEMA_VERSION, MNEME_TEAM_SYNC_SCHEMA_VERSION,
 };
 
 /// Public product name.

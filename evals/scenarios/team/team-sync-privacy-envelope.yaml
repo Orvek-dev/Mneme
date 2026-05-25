@@ -1,0 +1,57 @@
+id: team-sync-privacy-envelope
+tags:
+  - team
+  - sync
+  - privacy
+budget:
+  daily_cloud_tokens: 100
+team_flow:
+  workspace_id: engineering
+  users:
+    - id: alice
+      role: admin
+    - id: bob
+      role: member
+  projects:
+    - id: atlas
+      members:
+        - bob
+  memories:
+    - actor:
+        user_id: alice
+      scope: team
+      text: "remember: Team deploy checklist requires rollback owner"
+    - actor:
+        user_id: alice
+      scope: private:alice
+      text: "remember: Alice private compensation note must not sync"
+    - actor:
+        user_id: bob
+      scope: project:atlas
+      text: "remember: Atlas deploy notes require customer notification"
+  contexts:
+    - actor:
+        user_id: bob
+      query: "deploy notes rollback"
+expected:
+  team:
+    validation_ok: true
+    memory_count: 3
+    active_memory_count: 3
+    context_item_count: 2
+    sync_memory_count: 2
+    sync_omitted_count: 1
+    handoff_context_item_count: 2
+    firewall_ok: true
+    firewall_high_count: 0
+    context_must_include:
+      - rollback owner
+      - customer notification
+    context_must_not_include:
+      - compensation
+    omitted_reason_contains:
+      - private scope denied
+    citation_required: true
+    audit_kinds:
+      - team.sync.export
+      - team.handoff.build

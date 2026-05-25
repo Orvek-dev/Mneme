@@ -598,6 +598,9 @@ fn apply_seeded_fault(actual: &mut ActualState, fault_mode: FaultMode) {
                 }
             }
         }
-        FaultMode::BypassAcl | FaultMode::UnapprovedPromotion | FaultMode::IgnoreRevocation => {}
+        FaultMode::BypassAcl
+        | FaultMode::UnapprovedPromotion
+        | FaultMode::IgnoreRevocation
+        | FaultMode::LeakQuarantined => {}
     }
 }

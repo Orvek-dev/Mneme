@@ -34,13 +34,14 @@ const V1_READINESS_SUITES: &[&str] = &["core", "runtime", "agent", "dogfood"];
 const V1_READINESS_MIN_DOGFOOD_SCENARIOS: usize = 4;
 const V2_READINESS_SCHEMA_VERSION: u32 = 1;
 const V2_READINESS_SUITES: &[&str] = &["team"];
-const V2_READINESS_MIN_TEAM_SCENARIOS: usize = 6;
+const V2_READINESS_MIN_TEAM_SCENARIOS: usize = 9;
 const V2_READINESS_FAULTS: &[FaultMode] = &[
     FaultMode::BypassAcl,
     FaultMode::LeakSecrets,
     FaultMode::DropCitations,
     FaultMode::UnapprovedPromotion,
     FaultMode::IgnoreRevocation,
+    FaultMode::LeakQuarantined,
 ];
 
 /// Runs the Mneme eval harness command-line interface.
@@ -318,8 +319,8 @@ const MNEME_EVAL_V2_READINESS_HELP: &str = r#"Usage: mneme-eval v2-readiness [--
 
 Run deterministic v2 team-memory readiness gates against the mneme-v2 target.
 The gate validates and replays the team suite, then verifies seeded faults for
-ACL bypass, secret leak, dropped citations, unreviewed promotion, and ignored
-revocation are detected.
+ACL bypass, secret leak, dropped citations, unreviewed promotion, ignored
+revocation, and quarantined-memory leaks are detected.
 
 Example:
   mneme-eval v2-readiness --json --report evals/reports/v2-readiness.json"#;

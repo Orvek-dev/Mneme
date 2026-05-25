@@ -2,7 +2,7 @@ use mneme_core::{
     validate_team_state, TeamActor, TeamAgentInput, TeamContextPack, TeamContextQuery,
     TeamMemoryConfig, TeamMemoryEngine, TeamMemoryStatus, TeamProjectInput,
     TeamPromotionCreateInput, TeamPromotionReviewInput, TeamPromotionStatus, TeamRole,
-    TeamUserInput, DEFAULT_TEAM_CONTEXT_MAX_ITEMS,
+    TeamSyncExportInput, TeamUserInput, DEFAULT_TEAM_CONTEXT_MAX_ITEMS,
 };
 
 use crate::error::EvalError;
@@ -48,6 +48,7 @@ fn run_team_flow(scenario: &Scenario, options: TargetRunOptions) -> Result<Actua
     });
     let mut denied_count = 0usize;
     let mut last_context_actor = None;
+    let mut last_context_query = None;
     let mut last_context_pack = None;
 
     for user in &flow.users {
@@ -137,12 +138,35 @@ fn run_team_flow(scenario: &Scenario, options: TargetRunOptions) -> Result<Actua
     for context in &flow.contexts {
         let actor = team_actor(&context.actor);
         last_context_actor = Some(actor.clone());
+        last_context_query = Some(context.query.clone());
         last_context_pack = Some(engine.build_context_pack(TeamContextQuery {
             actor,
             query: context.query.clone(),
             max_items: context.max_items.unwrap_or(DEFAULT_TEAM_CONTEXT_MAX_ITEMS),
         }));
     }
+
+    let mut sync_memory_count = 0usize;
+    let mut sync_omitted_count = 0usize;
+    let mut handoff_context_item_count = 0usize;
+    if let (Some(actor), Some(query)) = (&last_context_actor, &last_context_query) {
+        if let Ok(envelope) = engine.export_sync_envelope(TeamSyncExportInput {
+            actor: actor.clone(),
+            include_project_scopes: true,
+        }) {
+            sync_memory_count = envelope.memories.len();
+            sync_omitted_count = envelope.omitted.len();
+        }
+        if let Ok(handoff) = engine.build_handoff_package(TeamContextQuery {
+            actor: actor.clone(),
+            query: query.clone(),
+            max_items: DEFAULT_TEAM_CONTEXT_MAX_ITEMS,
+        }) {
+            handoff_context_item_count = handoff.context_pack.items.len();
+        }
+    }
+    let firewall = engine.firewall_report();
+    let ontology = engine.ontology_report();
 
     let state = engine.state();
     let validation = validate_team_state(&state);
@@ -155,6 +179,11 @@ fn run_team_flow(scenario: &Scenario, options: TargetRunOptions) -> Result<Actua
         .memories
         .iter()
         .filter(|memory| memory.status == TeamMemoryStatus::BlockedSecret)
+        .count();
+    let quarantined_count = state
+        .memories
+        .iter()
+        .filter(|memory| memory.status == TeamMemoryStatus::Quarantined)
         .count();
     let pending_promotion_count = state
         .promotions
@@ -183,6 +212,7 @@ fn run_team_flow(scenario: &Scenario, options: TargetRunOptions) -> Result<Actua
         memory_count: state.memories.len(),
         active_memory_count,
         blocked_secret_count,
+        quarantined_count,
         promotion_count: state.promotions.len(),
         pending_promotion_count,
         approved_promotion_count,
@@ -190,6 +220,14 @@ fn run_team_flow(scenario: &Scenario, options: TargetRunOptions) -> Result<Actua
         denied_count,
         scope_leak_count: 0,
         secret_leak_count: 0,
+        sync_memory_count,
+        sync_omitted_count,
+        handoff_context_item_count,
+        firewall_ok: firewall.ok,
+        firewall_high_count: firewall.high_count,
+        ontology_entity_count: ontology.entity_count,
+        ontology_relation_count: ontology.relation_count,
+        ontology_attribute_count: ontology.attribute_count,
         context_pack: team_context.take(),
     };
     apply_seeded_fault(
@@ -259,7 +297,8 @@ fn apply_seeded_fault(
         | FaultMode::LeakSecrets
         | FaultMode::DropCitations
         | FaultMode::UnapprovedPromotion
-        | FaultMode::IgnoreRevocation => {}
+        | FaultMode::IgnoreRevocation
+        | FaultMode::LeakQuarantined => {}
     }
     match fault_mode {
         FaultMode::None | FaultMode::SkipClaims => {}
@@ -314,6 +353,15 @@ fn apply_seeded_fault(
                 .memories
                 .iter()
                 .find(|memory| memory.status == TeamMemoryStatus::Active)
+            {
+                push_fault_context_item(actual, memory);
+            }
+        }
+        FaultMode::LeakQuarantined => {
+            if let Some(memory) = state
+                .memories
+                .iter()
+                .find(|memory| memory.status == TeamMemoryStatus::Quarantined)
             {
                 push_fault_context_item(actual, memory);
             }

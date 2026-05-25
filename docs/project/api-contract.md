@@ -63,11 +63,18 @@ recommendations without mutating workspace files.
 
 CLI-bound team workflows can use `mneme team init`, `mneme team user add`,
 `mneme team agent add`, `mneme team project add`, `mneme team remember`,
-`mneme team promote`, `mneme team review`, `mneme team context`, and
+`mneme team promote`, `mneme team review`, `mneme team context`,
+`mneme team handoff`, `mneme team sync export/import`, `mneme team firewall`,
+`mneme team ontology`, `mneme team adapter manifest`, and
 `mneme team validate` against the local `.mneme/mneme-team-v2.json` store.
 Direct integrations can use `TeamMemoryEngine`, `TeamMemoryStore`,
-`JsonTeamFileStore`, team role/scope inputs, promotion review inputs, and
+`JsonTeamFileStore`, team role/scope inputs, promotion review inputs,
+sync-envelope inputs, handoff packages, firewall reports, ontology reports, and
 `validate_team_state`.
+
+MCP-style integrations can use `scripts/mneme-mcp-stdio.py`. The script is a
+thin stdio bridge over the same `mneme team ... --json` commands; it does not
+reimplement policy.
 
 Agent runtimes can use `scripts/mneme-agent-hook.sh` as the repository-local
 installation wrapper. It delegates to an installed `MNEME_BIN`, otherwise runs

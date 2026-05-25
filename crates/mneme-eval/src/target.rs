@@ -58,6 +58,7 @@ pub(crate) enum FaultMode {
     BypassAcl,
     UnapprovedPromotion,
     IgnoreRevocation,
+    LeakQuarantined,
 }
 
 impl FaultMode {
@@ -70,6 +71,7 @@ impl FaultMode {
             "bypass-acl" => Some(Self::BypassAcl),
             "unapproved-promotion" => Some(Self::UnapprovedPromotion),
             "ignore-revocation" => Some(Self::IgnoreRevocation),
+            "leak-quarantined" => Some(Self::LeakQuarantined),
             _ => None,
         }
     }
@@ -83,6 +85,7 @@ impl FaultMode {
             Self::BypassAcl => "bypass-acl",
             Self::UnapprovedPromotion => "unapproved-promotion",
             Self::IgnoreRevocation => "ignore-revocation",
+            Self::LeakQuarantined => "leak-quarantined",
         }
     }
 }
@@ -236,6 +239,7 @@ pub(crate) struct TeamActual {
     pub(crate) memory_count: usize,
     pub(crate) active_memory_count: usize,
     pub(crate) blocked_secret_count: usize,
+    pub(crate) quarantined_count: usize,
     pub(crate) promotion_count: usize,
     pub(crate) pending_promotion_count: usize,
     pub(crate) approved_promotion_count: usize,
@@ -243,6 +247,14 @@ pub(crate) struct TeamActual {
     pub(crate) denied_count: usize,
     pub(crate) scope_leak_count: usize,
     pub(crate) secret_leak_count: usize,
+    pub(crate) sync_memory_count: usize,
+    pub(crate) sync_omitted_count: usize,
+    pub(crate) handoff_context_item_count: usize,
+    pub(crate) firewall_ok: bool,
+    pub(crate) firewall_high_count: usize,
+    pub(crate) ontology_entity_count: usize,
+    pub(crate) ontology_relation_count: usize,
+    pub(crate) ontology_attribute_count: usize,
     pub(crate) context_pack: Option<TeamContextActual>,
 }
 

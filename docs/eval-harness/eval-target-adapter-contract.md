@@ -78,6 +78,10 @@ Seeded faults are target-level options. The fake target currently supports:
 - `skip-claims`
 - `leak-secrets`
 - `drop-citations`
+- `bypass-acl`
+- `unapproved-promotion`
+- `ignore-revocation`
+- `leak-quarantined`
 
 Future targets may reject unsupported seeded faults, but the harness should keep
 using the same report and exit-code behavior.

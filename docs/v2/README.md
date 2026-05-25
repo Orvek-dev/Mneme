@@ -5,9 +5,9 @@ inspectable idea as v1, but the core question changes:
 
 > Which memories can safely move from one person or agent to a team?
 
-The current v2 implementation is a local team policy core and CLI preview. It
-is ready for deterministic dogfood and public inspection, while hosted sync,
-server deployment, and UI are still future work.
+The current v2 implementation is a local team policy core plus connector-ready
+boundary. It is ready for deterministic dogfood and public inspection, while
+hosted sync, server deployment, and UI are still future work.
 
 ## What v2 Adds
 
@@ -20,8 +20,16 @@ server deployment, and UI are still future work.
 - Admin revocation for users and agents.
 - Audit records for writes, reads, denials, promotion, and revoke actions.
 - Secret-like memory blocking before context retrieval.
+- Memory-poisoning-like text quarantine before context retrieval or sync.
+- Connector-safe sync envelopes that omit private, agent-private, blocked, and
+  quarantined memory.
+- Agent handoff packages with context, sync payload, firewall report, and
+  ontology projection.
+- Entity/relation/attribute ontology reports for team state.
+- A thin stdio bridge for MCP-style agent runtime integration.
 - A v2 eval suite and readiness gate for ACL leaks, secret leaks, promotion
-  review, citation coverage, and revoked-agent denial.
+  review, citation coverage, revoked-agent denial, sync privacy, handoff, and
+  quarantine behavior.
 
 ## Quick Start
 
@@ -37,6 +45,14 @@ cargo run -p mneme-cli -- team remember "Atlas deploys require rollback notes" \
 cargo run -p mneme-cli -- team promote team-memory-001 --actor bob --agent codex-bob
 cargo run -p mneme-cli -- team review team-promotion-001 --actor alice --approve
 cargo run -p mneme-cli -- team context "rollback notes" --actor alice --json
+cargo run -p mneme-cli -- team handoff "rollback notes" --actor bob --agent codex-bob --json
+cargo run -p mneme-cli -- team sync export /tmp/mneme-team-sync.json \
+  --actor bob \
+  --agent codex-bob \
+  --include-projects \
+  --json
+cargo run -p mneme-cli -- team firewall --json
+cargo run -p mneme-cli -- team ontology --json
 ```
 
 Without `--store`, v2 writes to `.mneme/mneme-team-v2.json` in the current
@@ -54,9 +70,9 @@ scripts/v2-team-dogfood.py --check-dataset
 scripts/v2-team-dogfood.py --check-seeded-faults
 ```
 
-The readiness gate currently requires six public-safe team scenarios and
+The readiness gate currently requires nine public-safe team scenarios and
 seeded-fault detection for ACL bypass, secret leak, dropped citations,
-unapproved promotion, and ignored revocation.
+unapproved promotion, ignored revocation, and quarantined-memory leakage.
 
 ## Current Boundary
 
@@ -65,16 +81,22 @@ Implemented:
 - local JSON team store;
 - Rust team-memory policy API in `mneme-core`;
 - `mneme team ...` CLI;
+- connector-safe sync export/import;
+- agent handoff packages;
+- firewall and ontology reports;
+- CLI adapter manifest and `scripts/mneme-mcp-stdio.py`;
 - `mneme-v2` eval target;
 - team scenario suite and v2 readiness gate;
 - v2 team dogfood evidence script.
 
 Not implemented yet:
 
-- hosted sync or server-backed storage;
+- hosted sync or server-backed storage beyond the local sync-envelope contract;
 - team UI;
 - multi-device conflict resolution;
 - provider-specific extraction for v2 team notes;
 - production auth integration.
 
 See [Team Memory Core](team-memory-core.md) for the API and policy surface.
+See [Use Cases](use-cases.md) for onboarding, handoff, promotion, sync,
+firewall, and ontology recipes.

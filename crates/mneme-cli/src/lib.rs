@@ -18,11 +18,13 @@ use mneme_core::{
     RuleBasedExtractor, SessionBeginInput, SessionBeginReport, SessionEndInput, SessionEndReport,
     SessionError, SessionMemoryInputMode, SessionRecord, StateValidationReport, StoreError,
     StoreErrorKind, StoreFileInspection, StoreFileStatus, StoreInspection, StoreRepairReport,
-    StoreRestoreReport, TeamActor, TeamAgentInput, TeamContextPack, TeamContextQuery,
-    TeamMemoryConfig, TeamMemoryEngine, TeamMemoryRecord, TeamMemoryState, TeamProjectInput,
+    StoreRestoreReport, TeamActor, TeamAdapterManifest, TeamAgentInput, TeamContextPack,
+    TeamContextQuery, TeamFirewallReport, TeamHandoffPackage, TeamMemoryConfig, TeamMemoryEngine,
+    TeamMemoryRecord, TeamMemoryState, TeamOntologyReport, TeamProjectInput,
     TeamPromotionCreateInput, TeamPromotionRecord, TeamPromotionReviewInput, TeamRole,
-    TeamStateValidationReport, TeamUserInput, ValidationSeverity, DEFAULT_CONTEXT_MAX_ITEMS,
-    DEFAULT_TEAM_CONTEXT_MAX_ITEMS, PRODUCT_NAME,
+    TeamStateValidationReport, TeamSyncApplyReport, TeamSyncEnvelope, TeamSyncExportInput,
+    TeamUserInput, ValidationSeverity, DEFAULT_CONTEXT_MAX_ITEMS, DEFAULT_TEAM_CONTEXT_MAX_ITEMS,
+    PRODUCT_NAME,
 };
 use serde::Serialize;
 
@@ -523,8 +525,14 @@ const MNEME_TEAM_HELP: &str = r#"Usage:
   mneme team project grant <project> <user> [--store <path>] [--json]
   mneme team remember <text> --actor <user> [--agent <agent>] --scope <scope> [--store <path>] [--json]
   mneme team context <query> --actor <user> [--agent <agent>] [--max-items <n>] [--store <path>] [--json]
+  mneme team handoff <query> --actor <user> [--agent <agent>] [--max-items <n>] [--store <path>] [--json]
   mneme team promote <memory-id> --actor <user> [--agent <agent>] [--note <text>] [--store <path>] [--json]
   mneme team review <promotion-id> --actor <user> [--agent <agent>] --approve|--reject [--store <path>] [--json]
+  mneme team sync export <path> --actor <user> [--agent <agent>] [--include-projects] [--store <path>] [--json]
+  mneme team sync import <path> [--apply] [--store <path>] [--json]
+  mneme team firewall [--store <path>] [--json]
+  mneme team ontology [--store <path>] [--json]
+  mneme team adapter manifest [--json]
   mneme team revoke-user <user> --actor <admin> [--store <path>] [--json]
   mneme team revoke-agent <agent> --actor <admin> [--store <path>] [--json]
   mneme team validate [--store <path>] [--json]
@@ -542,7 +550,9 @@ Examples:
   mneme team remember "Atlas deploys require rollback notes" --actor bob --scope project:atlas
   mneme team promote team-memory-001 --actor bob
   mneme team review team-promotion-001 --actor alice --approve
-  mneme team context "rollback notes" --actor alice --json"#;
+  mneme team context "rollback notes" --actor alice --json
+  mneme team handoff "handoff deploy notes" --actor bob --json
+  mneme team sync export /tmp/mneme-team-sync.json --actor alice --include-projects --json"#;
 
 const MNEME_VALIDATE_HELP: &str = r#"Usage: mneme validate [--store <path>] [--json]
 
@@ -717,6 +727,18 @@ impl Default for TeamContextOptions {
             max_items: DEFAULT_TEAM_CONTEXT_MAX_ITEMS,
         }
     }
+}
+
+#[derive(Debug, Clone, Default)]
+struct TeamSyncExportOptions {
+    actor: TeamActorOptions,
+    include_project_scopes: bool,
+}
+
+#[derive(Debug, Clone, Default)]
+struct TeamSyncImportOptions {
+    common: CommonOptions,
+    apply: bool,
 }
 
 #[derive(Debug, Clone, Default)]
@@ -1307,11 +1329,64 @@ struct TeamContextReport {
 }
 
 #[derive(Debug, Serialize)]
+struct TeamHandoffCliReport {
+    command: &'static str,
+    store: String,
+    actor_user_id: String,
+    actor_agent_id: Option<String>,
+    query: String,
+    context_item_count: usize,
+    sync_memory_count: usize,
+    firewall_ok: bool,
+    package: TeamHandoffPackage,
+}
+
+#[derive(Debug, Serialize)]
 struct TeamPromotionReport {
     command: &'static str,
     store: String,
     promotion: TeamPromotionRecord,
     validation: TeamStateValidationReport,
+}
+
+#[derive(Debug, Serialize)]
+struct TeamSyncExportCliReport {
+    command: &'static str,
+    store: String,
+    path: String,
+    memory_count: usize,
+    event_count: usize,
+    omitted_count: usize,
+    envelope: TeamSyncEnvelope,
+}
+
+#[derive(Debug, Serialize)]
+struct TeamSyncImportCliReport {
+    command: &'static str,
+    store: String,
+    path: String,
+    applied: bool,
+    report: TeamSyncApplyReport,
+}
+
+#[derive(Debug, Serialize)]
+struct TeamFirewallCliReport {
+    command: &'static str,
+    store: String,
+    firewall: TeamFirewallReport,
+}
+
+#[derive(Debug, Serialize)]
+struct TeamOntologyCliReport {
+    command: &'static str,
+    store: String,
+    ontology: TeamOntologyReport,
+}
+
+#[derive(Debug, Serialize)]
+struct TeamAdapterCliReport {
+    command: &'static str,
+    manifest: TeamAdapterManifest,
 }
 
 #[derive(Debug, Serialize)]
@@ -1940,7 +2015,7 @@ fn run_agent_hook_end(raw_args: Vec<String>, writer: &mut impl Write) -> Result<
 fn run_team(raw_args: Vec<String>, writer: &mut impl Write) -> Result<(), CliError> {
     if raw_args.is_empty() {
         return Err(CliError::invalid_cli(
-            "usage: mneme team <init|user|agent|project|remember|context|promote|review|revoke-user|revoke-agent|validate|snapshot> [options]",
+            "usage: mneme team <init|user|agent|project|remember|context|handoff|promote|review|sync|firewall|ontology|adapter|revoke-user|revoke-agent|validate|snapshot> [options]",
         ));
     }
     let mut raw_args = raw_args;
@@ -1952,14 +2027,19 @@ fn run_team(raw_args: Vec<String>, writer: &mut impl Write) -> Result<(), CliErr
         "project" => run_team_project(raw_args, writer),
         "remember" => run_team_remember(raw_args, writer),
         "context" => run_team_context(raw_args, writer),
+        "handoff" => run_team_handoff(raw_args, writer),
         "promote" => run_team_promote(raw_args, writer),
         "review" => run_team_review(raw_args, writer),
+        "sync" => run_team_sync(raw_args, writer),
+        "firewall" => run_team_firewall(raw_args, writer),
+        "ontology" => run_team_ontology(raw_args, writer),
+        "adapter" => run_team_adapter(raw_args, writer),
         "revoke-user" => run_team_revoke_user(raw_args, writer),
         "revoke-agent" => run_team_revoke_agent(raw_args, writer),
         "validate" => run_team_validate(raw_args, writer),
         "snapshot" => run_team_snapshot(raw_args, writer),
         value => Err(CliError::invalid_cli(format!(
-            "unknown team operation: {value}\navailable team operations: init, user, agent, project, remember, context, promote, review, revoke-user, revoke-agent, validate, snapshot"
+            "unknown team operation: {value}\navailable team operations: init, user, agent, project, remember, context, handoff, promote, review, sync, firewall, ontology, adapter, revoke-user, revoke-agent, validate, snapshot"
         ))),
     }
 }
@@ -2168,6 +2248,33 @@ fn run_team_context(raw_args: Vec<String>, writer: &mut impl Write) -> Result<()
     emit_team_context_report(&report, options.actor.common.json, writer)
 }
 
+fn run_team_handoff(raw_args: Vec<String>, writer: &mut impl Write) -> Result<(), CliError> {
+    let (query, options) = parse_team_context_args(raw_args)?;
+    let actor = required_team_actor(&options.actor)?;
+    let store_path = resolve_team_store_path(&options.actor.common)?;
+    let mut engine = load_team_engine(&store_path)?;
+    let package = engine
+        .build_handoff_package(TeamContextQuery {
+            actor: actor.clone(),
+            query: query.clone(),
+            max_items: options.max_items,
+        })
+        .map_err(team_policy_error)?;
+    persist_team_engine(&store_path, &engine)?;
+    let report = TeamHandoffCliReport {
+        command: "team.handoff",
+        store: store_path.display().to_string(),
+        actor_user_id: actor.user_id,
+        actor_agent_id: actor.agent_id,
+        query,
+        context_item_count: package.context_pack.items.len(),
+        sync_memory_count: package.sync_envelope.memories.len(),
+        firewall_ok: package.firewall.ok,
+        package,
+    };
+    emit_team_handoff_report(&report, options.actor.common.json, writer)
+}
+
 fn run_team_promote(raw_args: Vec<String>, writer: &mut impl Write) -> Result<(), CliError> {
     let (memory_id, options) = parse_team_promote_args(raw_args)?;
     let actor = required_team_actor(&options.actor)?;
@@ -2213,6 +2320,131 @@ fn run_team_review(raw_args: Vec<String>, writer: &mut impl Write) -> Result<(),
         validation: mneme_core::validate_team_state(&engine.state()),
     };
     emit_team_promotion_report(&report, options.actor.common.json, writer)
+}
+
+fn run_team_sync(mut raw_args: Vec<String>, writer: &mut impl Write) -> Result<(), CliError> {
+    let Some(subcommand) = raw_args.first().cloned() else {
+        return Err(CliError::invalid_cli(
+            "usage: mneme team sync <export|import> [options]",
+        ));
+    };
+    raw_args.remove(0);
+    match subcommand.as_str() {
+        "export" => run_team_sync_export(raw_args, writer),
+        "import" => run_team_sync_import(raw_args, writer),
+        value => Err(CliError::invalid_cli(format!(
+            "unknown team sync operation: {value}\navailable team sync operations: export, import"
+        ))),
+    }
+}
+
+fn run_team_sync_export(raw_args: Vec<String>, writer: &mut impl Write) -> Result<(), CliError> {
+    let (path, options) = parse_team_sync_export_args(raw_args)?;
+    let actor = required_team_actor(&options.actor)?;
+    let store_path = resolve_team_store_path(&options.actor.common)?;
+    let mut engine = load_team_engine(&store_path)?;
+    let envelope = engine
+        .export_sync_envelope(TeamSyncExportInput {
+            actor,
+            include_project_scopes: options.include_project_scopes,
+        })
+        .map_err(team_policy_error)?;
+    persist_team_engine(&store_path, &engine)?;
+    write_team_sync_envelope(&path, &envelope)?;
+    let report = TeamSyncExportCliReport {
+        command: "team.sync.export",
+        store: store_path.display().to_string(),
+        path: path.display().to_string(),
+        memory_count: envelope.memories.len(),
+        event_count: envelope.events.len(),
+        omitted_count: envelope.omitted.len(),
+        envelope,
+    };
+    emit_team_sync_export_report(&report, options.actor.common.json, writer)
+}
+
+fn run_team_sync_import(raw_args: Vec<String>, writer: &mut impl Write) -> Result<(), CliError> {
+    let (path, options) = parse_team_sync_import_args(raw_args)?;
+    let store_path = resolve_team_store_path(&options.common)?;
+    let envelope = read_team_sync_envelope(&path)?;
+    let mut engine = load_team_engine(&store_path)?;
+    let apply_report = engine.apply_sync_envelope(envelope, options.apply);
+    if options.apply && apply_report.ok {
+        persist_team_engine(&store_path, &engine)?;
+    }
+    let report = TeamSyncImportCliReport {
+        command: "team.sync.import",
+        store: store_path.display().to_string(),
+        path: path.display().to_string(),
+        applied: options.apply,
+        report: apply_report,
+    };
+    emit_team_sync_import_report(&report, options.common.json, writer)?;
+    if report.report.ok {
+        Ok(())
+    } else {
+        Err(CliError::store(
+            "import team sync envelope",
+            &store_path,
+            "sync envelope rejected",
+        ))
+    }
+}
+
+fn run_team_firewall(raw_args: Vec<String>, writer: &mut impl Write) -> Result<(), CliError> {
+    let options = parse_no_position_args(raw_args, "team firewall")?;
+    let store_path = resolve_team_store_path(&options)?;
+    let engine = load_team_engine(&store_path)?;
+    let firewall = engine.firewall_report();
+    let report = TeamFirewallCliReport {
+        command: "team.firewall",
+        store: store_path.display().to_string(),
+        firewall,
+    };
+    emit_team_firewall_report(&report, options.json, writer)?;
+    if report.firewall.ok {
+        Ok(())
+    } else {
+        Err(CliError::store(
+            "scan team firewall",
+            &store_path,
+            "active memory firewall finding",
+        ))
+    }
+}
+
+fn run_team_ontology(raw_args: Vec<String>, writer: &mut impl Write) -> Result<(), CliError> {
+    let options = parse_no_position_args(raw_args, "team ontology")?;
+    let store_path = resolve_team_store_path(&options)?;
+    let engine = load_team_engine(&store_path)?;
+    let report = TeamOntologyCliReport {
+        command: "team.ontology",
+        store: store_path.display().to_string(),
+        ontology: engine.ontology_report(),
+    };
+    emit_team_ontology_report(&report, options.json, writer)
+}
+
+fn run_team_adapter(mut raw_args: Vec<String>, writer: &mut impl Write) -> Result<(), CliError> {
+    let Some(subcommand) = raw_args.first().cloned() else {
+        return Err(CliError::invalid_cli(
+            "usage: mneme team adapter manifest [--json]",
+        ));
+    };
+    raw_args.remove(0);
+    match subcommand.as_str() {
+        "manifest" => {
+            let options = parse_no_position_args(raw_args, "team adapter manifest")?;
+            let report = TeamAdapterCliReport {
+                command: "team.adapter.manifest",
+                manifest: TeamMemoryEngine::adapter_manifest(),
+            };
+            emit_team_adapter_report(&report, options.json, writer)
+        }
+        value => Err(CliError::invalid_cli(format!(
+            "unknown team adapter operation: {value}\navailable team adapter operations: manifest"
+        ))),
+    }
 }
 
 fn run_team_revoke_user(raw_args: Vec<String>, writer: &mut impl Write) -> Result<(), CliError> {
@@ -2847,6 +3079,70 @@ fn parse_team_context_args(
         ));
     }
     Ok((require_nonempty(positionals.remove(0), "query")?, options))
+}
+
+fn parse_team_sync_export_args(
+    raw_args: Vec<String>,
+) -> Result<(PathBuf, TeamSyncExportOptions), CliError> {
+    let mut options = TeamSyncExportOptions::default();
+    let mut positionals = Vec::new();
+    let mut idx = 0;
+    while idx < raw_args.len() {
+        if parse_team_actor_option(&raw_args, &mut idx, &mut options.actor)? {
+            idx += 1;
+            continue;
+        }
+        match raw_args[idx].as_str() {
+            "--include-projects" => {
+                options.include_project_scopes = true;
+            }
+            value if value.starts_with('-') => {
+                return Err(CliError::invalid_cli(format!(
+                    "unknown team sync export option: {value}"
+                )));
+            }
+            value => positionals.push(value.to_owned()),
+        }
+        idx += 1;
+    }
+    if positionals.len() != 1 {
+        return Err(CliError::invalid_cli(
+            "usage: mneme team sync export <path> --actor <user> [--agent <agent>] [--include-projects] [--store <path>] [--json]",
+        ));
+    }
+    Ok((PathBuf::from(positionals.remove(0)), options))
+}
+
+fn parse_team_sync_import_args(
+    raw_args: Vec<String>,
+) -> Result<(PathBuf, TeamSyncImportOptions), CliError> {
+    let mut options = TeamSyncImportOptions::default();
+    let mut positionals = Vec::new();
+    let mut idx = 0;
+    while idx < raw_args.len() {
+        if parse_common_option(&raw_args, &mut idx, &mut options.common)? {
+            idx += 1;
+            continue;
+        }
+        match raw_args[idx].as_str() {
+            "--apply" => {
+                options.apply = true;
+            }
+            value if value.starts_with('-') => {
+                return Err(CliError::invalid_cli(format!(
+                    "unknown team sync import option: {value}"
+                )));
+            }
+            value => positionals.push(value.to_owned()),
+        }
+        idx += 1;
+    }
+    if positionals.len() != 1 {
+        return Err(CliError::invalid_cli(
+            "usage: mneme team sync import <path> [--apply] [--store <path>] [--json]",
+        ));
+    }
+    Ok((PathBuf::from(positionals.remove(0)), options))
 }
 
 fn parse_team_promote_args(
@@ -4362,6 +4658,24 @@ fn write_state_json(path: &Path, state: &MnemeState) -> Result<(), CliError> {
     std::fs::write(path, format!("{json}\n")).map_err(|source| CliError::io("write", path, source))
 }
 
+fn write_team_sync_envelope(path: &Path, envelope: &TeamSyncEnvelope) -> Result<(), CliError> {
+    if let Some(parent) = path
+        .parent()
+        .filter(|parent| !parent.as_os_str().is_empty())
+    {
+        std::fs::create_dir_all(parent)
+            .map_err(|source| CliError::io("create dir", parent, source))?;
+    }
+    let json = serde_json::to_string_pretty(envelope).map_err(CliError::json)?;
+    std::fs::write(path, format!("{json}\n")).map_err(|source| CliError::io("write", path, source))
+}
+
+fn read_team_sync_envelope(path: &Path) -> Result<TeamSyncEnvelope, CliError> {
+    let text =
+        std::fs::read_to_string(path).map_err(|source| CliError::io("read", path, source))?;
+    serde_json::from_str(&text).map_err(|source| CliError::json_file("parse", path, source))
+}
+
 fn build_memory_quality_report(
     store_path: &Path,
     claims: &[ClaimRecord],
@@ -5748,6 +6062,37 @@ fn emit_team_context_report(
     Ok(())
 }
 
+fn emit_team_handoff_report(
+    report: &TeamHandoffCliReport,
+    json: bool,
+    writer: &mut impl Write,
+) -> Result<(), CliError> {
+    if json {
+        return write_json(writer, report);
+    }
+    writeln!(
+        writer,
+        "mneme: team handoff {} (actor={}, items={}, sync_memories={}, firewall_ok={})",
+        report.store,
+        report.actor_user_id,
+        report.context_item_count,
+        report.sync_memory_count,
+        report.firewall_ok
+    )
+    .map_err(|source| CliError::io("write", Path::new("<stdout>"), source))?;
+    for item in &report.package.context_pack.items {
+        writeln!(
+            writer,
+            "- {} [{}; {}]",
+            item.memory_text,
+            item.scope,
+            item.source_event_ids.join(",")
+        )
+        .map_err(|source| CliError::io("write", Path::new("<stdout>"), source))?;
+    }
+    Ok(())
+}
+
 fn emit_team_promotion_report(
     report: &TeamPromotionReport,
     json: bool,
@@ -5767,6 +6112,109 @@ fn emit_team_promotion_report(
         report.validation.ok
     )
     .map_err(|source| CliError::io("write", Path::new("<stdout>"), source))
+}
+
+fn emit_team_sync_export_report(
+    report: &TeamSyncExportCliReport,
+    json: bool,
+    writer: &mut impl Write,
+) -> Result<(), CliError> {
+    if json {
+        return write_json(writer, report);
+    }
+    writeln!(
+        writer,
+        "mneme: team sync exported {} -> {} (memories={}, events={}, omitted={})",
+        report.store, report.path, report.memory_count, report.event_count, report.omitted_count
+    )
+    .map_err(|source| CliError::io("write", Path::new("<stdout>"), source))
+}
+
+fn emit_team_sync_import_report(
+    report: &TeamSyncImportCliReport,
+    json: bool,
+    writer: &mut impl Write,
+) -> Result<(), CliError> {
+    if json {
+        return write_json(writer, report);
+    }
+    writeln!(
+        writer,
+        "mneme: team sync import {} <- {} (mode={}, ok={}, memories_applied={}, rejected={})",
+        report.store,
+        report.path,
+        report.report.mode,
+        report.report.ok,
+        report.report.applied.memories,
+        report.report.rejected.len()
+    )
+    .map_err(|source| CliError::io("write", Path::new("<stdout>"), source))
+}
+
+fn emit_team_firewall_report(
+    report: &TeamFirewallCliReport,
+    json: bool,
+    writer: &mut impl Write,
+) -> Result<(), CliError> {
+    if json {
+        return write_json(writer, report);
+    }
+    writeln!(
+        writer,
+        "mneme: team firewall {} (ok={}, high={}, findings={})",
+        report.store, report.firewall.ok, report.firewall.high_count, report.firewall.finding_count
+    )
+    .map_err(|source| CliError::io("write", Path::new("<stdout>"), source))?;
+    for finding in &report.firewall.findings {
+        writeln!(
+            writer,
+            "- {:?} {} {} ({})",
+            finding.severity, finding.kind, finding.memory_id, finding.detail
+        )
+        .map_err(|source| CliError::io("write", Path::new("<stdout>"), source))?;
+    }
+    Ok(())
+}
+
+fn emit_team_ontology_report(
+    report: &TeamOntologyCliReport,
+    json: bool,
+    writer: &mut impl Write,
+) -> Result<(), CliError> {
+    if json {
+        return write_json(writer, report);
+    }
+    writeln!(
+        writer,
+        "mneme: team ontology {} (entities={}, relations={}, attributes={})",
+        report.store,
+        report.ontology.entity_count,
+        report.ontology.relation_count,
+        report.ontology.attribute_count
+    )
+    .map_err(|source| CliError::io("write", Path::new("<stdout>"), source))
+}
+
+fn emit_team_adapter_report(
+    report: &TeamAdapterCliReport,
+    json: bool,
+    writer: &mut impl Write,
+) -> Result<(), CliError> {
+    if json {
+        return write_json(writer, report);
+    }
+    writeln!(
+        writer,
+        "mneme: team adapter manifest (protocol={}, tools={})",
+        report.manifest.protocol,
+        report.manifest.tools.len()
+    )
+    .map_err(|source| CliError::io("write", Path::new("<stdout>"), source))?;
+    for tool in &report.manifest.tools {
+        writeln!(writer, "- {}", tool.name)
+            .map_err(|source| CliError::io("write", Path::new("<stdout>"), source))?;
+    }
+    Ok(())
 }
 
 fn emit_team_validation_report(

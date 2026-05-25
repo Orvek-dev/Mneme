@@ -1,14 +1,14 @@
 # Mneme
 
 Mneme is a local-first memory runtime and eval harness for agent workflows. v1
-is personal memory for one user. v2 adds a team-memory policy core for shared
-workspaces where private, project, agent, and team memory must stay separated
-until policy allows it.
+is personal memory for one user. v2 adds a connector-ready team-memory layer
+for shared workspaces where private, project, agent, and team memory must stay
+separated until policy allows it.
 
 The public repository is intentionally focused on deterministic local behavior:
 JSON stores, CLI workflows, agent hooks, review and curation tools, team policy
-checks, and public-safe eval suites. Hosted sync, UI, and production storage
-belong to later tracks.
+checks, connector-safe sync envelopes, handoff packages, and public-safe eval
+suites. Hosted sync, UI, and production storage belong to later tracks.
 
 Mneme currently provides:
 
@@ -68,9 +68,9 @@ privacy, provenance, scope discipline, and repeatable agent-memory evaluation.
 | Ontology readiness | 13 golden ontology cases | `1.00` entity/relation/attribute F1, `v1_ontology_ready` |
 | Hard dogfood | 100 normal records, 150 adversarial records, 30 agent handoffs | `30/30` workflows passed |
 | Safety guardrails | scope leak and secret leak checks | `0` scope leaks, `0` secret leaks |
-| Public eval surface | core, runtime, agent, dogfood, model, and team suites | `42` public scenarios |
-| Regression detection | seeded dropped-citation, scope, secret, stale, and handoff faults | `5/5` detected |
-| Team v2 readiness | ACL, promotion, revoke, secret, and citation checks | `6/6` team scenarios passed, `5/5` v2 seeded faults detected |
+| Public eval surface | core, runtime, agent, dogfood, model, and team suites | `45` public scenarios |
+| Regression detection | seeded dropped-citation, scope, secret, stale, handoff, and quarantine faults | `6/6` v2 faults detected |
+| Team v2 readiness | ACL, promotion, revoke, secret, citation, sync, firewall, handoff, and ontology checks | `9/9` team scenarios passed, `6/6` v2 seeded faults detected |
 
 For a GitHub-native scorecard with metric bars and reproducibility notes, see
 [Mneme v1 Evidence Scorecard](docs/v1/evidence-scorecard.md).
@@ -135,7 +135,12 @@ Mneme is pre-1.0. The useful surface today is local development and evaluation:
   ontology layer for the public benchmark and is checked by the quality gate;
 - v2 team memory supports local users, agents, projects, scoped memory,
   reviewed promotion into team memory, admin revoke, audit records, secret
-  blocking, and team context packs;
+  blocking, memory-poisoning quarantine, and team context packs;
+- v2 connector workflows can export/import public-safe sync envelopes, build
+  handoff packages, scan the memory firewall, project an ontology, and expose
+  a CLI adapter manifest;
+- `scripts/mneme-mcp-stdio.py` exposes a thin MCP-style stdio bridge over the
+  same v2 team CLI surface for agent runtimes;
 - v2 readiness can be checked through the public `team` suite, `mneme-v2`
   target, seeded-fault acceptance, and `scripts/v2-team-dogfood.py`;
 - Mneme is MIT licensed for source use, while workspace crates remain marked
@@ -206,6 +211,17 @@ cargo run -p mneme-eval -- run --suite team --target mneme-v2
 cargo run -p mneme-eval -- acceptance --suite team --target mneme-v2
 cargo run -p mneme-eval -- v2-readiness --json --report evals/reports/v2-readiness.json
 scripts/v2-team-dogfood.py
+```
+
+Useful v2 connector commands:
+
+```sh
+mneme team handoff "handoff query" --actor bob --agent codex-bob --json
+mneme team sync export /tmp/mneme-team-sync.json --actor bob --agent codex-bob --include-projects --json
+mneme team sync import /tmp/mneme-team-sync.json --json
+mneme team firewall --json
+mneme team ontology --json
+scripts/mneme-mcp-stdio.py --self-test
 ```
 
 Run the opt-in command extraction suite:
@@ -300,7 +316,7 @@ cargo run -p mneme-eval -- dogfood-summary --help
 
 ## Evaluation Evidence
 
-The latest public-safe local evidence snapshot was measured for `v0.60.0` on
+The latest public-safe local evidence snapshot was measured for `v0.61.0` on
 2026-05-25. These numbers are reproducible development evidence for Mneme,
 not claims against external production workloads. Full run bundles are ignored
 by git; the committed fixtures and scripts are safe to inspect and rerun.
@@ -310,13 +326,13 @@ The same evidence is summarized in the GitHub-native
 
 | Surface | Public-safe data | Latest result |
 | --- | --- | --- |
-| Scenario suites | 42 public scenarios across `core`, `runtime`, `agent`, `dogfood`, `model`, and `team` | validation, replay, acceptance, baseline, regression, and candidate gates passed in `quality-gate` |
+| Scenario suites | 45 public scenarios across `core`, `runtime`, `agent`, `dogfood`, `model`, and `team` | validation, replay, acceptance, baseline, regression, and candidate gates passed in `quality-gate` |
 | Manual dogfood | 100 synthetic records and 25 workflow checks | fixture shape verified in CI; full evidence remains local-only |
 | Hard dogfood | 100 normal records, 150 adversarial records, 30 agent handoff workflows | `30/30` workflows passed; `Recall@K=1.0`, `Precision@K=1.0`, `citation_coverage=1.0`, `handoff_success=1.0`, `scope_leak=0`, `secret_leak=0` |
 | Seeded faults | dropped citation, scope leak, secret leak, stale reuse, handoff miss | `5/5` detected |
 | Candidate bridge | hard-mode findings mirrored into official candidate YAML | `5/5` candidates valid with `mneme-eval candidate-check` |
 | Ontology benchmark | 13 golden ontology cases: 10 natural-language, 3 explicit-marker anchors | current v1 reports `ontology_benchmark_passed` and `v1_ontology_ready`: `entity_f1=1.0`, `relation_f1=1.0`, `attribute_f1=1.0`, `scope_accuracy=1.0`, `temporal_correctness=1.0`, `provenance_coverage=1.0`, `context_recall_at_k=1.0`, `scope_leak=0`, `secret_leak=0` |
-| v2 team readiness | 6 public team scenarios for ACL, project access, promotion, secret blocking, and revoked agents | `ready_for_team_v2_dogfood`; `6/6` scenarios passed; `5/5` seeded faults detected |
+| v2 team readiness | 9 public team scenarios for ACL, project access, promotion, secret blocking, revoked agents, sync privacy, firewall quarantine, handoff, and ontology | `ready_for_team_v2_dogfood`; `9/9` scenarios passed; `6/6` seeded faults detected |
 | v2 team dogfood shape | 120 synthetic team records, 80 adversarial records, 25 handoff workflows | fixture shape verified; generated bundles are public-safe and ignored by git |
 
 The ontology benchmark remains the public regression gate for natural-language
@@ -364,11 +380,11 @@ crates/mneme-core     shared v1 personal-memory and v2 team-memory core
 crates/mneme-cli      local v1/v2 CLI
 crates/mneme-eval     reusable eval harness CLI
 docs/v1/              Mneme v1 personal-memory docs
-docs/v2/              Mneme v2 team-memory docs
+docs/v2/              Mneme v2 team-memory and connector docs
 docs/eval-harness/    scenario, baseline, candidate, and provider eval docs
 docs/project/         roadmap, release, packaging, and policy docs
 evals/                public scenario fixtures
-scripts/              local quality, safety, and live-baseline helpers
+scripts/              local quality, safety, MCP bridge, and live-baseline helpers
 spec/                 feature specs and verification maps
 ```
 

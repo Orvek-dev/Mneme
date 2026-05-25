@@ -4,6 +4,26 @@ This project follows the spirit of Keep a Changelog.
 
 ## Unreleased
 
+## [0.61.0] - 2026-05-25
+
+### Added
+
+- Added v2 connector-ready sync envelopes with public-safe export, dry-run
+  import, idempotent replay checks, and connector privacy omissions.
+- Added v2 handoff packages, memory firewall scans, ontology projection, and a
+  CLI adapter manifest for external agent runtimes.
+- Added `scripts/mneme-mcp-stdio.py`, a thin stdio bridge that exposes v2 team
+  memory tools by delegating to the public CLI.
+- Added team eval scenarios for sync privacy, handoff ontology projection, and
+  memory-poisoning quarantine.
+
+### Changed
+
+- Expanded v2 readiness from 6 to 9 public team scenarios and from 5 to 6
+  seeded faults, including quarantined-memory leak detection.
+- Expanded the quality gate to cover v2 sync, handoff, firewall, ontology,
+  adapter manifest, and MCP bridge smoke checks.
+
 ## [0.60.0] - 2026-05-25
 
 ### Added
