@@ -19,7 +19,7 @@ if grep -E '(^|/)(\.env|\.env\..*|Mneme_.*|AGENTS\.md|CLAUDE\.md|harness/|templa
   exit 1
 fi
 
-PRIVATE_USER_PATH="/Users/""isanginn"
+PRIVATE_USER_PATH="${HOME:-__mneme_no_home__}"
 PRIVATE_TEMPLATE_ROOT="99_""vibecoding_""template"
 PRIVATE_TEMPLATE_NAME="vibecoding_""template"
 OPENAI_KEY_PREFIX="OPENAI_API_KEY=""sk"
