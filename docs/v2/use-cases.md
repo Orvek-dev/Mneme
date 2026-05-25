@@ -52,6 +52,7 @@ mneme team sync export /tmp/mneme-team-sync.json \
   --include-projects \
   --json
 mneme team sync import /tmp/mneme-team-sync.json --json
+mneme team sync import /tmp/mneme-team-sync.json --apply --actor alice --json
 ```
 
 ## Memory Firewall
@@ -66,9 +67,10 @@ mneme team firewall --json
 
 ## Ontology Projection
 
-The ontology report gives external tools a simple entity, relation, and
-attribute map without requiring a graph database.
+The ontology report gives external tools a simple actor-scoped entity,
+relation, and attribute map without requiring a graph database. Without
+`--actor`, memory labels are redacted for public-safe inspection.
 
 ```sh
-mneme team ontology --json
+mneme team ontology --actor bob --agent codex-bob --json
 ```

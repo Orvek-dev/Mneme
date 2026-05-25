@@ -529,9 +529,9 @@ const MNEME_TEAM_HELP: &str = r#"Usage:
   mneme team promote <memory-id> --actor <user> [--agent <agent>] [--note <text>] [--store <path>] [--json]
   mneme team review <promotion-id> --actor <user> [--agent <agent>] --approve|--reject [--store <path>] [--json]
   mneme team sync export <path> --actor <user> [--agent <agent>] [--include-projects] [--store <path>] [--json]
-  mneme team sync import <path> [--apply] [--store <path>] [--json]
+  mneme team sync import <path> [--apply] [--actor <admin-or-maintainer>] [--agent <agent>] [--store <path>] [--json]
   mneme team firewall [--store <path>] [--json]
-  mneme team ontology [--store <path>] [--json]
+  mneme team ontology [--actor <user>] [--agent <agent>] [--store <path>] [--json]
   mneme team adapter manifest [--json]
   mneme team revoke-user <user> --actor <admin> [--store <path>] [--json]
   mneme team revoke-agent <agent> --actor <admin> [--store <path>] [--json]
@@ -737,7 +737,7 @@ struct TeamSyncExportOptions {
 
 #[derive(Debug, Clone, Default)]
 struct TeamSyncImportOptions {
-    common: CommonOptions,
+    actor: TeamActorOptions,
     apply: bool,
 }
 
@@ -2365,10 +2365,15 @@ fn run_team_sync_export(raw_args: Vec<String>, writer: &mut impl Write) -> Resul
 
 fn run_team_sync_import(raw_args: Vec<String>, writer: &mut impl Write) -> Result<(), CliError> {
     let (path, options) = parse_team_sync_import_args(raw_args)?;
-    let store_path = resolve_team_store_path(&options.common)?;
+    let store_path = resolve_team_store_path(&options.actor.common)?;
     let envelope = read_team_sync_envelope(&path)?;
     let mut engine = load_team_engine(&store_path)?;
-    let apply_report = engine.apply_sync_envelope(envelope, options.apply);
+    let actor = if options.actor.actor_user_id.is_some() {
+        Some(required_team_actor(&options.actor)?)
+    } else {
+        None
+    };
+    let apply_report = engine.apply_sync_envelope(envelope, options.apply, actor);
     if options.apply && apply_report.ok {
         persist_team_engine(&store_path, &engine)?;
     }
@@ -2379,7 +2384,7 @@ fn run_team_sync_import(raw_args: Vec<String>, writer: &mut impl Write) -> Resul
         applied: options.apply,
         report: apply_report,
     };
-    emit_team_sync_import_report(&report, options.common.json, writer)?;
+    emit_team_sync_import_report(&report, options.actor.common.json, writer)?;
     if report.report.ok {
         Ok(())
     } else {
@@ -2414,15 +2419,22 @@ fn run_team_firewall(raw_args: Vec<String>, writer: &mut impl Write) -> Result<(
 }
 
 fn run_team_ontology(raw_args: Vec<String>, writer: &mut impl Write) -> Result<(), CliError> {
-    let options = parse_no_position_args(raw_args, "team ontology")?;
-    let store_path = resolve_team_store_path(&options)?;
+    let options = parse_team_ontology_args(raw_args)?;
+    let store_path = resolve_team_store_path(&options.common)?;
     let engine = load_team_engine(&store_path)?;
+    let ontology = if options.actor_user_id.is_some() {
+        engine
+            .ontology_report_for_actor(required_team_actor(&options)?)
+            .map_err(team_policy_error)?
+    } else {
+        engine.ontology_report()
+    };
     let report = TeamOntologyCliReport {
         command: "team.ontology",
         store: store_path.display().to_string(),
-        ontology: engine.ontology_report(),
+        ontology,
     };
-    emit_team_ontology_report(&report, options.json, writer)
+    emit_team_ontology_report(&report, options.common.json, writer)
 }
 
 fn run_team_adapter(mut raw_args: Vec<String>, writer: &mut impl Write) -> Result<(), CliError> {
@@ -3120,7 +3132,7 @@ fn parse_team_sync_import_args(
     let mut positionals = Vec::new();
     let mut idx = 0;
     while idx < raw_args.len() {
-        if parse_common_option(&raw_args, &mut idx, &mut options.common)? {
+        if parse_team_actor_option(&raw_args, &mut idx, &mut options.actor)? {
             idx += 1;
             continue;
         }
@@ -3139,10 +3151,31 @@ fn parse_team_sync_import_args(
     }
     if positionals.len() != 1 {
         return Err(CliError::invalid_cli(
-            "usage: mneme team sync import <path> [--apply] [--store <path>] [--json]",
+            "usage: mneme team sync import <path> [--apply] [--actor <admin-or-maintainer>] [--agent <agent>] [--store <path>] [--json]",
         ));
     }
     Ok((PathBuf::from(positionals.remove(0)), options))
+}
+
+fn parse_team_ontology_args(raw_args: Vec<String>) -> Result<TeamActorOptions, CliError> {
+    let mut options = TeamActorOptions::default();
+    let mut idx = 0;
+    while idx < raw_args.len() {
+        if parse_team_actor_option(&raw_args, &mut idx, &mut options)? {
+            idx += 1;
+            continue;
+        }
+        let value = &raw_args[idx];
+        if value.starts_with('-') {
+            return Err(CliError::invalid_cli(format!(
+                "unknown team ontology option: {value}"
+            )));
+        }
+        return Err(CliError::invalid_cli(format!(
+            "unexpected team ontology argument: {value}"
+        )));
+    }
+    Ok(options)
 }
 
 fn parse_team_promote_args(

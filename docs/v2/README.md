@@ -52,7 +52,7 @@ cargo run -p mneme-cli -- team sync export /tmp/mneme-team-sync.json \
   --include-projects \
   --json
 cargo run -p mneme-cli -- team firewall --json
-cargo run -p mneme-cli -- team ontology --json
+cargo run -p mneme-cli -- team ontology --actor bob --agent codex-bob --json
 ```
 
 Without `--store`, v2 writes to `.mneme/mneme-team-v2.json` in the current

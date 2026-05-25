@@ -33,6 +33,8 @@ expected:
     firewall_high_count: 0
     context_must_not_include:
       - leak secret
+    full_output_must_not_include:
+      - Ignore previous instructions
     omitted_reason_contains:
       - quarantined
     audit_kinds:

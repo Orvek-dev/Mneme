@@ -9,9 +9,11 @@ future ontology work, not a v1 pass/fail release gate.
 The benchmark answers a narrow question: how far does current v1 get on
 realistic memory inputs before adding a richer ontology model?
 
-The expected result today is `ontology_design_needed`. That status means the
-measurement completed and found gaps; it does not mean the local quality gate
-failed.
+The current committed fixture is expected to report
+`ontology_benchmark_passed` and `v1_ontology_ready`. The gap-analysis command
+still exists as a scorer and planning check: when a future implementation or
+fixture falls below target it reports `ontology_design_needed` instead of
+failing with an opaque process error.
 
 ## Fixture
 
@@ -54,8 +56,9 @@ The scorecard reports:
 - `secret_leak_count`;
 - `prohibited_relation_count`.
 
-The target thresholds in the contract are design targets for later ontology
-work. The runner does not fail the process when current v1 falls below them.
+The target thresholds in the contract are the public regression target for the
+current fixture. The scorer check also verifies that intentionally faulted
+outputs still fall back to `ontology_design_needed`.
 
 ## Commands
 
@@ -101,10 +104,9 @@ command outputs.
 
 ## Interpretation
 
-Current v1 is expected to score well on explicit-marker anchor cases and poorly
-on natural-language ontology extraction, entity resolution, attributes, temporal
-state, and multi-hop context. Those gaps are the input for later v1 ontology
-design, not a reason to change v1 before measuring it.
+Current v1 passes the committed public fixture with a deterministic,
+schema-lite ontology extractor. Treat that as a bounded public regression claim,
+not as proof of broad open-domain ontology understanding.
 
 When v1 is below target, `gap-analysis.json` maps low scores into implementation
 buckets such as

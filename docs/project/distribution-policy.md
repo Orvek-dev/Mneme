@@ -46,7 +46,7 @@ Run:
 ./scripts/quality-gate.sh full
 ```
 
-The distribution policy check currently enforces the pending-license state:
-`LICENSE` must be MIT, package metadata must declare the MIT license, `publish
-= false` must remain in all package manifests, and registry publication must
-stay disabled.
+The distribution policy check currently enforces the MIT source-distribution
+state: `LICENSE` must be MIT, package metadata must declare the MIT license,
+`publish = false` must remain in all package manifests, and registry
+publication must stay disabled.

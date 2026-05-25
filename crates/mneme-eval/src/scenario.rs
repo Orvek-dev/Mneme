@@ -352,6 +352,7 @@ pub(crate) struct TeamExpected {
     pub(crate) context_item_count: Option<usize>,
     pub(crate) context_must_include: Vec<String>,
     pub(crate) context_must_not_include: Vec<String>,
+    pub(crate) full_output_must_not_include: Vec<String>,
     pub(crate) omitted_reason_contains: Vec<String>,
     pub(crate) citation_required: bool,
     pub(crate) audit_kinds: Vec<String>,
@@ -737,6 +738,7 @@ fn validate_team_expected(team: &TeamExpected, scenario_id: &str) -> Result<(), 
         .context_must_include
         .iter()
         .chain(team.context_must_not_include.iter())
+        .chain(team.full_output_must_not_include.iter())
         .chain(team.omitted_reason_contains.iter())
         .chain(team.audit_kinds.iter())
         .any(|value| value.trim().is_empty())

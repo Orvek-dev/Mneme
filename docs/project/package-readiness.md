@@ -31,8 +31,9 @@ Run:
 ./scripts/package-check.sh
 ```
 
-The distribution policy check verifies that crates remain unpublished while no
-license file exists. The package check runs that guard before assembling
+The distribution policy check verifies that crates remain unpublished while the
+MIT-licensed source distribution stays separate from registry publication. The
+package check runs that guard before assembling
 `mneme-core` and listing each workspace package's included files. `mneme-cli`
 and `mneme-eval` depend on the unpublished workspace-local `mneme-core` crate,
 so their file-list checks are the useful pre-publication signal until registry

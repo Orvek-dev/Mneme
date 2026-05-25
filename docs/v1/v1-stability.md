@@ -86,8 +86,9 @@ eval update land in the same PR.
   is created.
 - `scripts/v1-ontology-benchmark.py` measures current v1 against a public-safe
   natural-language ontology fixture, writes scorecard and capability gap-analysis
-  reports, and reports `ontology_design_needed` when the baseline exposes
-  expected ontology gaps.
+  reports, and currently reports `ontology_benchmark_passed` with
+  `v1_ontology_ready` for the committed fixture. Faulted scorer checks still
+  report `ontology_design_needed`.
 - The opt-in `model` suite covers command-backed extraction quality for durable
   preferences, no-claim cases, secret blocking, and lifecycle correction.
 - The `core`, `runtime`, `agent`, and `dogfood` suites must pass for `fake`
@@ -147,8 +148,8 @@ eval update land in the same PR.
   file and text patterns before release.
 - `scripts/package-check.sh` verifies workspace package assembly and blocks
   known private or generated files from package contents.
-- `scripts/distribution-policy-check.sh` guards the current pending-license
-  state and disabled registry publication policy.
+- `scripts/distribution-policy-check.sh` guards MIT license metadata and the
+  disabled registry publication policy.
 
 ## Unstable Areas
 

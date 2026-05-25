@@ -255,6 +255,7 @@ pub(crate) struct TeamActual {
     pub(crate) ontology_entity_count: usize,
     pub(crate) ontology_relation_count: usize,
     pub(crate) ontology_attribute_count: usize,
+    pub(crate) serialized_surface: String,
     pub(crate) context_pack: Option<TeamContextActual>,
 }
 

@@ -236,19 +236,36 @@ def build_scorecard(readiness: dict[str, Any], seeded_faults: dict[str, Any]) ->
     scenario_count = readiness.get("scenario_count", 0)
     passed_scenarios = readiness.get("passed_scenarios", 0)
     pass_rate = passed_scenarios / scenario_count if scenario_count else 0.0
+    leak_counts = measured_leak_counts(readiness)
     return {
         "schema_version": SCHEMA_VERSION,
         "command": "v2-team-dogfood-scorecard",
         "team_suite_pass_rate": pass_rate,
-        "acl_leak_count": 0 if readiness.get("ok") else None,
-        "secret_leak_count": 0 if readiness.get("ok") else None,
+        "acl_leak_count": leak_counts["acl"],
+        "secret_leak_count": leak_counts["secret"],
         "promotion_audit_coverage": 1.0 if readiness.get("ok") else 0.0,
         "revocation_denial_count": 1 if readiness.get("ok") else 0,
-        "quarantine_leak_count": 0 if readiness.get("ok") else None,
+        "quarantine_leak_count": leak_counts["quarantine"],
         "seeded_fault_detection_rate": seeded_faults["detection_rate"],
         "ok": readiness.get("ok") and seeded_faults["ok"] and pass_rate >= THRESHOLDS["team_suite_pass_rate_min"],
         "thresholds": THRESHOLDS,
     }
+
+
+def measured_leak_counts(readiness: dict[str, Any]) -> dict[str, int]:
+    counts = {"acl": 0, "secret": 0, "quarantine": 0}
+    for suite in readiness.get("suites", []):
+        for failed in suite.get("failed_checks", []):
+            check = str(failed.get("check", ""))
+            scenario_id = str(failed.get("scenario_id", ""))
+            if "full_output_must_not_include" in check or "context_must_not_include" in check:
+                if "private" in scenario_id or "sync-privacy" in scenario_id:
+                    counts["acl"] += 1
+                elif "secret" in scenario_id:
+                    counts["secret"] += 1
+                elif "quarantine" in scenario_id or "firewall" in scenario_id:
+                    counts["quarantine"] += 1
+    return counts
 
 
 def write_bundle(out_dir: Path, *, force: bool) -> dict[str, Any]:

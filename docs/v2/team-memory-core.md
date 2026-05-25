@@ -52,9 +52,11 @@ The committed v2 suite checks:
 - pending promotion does not become team context;
 - secret-like text is blocked from context;
 - revoked agents cannot retrieve context.
-- connector sync excludes private/quarantined memory;
+- connector sync excludes private/quarantined memory and scans full JSON output
+  for privacy leaks;
 - handoff packages include only cited, policy-allowed memory;
-- ontology projection exposes team entities, relations, and attributes.
+- ontology projection exposes actor-readable team entities, relations, and
+  attributes.
 
 `mneme-eval v2-readiness` also verifies seeded faults are detected:
 
@@ -70,9 +72,9 @@ The committed v2 suite checks:
 ## Connector Boundary
 
 `mneme team sync export` writes a `mneme.team_sync.v1` envelope. It includes
-active team memory and actor-readable project memory, plus the user, agent,
-project, event, promotion, and audit records needed for downstream policy
-checks.
+active team memory and actor-readable project memory, sanitized supporting
+events, and only the minimal user, agent, project, and promotion metadata needed
+to resolve exported records. Raw audit trails are not exported.
 
 The envelope deliberately excludes:
 
@@ -81,9 +83,10 @@ The envelope deliberately excludes:
 - `blocked_secret` memory;
 - `quarantined` memory.
 
-`mneme team sync import` defaults to dry-run. `--apply` mutates the local store
-only when the envelope schema, workspace, record conflicts, firewall checks, and
-state validation all pass.
+`mneme team sync import` defaults to dry-run. `--apply` requires
+`--actor <admin-or-maintainer>` and mutates the local store only when the
+envelope schema, workspace, metadata conflicts, firewall checks, and state
+validation all pass.
 
 ## Agent Handoff
 
@@ -92,7 +95,7 @@ state validation all pass.
 - the actor-scoped context pack;
 - a connector-safe sync envelope for downstream tools;
 - the current firewall report;
-- the current ontology projection.
+- the actor-scoped ontology projection.
 
 This is the intended boundary for coding agents that hand work from one agent
 or developer to another.

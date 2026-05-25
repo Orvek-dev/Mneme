@@ -4,6 +4,31 @@ This project follows the spirit of Keep a Changelog.
 
 ## Unreleased
 
+## [0.62.0] - 2026-05-25
+
+### Security
+
+- Redacted v2 omitted context records so denied, private, blocked-secret, and
+  quarantined memory text cannot leak through JSON `omitted` payloads.
+- Made v2 handoff ontology actor-scoped and made unauthenticated ontology
+  output public-safe by redacting memory labels.
+- Minimized v2 sync envelopes by omitting audit payloads, sanitizing promotion
+  notes, narrowing exported metadata, and requiring an admin or maintainer actor
+  for `sync import --apply`.
+- Expanded v1 and v2 secret-like detection for bearer tokens, colon-separated
+  credentials, OpenAI/GitHub-style key prefixes, AWS-style access keys, and
+  private-key text.
+
+### Changed
+
+- Added v1 generation conflict checks so stale concurrent writers fail with a
+  recoverable store-lock error instead of silently overwriting newer memory.
+- Added stale lock recovery for v1 and atomic locked writes for v2 JSON stores.
+- Extended v2 eval scenarios with full-output privacy assertions across
+  context, handoff, sync, firewall, and ontology JSON surfaces.
+- Reworked v1 hard-dogfood seeded faults to mutate real run-bundle-shaped
+  workflow results instead of tiny standalone literals.
+
 ## [0.61.0] - 2026-05-25
 
 ### Added

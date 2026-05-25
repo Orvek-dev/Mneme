@@ -49,6 +49,8 @@ expected:
       - customer notification
     context_must_not_include:
       - compensation
+    full_output_must_not_include:
+      - Alice private compensation note must not sync
     omitted_reason_contains:
       - private scope denied
     citation_required: true

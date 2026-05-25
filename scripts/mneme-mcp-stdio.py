@@ -94,8 +94,15 @@ TOOLS = [
     },
     {
         "name": "mneme_team_ontology",
-        "description": "Return v2 entity, relation, and attribute projection.",
-        "inputSchema": {"type": "object", "properties": {}},
+        "description": "Return actor-scoped v2 entity, relation, and attribute projection.",
+        "inputSchema": {
+            "type": "object",
+            "required": ["actor"],
+            "properties": {
+                "actor": {"type": "string"},
+                "agent": {"type": "string"},
+            },
+        },
     },
 ]
 
@@ -131,7 +138,7 @@ def handle_request(request: dict[str, Any]) -> dict[str, Any]:
             {
                 "protocolVersion": "2024-11-05",
                 "capabilities": {"tools": {}},
-                "serverInfo": {"name": "mneme-team-memory", "version": "0.61.0"},
+                "serverInfo": {"name": "mneme-team-memory", "version": "0.62.0"},
             },
         )
     if method == "tools/list":
@@ -165,7 +172,7 @@ def call_tool(name: str, arguments: dict[str, Any]) -> dict[str, Any]:
     elif name == "mneme_team_firewall":
         output = run_mneme(["team", "firewall"])
     elif name == "mneme_team_ontology":
-        output = run_mneme(["team", "ontology"])
+        output = run_mneme(["team", "ontology", *actor_args(arguments)])
     else:
         raise ValueError(f"unknown tool: {name}")
     return {"content": [{"type": "text", "text": output}]}
@@ -177,7 +184,7 @@ def run_mneme(args: list[str]) -> str:
     command = [binary, *args, "--json"]
     if store:
         command.extend(["--store", store])
-    completed = subprocess.run(command, text=True, capture_output=True, check=False)
+    completed = subprocess.run(command, text=True, capture_output=True, check=False, timeout=30)
     if completed.returncode != 0:
         raise RuntimeError((completed.stderr or completed.stdout).strip())
     return completed.stdout.strip()

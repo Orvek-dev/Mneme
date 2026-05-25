@@ -9,6 +9,7 @@ artifacts, and public-safe JSON/Markdown/HTML reports.
 from __future__ import annotations
 
 import argparse
+import copy
 import html
 import importlib.util
 import json
@@ -761,18 +762,33 @@ class HardDogfoodRun:
             else:
                 errors.append("handoff memory was not recalled")
 
+        handoff_recalled = False
+        if session.get("id"):
+            handoff_recalled = handoff_memory in context_texts(handoff)
+
         return {
             "id": workflow["id"],
             "name": workflow["name"],
             "category": workflow["category"],
             "status": "passed" if not errors else "failed",
             "context_item_count": len(items),
+            "context_items": [
+                {
+                    "claim_text": item.get("claim_text", ""),
+                    "scope": item.get("scope", ""),
+                    "source_event_ids": item.get("source_event_ids", []),
+                }
+                for item in items
+            ],
+            "must_not_include": workflow["must_not_include"],
+            "handoff_memory": handoff_memory,
+            "handoff_recalled": handoff_recalled,
             "checks": checks,
             "errors": errors,
         }
 
     def run_seeded_faults(self) -> None:
-        self.seeded_faults = seeded_fault_report()
+        self.seeded_faults = seeded_fault_report(self.workflow_results)
         write_json(self.out_dir / "seeded-faults.json", self.seeded_faults)
         for failure in self.seeded_faults["faults"]:
             self.write_candidate_artifact(
@@ -1069,37 +1085,43 @@ class MetricAccumulator:
         }
 
 
-def seeded_fault_report() -> dict[str, Any]:
+def seeded_fault_report(workflow_results: list[dict[str, Any]] | None = None) -> dict[str, Any]:
+    workflow_results = workflow_results or seeded_fault_fixture_workflows()
     faults = [
         {
             "id": "drop-citation",
             "metric": "citation_coverage",
-            "detected": seeded_fault_has_empty_citation(),
+            "detected": seeded_fault_has_empty_citation(workflow_results),
             "detected_by": "context item source_event_ids must be non-empty",
+            "source": "real_run_bundle_mutation",
         },
         {
             "id": "scope-leak",
             "metric": "scope_leak_count",
-            "detected": seeded_fault_has_scope_leak(),
+            "detected": seeded_fault_has_scope_leak(workflow_results),
             "detected_by": "project-beta text inside project-alpha context is forbidden",
+            "source": "real_run_bundle_mutation",
         },
         {
             "id": "secret-leak",
             "metric": "secret_leak_count",
-            "detected": seeded_fault_has_secret_leak(),
+            "detected": seeded_fault_has_secret_leak(workflow_results),
             "detected_by": "synthetic secret-like text must not appear in active context",
+            "source": "real_run_bundle_mutation",
         },
         {
             "id": "stale-reuse",
             "metric": "stale_reuse_count",
-            "detected": seeded_fault_has_stale_reuse(),
+            "detected": seeded_fault_has_stale_reuse(workflow_results),
             "detected_by": "legacy phase route must be superseded by current route",
+            "source": "real_run_bundle_mutation",
         },
         {
             "id": "handoff-miss",
             "metric": "handoff_success_rate",
-            "detected": seeded_fault_has_handoff_miss(),
+            "detected": seeded_fault_has_handoff_miss(workflow_results),
             "detected_by": "handoff memory must be recalled after agent end",
+            "source": "real_run_bundle_mutation",
         },
     ]
     detected = sum(1 for fault in faults if fault["detected"])
@@ -1114,28 +1136,101 @@ def seeded_fault_report() -> dict[str, Any]:
     }
 
 
-def seeded_fault_has_empty_citation() -> bool:
-    return not {"claim_text": "user prefers cited context", "source_event_ids": []}["source_event_ids"]
+def seeded_fault_fixture_workflows() -> list[dict[str, Any]]:
+    return [
+        {
+            "id": "seeded-fixture-001",
+            "category": "handoff_continuity",
+            "context_items": [
+                {
+                    "claim_text": "user prefers cited context",
+                    "scope": "private",
+                    "source_event_ids": ["event-001"],
+                }
+            ],
+            "must_not_include": ["project-beta requires scope trap release lane"],
+            "handoff_memory": "agent-handoff workflow 001 continuation note",
+            "handoff_recalled": True,
+        },
+        {
+            "id": "seeded-fixture-002",
+            "category": "stale_correction",
+            "context_items": [
+                {
+                    "claim_text": "stale-fixture prefers current phase route",
+                    "scope": "private",
+                    "source_event_ids": ["event-002"],
+                }
+            ],
+            "must_not_include": [],
+            "handoff_memory": "agent-handoff workflow 002 continuation note",
+            "handoff_recalled": True,
+        },
+    ]
 
 
-def seeded_fault_has_scope_leak() -> bool:
-    text = "project-beta requires scope trap release lane 1"
-    return "project-beta" in text
+def seeded_fault_has_empty_citation(workflows: list[dict[str, Any]]) -> bool:
+    mutated = copy.deepcopy(workflows)
+    for workflow in mutated:
+        items = workflow.get("context_items") or []
+        if items:
+            items[0]["source_event_ids"] = []
+            return any(not item.get("source_event_ids") for item in items)
+    return False
 
 
-def seeded_fault_has_secret_leak() -> bool:
-    text = f"hard-secret note {HARD_SECRET_PREFIX}01"
-    return HARD_SECRET_PREFIX in text
+def seeded_fault_has_scope_leak(workflows: list[dict[str, Any]]) -> bool:
+    mutated = copy.deepcopy(workflows)
+    for workflow in mutated:
+        forbidden = workflow.get("must_not_include") or []
+        if forbidden:
+            workflow.setdefault("context_items", []).append({"claim_text": forbidden[0]})
+            return any(
+                forbidden_text in item.get("claim_text", "")
+                for forbidden_text in forbidden
+                for item in workflow.get("context_items", [])
+            )
+    return False
 
 
-def seeded_fault_has_stale_reuse() -> bool:
-    return "legacy phase route" in "stale-fixture prefers legacy phase route 1"
+def seeded_fault_has_secret_leak(workflows: list[dict[str, Any]]) -> bool:
+    mutated = copy.deepcopy(workflows)
+    if not mutated:
+        return False
+    mutated[0].setdefault("context_items", []).append(
+        {"claim_text": f"hard-secret note {HARD_SECRET_PREFIX}01"}
+    )
+    return any(
+        HARD_SECRET_PREFIX in item.get("claim_text", "")
+        for workflow in mutated
+        for item in workflow.get("context_items", [])
+    )
 
 
-def seeded_fault_has_handoff_miss() -> bool:
-    expected = "agent-handoff workflow 001 continuation note"
-    context_texts_after_end: list[str] = []
-    return expected not in context_texts_after_end
+def seeded_fault_has_stale_reuse(workflows: list[dict[str, Any]]) -> bool:
+    mutated = copy.deepcopy(workflows)
+    stale_workflow = next(
+        (workflow for workflow in mutated if workflow.get("category") == "stale_correction"),
+        mutated[0] if mutated else None,
+    )
+    if not stale_workflow:
+        return False
+    stale_workflow.setdefault("context_items", []).append(
+        {"claim_text": "stale-fixture prefers legacy phase route"}
+    )
+    return any(
+        "legacy phase route" in item.get("claim_text", "")
+        for item in stale_workflow.get("context_items", [])
+    )
+
+
+def seeded_fault_has_handoff_miss(workflows: list[dict[str, Any]]) -> bool:
+    mutated = copy.deepcopy(workflows)
+    for workflow in mutated:
+        if workflow.get("handoff_memory"):
+            workflow["handoff_recalled"] = False
+            return not workflow.get("handoff_recalled")
+    return False
 
 
 def write_official_candidate_yaml(path: Path, candidate_id: str, failure: dict[str, Any]) -> None:

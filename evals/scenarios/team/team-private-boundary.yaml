@@ -37,6 +37,8 @@ expected:
     context_item_count: 0
     context_must_not_include:
       - launch notes
+    full_output_must_not_include:
+      - Alice keeps launch notes private
     omitted_reason_contains:
       - private scope denied
     audit_kinds:

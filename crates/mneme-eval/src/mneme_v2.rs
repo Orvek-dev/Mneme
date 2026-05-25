@@ -50,6 +50,7 @@ fn run_team_flow(scenario: &Scenario, options: TargetRunOptions) -> Result<Actua
     let mut last_context_actor = None;
     let mut last_context_query = None;
     let mut last_context_pack = None;
+    let mut serialized_surface_parts = Vec::new();
 
     for user in &flow.users {
         engine.upsert_user(TeamUserInput {
@@ -139,11 +140,13 @@ fn run_team_flow(scenario: &Scenario, options: TargetRunOptions) -> Result<Actua
         let actor = team_actor(&context.actor);
         last_context_actor = Some(actor.clone());
         last_context_query = Some(context.query.clone());
-        last_context_pack = Some(engine.build_context_pack(TeamContextQuery {
+        let context_pack = engine.build_context_pack(TeamContextQuery {
             actor,
             query: context.query.clone(),
             max_items: context.max_items.unwrap_or(DEFAULT_TEAM_CONTEXT_MAX_ITEMS),
-        }));
+        });
+        push_json_surface(&mut serialized_surface_parts, "context_pack", &context_pack);
+        last_context_pack = Some(context_pack);
     }
 
     let mut sync_memory_count = 0usize;
@@ -156,6 +159,7 @@ fn run_team_flow(scenario: &Scenario, options: TargetRunOptions) -> Result<Actua
         }) {
             sync_memory_count = envelope.memories.len();
             sync_omitted_count = envelope.omitted.len();
+            push_json_surface(&mut serialized_surface_parts, "sync_envelope", &envelope);
         }
         if let Ok(handoff) = engine.build_handoff_package(TeamContextQuery {
             actor: actor.clone(),
@@ -163,10 +167,13 @@ fn run_team_flow(scenario: &Scenario, options: TargetRunOptions) -> Result<Actua
             max_items: DEFAULT_TEAM_CONTEXT_MAX_ITEMS,
         }) {
             handoff_context_item_count = handoff.context_pack.items.len();
+            push_json_surface(&mut serialized_surface_parts, "handoff_package", &handoff);
         }
     }
     let firewall = engine.firewall_report();
     let ontology = engine.ontology_report();
+    push_json_surface(&mut serialized_surface_parts, "firewall", &firewall);
+    push_json_surface(&mut serialized_surface_parts, "ontology", &ontology);
 
     let state = engine.state();
     let validation = validate_team_state(&state);
@@ -228,6 +235,7 @@ fn run_team_flow(scenario: &Scenario, options: TargetRunOptions) -> Result<Actua
         ontology_entity_count: ontology.entity_count,
         ontology_relation_count: ontology.relation_count,
         ontology_attribute_count: ontology.attribute_count,
+        serialized_surface: serialized_surface_parts.join("\n"),
         context_pack: team_context.take(),
     };
     apply_seeded_fault(
@@ -282,6 +290,12 @@ fn run_team_flow(scenario: &Scenario, options: TargetRunOptions) -> Result<Actua
         curation: None,
         team: Some(team_actual),
     })
+}
+
+fn push_json_surface<T: serde::Serialize>(parts: &mut Vec<String>, label: &str, value: &T) {
+    if let Ok(json) = serde_json::to_string(value) {
+        parts.push(format!("{label}:{json}"));
+    }
 }
 
 fn apply_seeded_fault(

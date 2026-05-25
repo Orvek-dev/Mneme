@@ -945,6 +945,7 @@ fn check_team(expected: &TeamExpected, actual: &ActualState) -> Vec<CheckReport>
         .collect::<Vec<_>>()
         .join("\n");
     let joined_lower = joined.to_ascii_lowercase();
+    let full_output_lower = team.serialized_surface.to_ascii_lowercase();
     let item_summary = context_items
         .iter()
         .map(|item| format!("{}:{}:{}", item.memory_id, item.scope, item.score))
@@ -993,6 +994,23 @@ fn check_team(expected: &TeamExpected, actual: &ActualState) -> Vec<CheckReport>
         } else {
             checks.push(CheckReport::pass(
                 format!("team.context_must_not_include.{value}"),
+                "absent",
+                "absent",
+            ));
+        }
+    }
+    for value in &expected.full_output_must_not_include {
+        let value_lower = value.to_ascii_lowercase();
+        if full_output_lower.contains(&value_lower) {
+            checks.push(CheckReport::fail(
+                format!("team.full_output_must_not_include.{value}"),
+                "absent",
+                "included",
+                "actual.team.serialized_surface",
+            ));
+        } else {
+            checks.push(CheckReport::pass(
+                format!("team.full_output_must_not_include.{value}"),
                 "absent",
                 "absent",
             ));

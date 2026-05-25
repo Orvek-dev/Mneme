@@ -15,6 +15,8 @@ use std::time::{SystemTime, UNIX_EPOCH};
 
 use serde::{Deserialize, Serialize};
 
+const STORE_LOCK_STALE_SECONDS: u64 = 60 * 60;
+
 /// Current persisted state schema version for v1 local stores.
 pub const MNEME_STATE_SCHEMA_VERSION: u32 = 2;
 
@@ -1280,6 +1282,20 @@ impl MnemeStore for JsonFileStore {
 
     fn save(&mut self, state: &MnemeState) -> Result<(), StoreError> {
         let _lock = acquire_store_lock(&self.path)?;
+        match read_state_file(&self.path) {
+            Ok(Some(current)) => {
+                let incoming_generation = state.metadata.generation;
+                let current_generation = current.metadata.generation;
+                if incoming_generation != 0 && incoming_generation < current_generation {
+                    return Err(StoreError::lock_conflict(format!(
+                        "store generation changed while this writer was active: loaded={incoming_generation}, current={current_generation}"
+                    )));
+                }
+            }
+            Ok(None) => {}
+            Err(_) if state.metadata.generation == 0 => {}
+            Err(error) => return Err(error),
+        }
         let prepared = state.prepared_for_save();
         backup_current_file(&self.path)?;
         write_state_atomic(&self.path, &prepared)
@@ -1357,20 +1373,43 @@ fn acquire_store_lock(path: &Path) -> Result<StoreLockGuard, StoreError> {
             .map_err(|source| StoreError::new(format!("failed to create store dir: {source}")))?;
     }
     let lock_path = lock_path_for(path);
-    let mut file = OpenOptions::new()
+    let mut file = match OpenOptions::new()
         .write(true)
         .create_new(true)
         .open(&lock_path)
-        .map_err(|source| {
-            if source.kind() == io::ErrorKind::AlreadyExists {
-                StoreError::lock_conflict(format!(
+    {
+        Ok(file) => file,
+        Err(source) if source.kind() == io::ErrorKind::AlreadyExists => {
+            if stale_lock_should_be_recovered(&lock_path) {
+                fs::remove_file(&lock_path).map_err(|source| {
+                    StoreError::lock_conflict(format!(
+                        "failed to recover stale store lock {}: {source}",
+                        lock_path.display()
+                    ))
+                })?;
+                OpenOptions::new()
+                    .write(true)
+                    .create_new(true)
+                    .open(&lock_path)
+                    .map_err(|source| {
+                        StoreError::lock_conflict(format!(
+                            "store lock already exists after stale recovery: {} ({source})",
+                            lock_path.display()
+                        ))
+                    })?
+            } else {
+                return Err(StoreError::lock_conflict(format!(
                     "store lock already exists: {}",
                     lock_path.display()
-                ))
-            } else {
-                StoreError::new(format!("failed to create store lock: {source}"))
+                )));
             }
-        })?;
+        }
+        Err(source) => {
+            return Err(StoreError::new(format!(
+                "failed to create store lock: {source}"
+            )));
+        }
+    };
     let lock_body = format!(
         "pid={}\ncreated_at_unix_seconds={}\n",
         std::process::id(),
@@ -1389,6 +1428,19 @@ fn acquire_store_lock(path: &Path) -> Result<StoreLockGuard, StoreError> {
         )));
     }
     Ok(StoreLockGuard { path: lock_path })
+}
+
+fn stale_lock_should_be_recovered(lock_path: &Path) -> bool {
+    let Ok(text) = fs::read_to_string(lock_path) else {
+        return false;
+    };
+    let Some(created_at) = text.lines().find_map(|line| {
+        line.strip_prefix("created_at_unix_seconds=")
+            .and_then(|value| value.parse::<u64>().ok())
+    }) else {
+        return false;
+    };
+    unix_timestamp().saturating_sub(created_at) > STORE_LOCK_STALE_SECONDS
 }
 
 fn backup_path_for(path: &Path) -> PathBuf {
@@ -2354,12 +2406,43 @@ fn find_correct_id_marker(text: &str) -> Option<(&str, &str)> {
 
 fn looks_like_secret(text: &str) -> bool {
     let lower = text.to_ascii_lowercase();
-    lower.contains("api_key=")
+    let compact = lower
+        .chars()
+        .filter(|character| !character.is_whitespace())
+        .collect::<String>();
+    compact.contains("api_key=")
+        || compact.contains("api_key:")
+        || compact.contains("apikey=")
+        || compact.contains("apikey:")
+        || compact.contains("api-key=")
+        || compact.contains("api-key:")
         || lower.contains("api key")
-        || lower.contains("secret=")
-        || lower.contains("token=")
-        || lower.contains("access_token=")
-        || lower.contains("password=")
+        || compact.contains("secret=")
+        || compact.contains("secret:")
+        || compact.contains("token=")
+        || compact.contains("token:")
+        || compact.contains("access_token=")
+        || compact.contains("access_token:")
+        || compact.contains("password=")
+        || compact.contains("password:")
+        || compact.contains("authorization:bearer")
+        || compact.contains("bearer")
+        || compact.contains("sk-")
+        || compact.contains("ghp_")
+        || compact.contains("github_pat_")
+        || contains_aws_access_key_like(text)
+        || lower.contains("private key")
+}
+
+fn contains_aws_access_key_like(text: &str) -> bool {
+    text.split(|character: char| !character.is_ascii_alphanumeric())
+        .any(|token| {
+            token.len() == 20
+                && (token.starts_with("AKIA") || token.starts_with("ASIA"))
+                && token
+                    .chars()
+                    .all(|character| character.is_ascii_uppercase() || character.is_ascii_digit())
+        })
 }
 
 fn validate_extracted_claim(claim: &ExtractedClaim) -> Result<(), ExtractorError> {
@@ -2836,6 +2919,32 @@ mod tests {
     }
 
     #[test]
+    fn common_secret_patterns_are_blocked() -> Result<(), Box<dyn std::error::Error>> {
+        for text in [
+            "remember: Authorization: Bearer fake-token-value",
+            "remember: token: fake-token-value",
+            "remember: password : fake-password",
+            "remember: provider key sk-testvalue",
+            "remember: GitHub token ghp_fakevalue",
+            "remember: AWS key AKIA1234567890ABCDEF",
+        ] {
+            let mut engine = MnemeEngine::new(MnemeConfig {
+                daily_cloud_tokens: 100,
+            });
+            engine.ingest_event(EventInput {
+                speaker_id: "user".to_owned(),
+                actor_agent_id: None,
+                text: text.to_owned(),
+                scope: "private".to_owned(),
+                trust_level: "trusted_user".to_owned(),
+            })?;
+            let snapshot = engine.snapshot();
+            assert_eq!(snapshot.claims[0].status, ClaimStatus::BlockedSecret);
+        }
+        Ok(())
+    }
+
+    #[test]
     fn correction_supersedes_old_claim_and_writes_replacement(
     ) -> Result<(), Box<dyn std::error::Error>> {
         let mut engine = MnemeEngine::new(MnemeConfig {
@@ -3103,6 +3212,90 @@ mod tests {
         let _ = std::fs::remove_file(&path);
         let _ = std::fs::remove_file(store.backup_path());
         let _ = std::fs::remove_file(store.lock_path());
+        Ok(())
+    }
+
+    #[test]
+    fn json_file_store_rejects_stale_generation_save() -> Result<(), Box<dyn std::error::Error>> {
+        let path = temp_store_path("generation-conflict");
+        let _ = std::fs::remove_file(&path);
+        let _ = std::fs::remove_file(backup_path_for(&path));
+        let _ = std::fs::remove_file(lock_path_for(&path));
+
+        let mut base = MnemeEngine::new(MnemeConfig::default());
+        base.ingest_event(EventInput {
+            speaker_id: "user".to_owned(),
+            actor_agent_id: None,
+            text: "remember: user prefers first write".to_owned(),
+            scope: "private".to_owned(),
+            trust_level: "trusted_user".to_owned(),
+        })?;
+        let mut base_store = JsonFileStore::new(path.clone());
+        base.persist(&mut base_store)?;
+
+        let store_a = JsonFileStore::new(path.clone());
+        let store_b = JsonFileStore::new(path.clone());
+        let mut writer_a = MnemeEngine::from_store(MnemeConfig::default(), &store_a)?;
+        let mut writer_b = MnemeEngine::from_store(MnemeConfig::default(), &store_b)?;
+        writer_a.ingest_event(EventInput {
+            speaker_id: "user".to_owned(),
+            actor_agent_id: None,
+            text: "remember: user prefers second write".to_owned(),
+            scope: "private".to_owned(),
+            trust_level: "trusted_user".to_owned(),
+        })?;
+        writer_a.persist(&mut JsonFileStore::new(path.clone()))?;
+        writer_b.ingest_event(EventInput {
+            speaker_id: "user".to_owned(),
+            actor_agent_id: None,
+            text: "remember: user prefers overwritten write".to_owned(),
+            scope: "private".to_owned(),
+            trust_level: "trusted_user".to_owned(),
+        })?;
+        let error = writer_b
+            .persist(&mut JsonFileStore::new(path.clone()))
+            .expect_err("stale writer should not overwrite a newer generation");
+        assert_eq!(error.kind(), StoreErrorKind::LockConflict);
+
+        let reloaded =
+            MnemeEngine::from_store(MnemeConfig::default(), &JsonFileStore::new(path.clone()))?;
+        let snapshot = reloaded.snapshot();
+        assert!(snapshot
+            .events
+            .iter()
+            .any(|event| event.text.contains("second write")));
+        assert!(!snapshot
+            .events
+            .iter()
+            .any(|event| event.text.contains("overwritten write")));
+
+        let _ = std::fs::remove_file(&path);
+        let _ = std::fs::remove_file(backup_path_for(&path));
+        let _ = std::fs::remove_file(lock_path_for(&path));
+        Ok(())
+    }
+
+    #[test]
+    fn json_file_store_recovers_stale_lock() -> Result<(), Box<dyn std::error::Error>> {
+        let path = temp_store_path("stale-lock-recovery");
+        let _ = std::fs::remove_file(&path);
+        let _ = std::fs::remove_file(backup_path_for(&path));
+        let _ = std::fs::remove_file(lock_path_for(&path));
+        std::fs::write(lock_path_for(&path), "pid=0\ncreated_at_unix_seconds=1\n")?;
+
+        let mut engine = MnemeEngine::new(MnemeConfig::default());
+        engine.ingest_event(EventInput {
+            speaker_id: "user".to_owned(),
+            actor_agent_id: None,
+            text: "remember: user prefers stale lock recovery".to_owned(),
+            scope: "private".to_owned(),
+            trust_level: "trusted_user".to_owned(),
+        })?;
+        engine.persist(&mut JsonFileStore::new(path.clone()))?;
+
+        assert!(!lock_path_for(&path).exists());
+        let _ = std::fs::remove_file(&path);
+        let _ = std::fs::remove_file(backup_path_for(&path));
         Ok(())
     }
 

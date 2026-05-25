@@ -219,8 +219,9 @@ Useful v2 connector commands:
 mneme team handoff "handoff query" --actor bob --agent codex-bob --json
 mneme team sync export /tmp/mneme-team-sync.json --actor bob --agent codex-bob --include-projects --json
 mneme team sync import /tmp/mneme-team-sync.json --json
+mneme team sync import /tmp/mneme-team-sync.json --apply --actor alice --json
 mneme team firewall --json
-mneme team ontology --json
+mneme team ontology --actor bob --agent codex-bob --json
 scripts/mneme-mcp-stdio.py --self-test
 ```
 
@@ -316,7 +317,7 @@ cargo run -p mneme-eval -- dogfood-summary --help
 
 ## Evaluation Evidence
 
-The latest public-safe local evidence snapshot was measured for `v0.61.0` on
+The latest public-safe local evidence snapshot was measured for `v0.62.0` on
 2026-05-25. These numbers are reproducible development evidence for Mneme,
 not claims against external production workloads. Full run bundles are ignored
 by git; the committed fixtures and scripts are safe to inspect and rerun.
@@ -332,7 +333,7 @@ The same evidence is summarized in the GitHub-native
 | Seeded faults | dropped citation, scope leak, secret leak, stale reuse, handoff miss | `5/5` detected |
 | Candidate bridge | hard-mode findings mirrored into official candidate YAML | `5/5` candidates valid with `mneme-eval candidate-check` |
 | Ontology benchmark | 13 golden ontology cases: 10 natural-language, 3 explicit-marker anchors | current v1 reports `ontology_benchmark_passed` and `v1_ontology_ready`: `entity_f1=1.0`, `relation_f1=1.0`, `attribute_f1=1.0`, `scope_accuracy=1.0`, `temporal_correctness=1.0`, `provenance_coverage=1.0`, `context_recall_at_k=1.0`, `scope_leak=0`, `secret_leak=0` |
-| v2 team readiness | 9 public team scenarios for ACL, project access, promotion, secret blocking, revoked agents, sync privacy, firewall quarantine, handoff, and ontology | `ready_for_team_v2_dogfood`; `9/9` scenarios passed; `6/6` seeded faults detected |
+| v2 team readiness | 9 public team scenarios for ACL, project access, promotion, secret blocking, revoked agents, sync privacy, firewall quarantine, handoff, and ontology | `ready_for_team_v2_dogfood`; `9/9` scenarios passed; full-output privacy checks passed; `6/6` seeded faults detected |
 | v2 team dogfood shape | 120 synthetic team records, 80 adversarial records, 25 handoff workflows | fixture shape verified; generated bundles are public-safe and ignored by git |
 
 The ontology benchmark remains the public regression gate for natural-language
