@@ -27,6 +27,7 @@ Useful commands:
 - [Eval Candidate Workflow](eval-candidate-workflow.md)
 - [V1 Dogfood Readiness](v1-dogfood-readiness.md)
 - [V1 Dogfood Execution](v1-dogfood-execution.md)
+- [V1 Dogfood Triage](v1-dogfood-triage.md)
 
 Useful commands:
 
@@ -34,4 +35,5 @@ Useful commands:
 - `mneme-eval candidate-check <candidate.yaml|dir>`
 - `mneme-eval candidate-promote <candidate.yaml>`
 - `mneme-eval v1-readiness`
+- `mneme-eval dogfood-summary <bundle-dir>`
 - `scripts/v1-dogfood.sh`

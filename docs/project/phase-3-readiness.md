@@ -199,3 +199,8 @@ Phase 34 shipped the **V1 Dogfood Execution Evidence MVP** in `v0.40.0`, adding
 `scripts/v1-dogfood.sh` so each v1 dogfood candidate can produce an ignored
 evidence bundle with dogfood evals, readiness output, and local CLI smoke
 reports before promotion to the next product phase.
+
+Phase 35 shipped the **V1 Dogfood Evidence Triage MVP** in `v0.41.0`, adding
+`mneme-eval dogfood-summary` so dogfood evidence bundles can be checked for
+missing, malformed, or failing artifacts and promoted to manual v1 dogfood only
+when the decision status is `ready_for_manual_dogfood`.

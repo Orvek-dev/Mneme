@@ -35,6 +35,7 @@ CLI_CONTEXT="${OUT_DIR}/cli.context.json"
 CLI_QUALITY="${OUT_DIR}/cli.quality.json"
 CLI_VALIDATE="${OUT_DIR}/cli.validate.txt"
 SUMMARY="${OUT_DIR}/summary.json"
+DOGFOOD_SUMMARY="${OUT_DIR}/dogfood-summary.json"
 
 mneme_cli() {
   cargo run -q -p mneme-cli -- "$@"
@@ -90,10 +91,14 @@ cat > "$SUMMARY" <<EOF
     "cli_end": "$CLI_END",
     "cli_context": "$CLI_CONTEXT",
     "cli_quality": "$CLI_QUALITY",
-    "cli_validate": "$CLI_VALIDATE"
+    "cli_validate": "$CLI_VALIDATE",
+    "dogfood_summary": "$DOGFOOD_SUMMARY"
   }
 }
 EOF
 
+mneme_eval dogfood-summary "$OUT_DIR" --report "$DOGFOOD_SUMMARY" --json > "${DOGFOOD_SUMMARY}.stdout"
+
 echo "v1-dogfood: wrote $OUT_DIR"
 echo "v1-dogfood: summary $SUMMARY"
+echo "v1-dogfood: dogfood summary $DOGFOOD_SUMMARY"

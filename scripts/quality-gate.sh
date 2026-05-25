@@ -167,6 +167,9 @@ grep -q -- "--scenario-root <dir>" "$MNEME_EVAL_HELP"
 cargo run -p mneme-eval -- v1-readiness --help > "$MNEME_EVAL_HELP"
 grep -q "Usage: mneme-eval v1-readiness" "$MNEME_EVAL_HELP"
 grep -q "dogfood" "$MNEME_EVAL_HELP"
+cargo run -p mneme-eval -- dogfood-summary --help > "$MNEME_EVAL_HELP"
+grep -q "Usage: mneme-eval dogfood-summary" "$MNEME_EVAL_HELP"
+grep -q "ready_for_manual_dogfood" "$MNEME_EVAL_HELP"
 
 STORE="${TMP_ROOT}/mneme-quality-gate-cli.json"
 rm -f "$STORE"
@@ -736,6 +739,11 @@ grep -q '"command": "v1-dogfood"' "$DOGFOOD_OUT_DIR/summary.json"
 grep -q '"status": "passed"' "$DOGFOOD_OUT_DIR/summary.json"
 grep -q '"readiness_status": "ready_for_v1_dogfood"' "$DOGFOOD_OUT_DIR/v1-readiness.json"
 grep -q '"ok": true' "$DOGFOOD_OUT_DIR/dogfood.run.mneme-v1.json"
+grep -q '"command": "dogfood-summary"' "$DOGFOOD_OUT_DIR/dogfood-summary.json"
+grep -q '"decision_status": "ready_for_manual_dogfood"' "$DOGFOOD_OUT_DIR/dogfood-summary.json"
+cargo run -p mneme-eval -- dogfood-summary "$DOGFOOD_OUT_DIR" \
+  --json > "${DOGFOOD_OUT_DIR}/dogfood-summary-rerun.stdout.json"
+grep -q '"decision_status": "ready_for_manual_dogfood"' "${DOGFOOD_OUT_DIR}/dogfood-summary-rerun.stdout.json"
 
 cargo run -p mneme-eval -- baseline-gate "$BASELINE_REPORT" \
   --report "$BASELINE_GATE_REPORT" \

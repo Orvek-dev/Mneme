@@ -51,8 +51,8 @@ eval update land in the same PR.
 
 - `mneme-eval` supports `doctor`, `validate`, `run`, `replay`, `acceptance`,
   `baseline`, `baseline-gate`, `baseline-summary`, `baseline-compare`,
-  `candidate`, `candidate-check`, `candidate-promote`, `v1-readiness`, and
-  command-specific help.
+  `candidate`, `candidate-check`, `candidate-promote`, `v1-readiness`,
+  `dogfood-summary`, and command-specific help.
 - Eval reports include `report_schema_version`, target metadata, counts, and
   per-scenario results.
 - Baseline summary reports include triage status, redaction findings, top
@@ -67,6 +67,9 @@ eval update land in the same PR.
 - `v1-readiness` validates and replays `core`, `runtime`, `agent`, and
   `dogfood` against `mneme-v1` and reports `ready_for_v1_dogfood` only when all
   deterministic product-readiness criteria pass.
+- `dogfood-summary` gates an evidence bundle produced by `scripts/v1-dogfood.sh`
+  and reports `ready_for_manual_dogfood` only when required dogfood, readiness,
+  and CLI smoke artifacts are present and passing.
 - The opt-in `model` suite covers command-backed extraction quality for durable
   preferences, no-claim cases, secret blocking, and lifecycle correction.
 - The `core`, `runtime`, `agent`, and `dogfood` suites must pass for `fake`
