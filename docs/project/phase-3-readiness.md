@@ -216,3 +216,8 @@ adding `scripts/v1-real-use-pilot.py` so private real-use pilot sessions can
 start only after manual dogfood preflight and any observed feedback can be
 sanitized, categorized, and routed toward fixes, docs, or eval candidates
 without committing private pilot evidence.
+
+Phase 38 shipped the **V1 Hard Mode + Agent Memory Eval Harness MVP** in
+`v0.44.0`, adding `scripts/v1-hard-dogfood.py` so v1 can be stressed with 100
+normal records, 150 adversarial records, 30 agent handoff workflows, seeded
+faults, regression gates, candidate artifacts, and public-safe reports.

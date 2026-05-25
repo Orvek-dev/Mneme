@@ -15,11 +15,23 @@ cargo test --workspace --all-targets
 RUSTDOCFLAGS="-D warnings" cargo doc --workspace --no-deps
 python3 -m py_compile wrappers/openai_extractor.py
 python3 -m py_compile scripts/v1-manual-dogfood.py
+python3 -m py_compile scripts/v1-hard-dogfood.py
 python3 -m py_compile scripts/v1-real-use-pilot.py
 MANUAL_DOGFOOD_DATASET="${TMP_ROOT}/mneme-quality-gate-manual-dogfood-dataset.json"
 scripts/v1-manual-dogfood.py --check-dataset > "$MANUAL_DOGFOOD_DATASET"
 grep -q '"mock_record_count": 100' "$MANUAL_DOGFOOD_DATASET"
 grep -q '"workflow_count": 25' "$MANUAL_DOGFOOD_DATASET"
+HARD_DOGFOOD_CONTRACT="${TMP_ROOT}/mneme-quality-gate-hard-dogfood-contract.json"
+HARD_DOGFOOD_DATASET="${TMP_ROOT}/mneme-quality-gate-hard-dogfood-dataset.json"
+HARD_DOGFOOD_FAULTS="${TMP_ROOT}/mneme-quality-gate-hard-dogfood-seeded-faults.json"
+scripts/v1-hard-dogfood.py --check-contract > "$HARD_DOGFOOD_CONTRACT"
+grep -q '"command": "v1-hard-dogfood-contract"' "$HARD_DOGFOOD_CONTRACT"
+scripts/v1-hard-dogfood.py --check-dataset > "$HARD_DOGFOOD_DATASET"
+grep -q '"normal_record_count": 100' "$HARD_DOGFOOD_DATASET"
+grep -q '"adversarial_record_count": 150' "$HARD_DOGFOOD_DATASET"
+grep -q '"agent_workflow_count": 30' "$HARD_DOGFOOD_DATASET"
+scripts/v1-hard-dogfood.py --check-seeded-faults > "$HARD_DOGFOOD_FAULTS"
+grep -q '"detection_rate": 1.0' "$HARD_DOGFOOD_FAULTS"
 REAL_USE_CONTRACT="${TMP_ROOT}/mneme-quality-gate-real-use-contract.json"
 REAL_USE_FEEDBACK="${TMP_ROOT}/mneme-quality-gate-real-use-feedback.json"
 scripts/v1-real-use-pilot.py --check-contract > "$REAL_USE_CONTRACT"

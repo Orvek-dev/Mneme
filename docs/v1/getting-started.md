@@ -119,6 +119,7 @@ cargo run -p mneme-eval -- v1-readiness --json --report evals/reports/v1-readine
 scripts/v1-dogfood.sh
 cargo run -p mneme-eval -- dogfood-summary evals/runs/v1-dogfood/<run-label>
 scripts/v1-manual-dogfood.py
+scripts/v1-hard-dogfood.py
 scripts/v1-real-use-pilot.py
 ```
 
