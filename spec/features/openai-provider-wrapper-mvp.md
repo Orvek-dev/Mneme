@@ -32,5 +32,5 @@ credentials, or prompts into `mneme-core`.
 | REQ-OPENAI-WRAP-003 | `MNEME_OPENAI_DRY_RUN=1` model suite run | verified |
 | REQ-OPENAI-WRAP-004 | local secret prefilter in wrapper | verified |
 | REQ-OPENAI-WRAP-005 | wrapper dry-run rules and model no-claim scenarios | verified |
-| REQ-OPENAI-WRAP-006 | `docs/openai-provider-wrapper.md` | verified |
+| REQ-OPENAI-WRAP-006 | `docs/eval-harness/openai-provider-wrapper.md` | verified |
 | REQ-OPENAI-WRAP-007 | CI and release workflow dry-run steps | verified |

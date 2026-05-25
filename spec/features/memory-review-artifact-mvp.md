@@ -39,4 +39,4 @@ claim lifecycle state, source citations, and agent sessions.
 | REQ-ARTIFACT-004 | `review_exports_markdown_and_json_artifacts` | verified |
 | REQ-ARTIFACT-005 | `review_exports_markdown_and_json_artifacts` | verified |
 | REQ-ARTIFACT-006 | `scripts/quality-gate.sh` review smoke | verified |
-| REQ-ARTIFACT-007 | `docs/memory-review-artifacts.md` | verified |
+| REQ-ARTIFACT-007 | `docs/v1/memory-review-artifacts.md` | verified |

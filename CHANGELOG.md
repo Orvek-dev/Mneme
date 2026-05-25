@@ -4,6 +4,11 @@ This project follows the spirit of Keep a Changelog.
 
 ## Unreleased
 
+### Changed
+
+- Reorganized public docs into `docs/v1`, `docs/v2`, `docs/eval-harness`,
+  and `docs/project` so GitHub shows the product structure directly.
+
 ## [0.37.0] - 2026-05-25
 
 ### Added

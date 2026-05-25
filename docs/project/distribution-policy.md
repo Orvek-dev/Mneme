@@ -44,7 +44,7 @@ Do not remove `publish = false` until all of the following are true:
 
 - a license file is committed;
 - every package manifest declares matching license metadata;
-- `docs/package-readiness.md` and `docs/release-checklist.md` describe the
+- `docs/project/package-readiness.md` and `docs/project/release-checklist.md` describe the
   intended registry publication path;
 - `scripts/distribution-policy-check.sh` has been updated for the selected
   license and publication target;

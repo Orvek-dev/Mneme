@@ -38,10 +38,10 @@ checks, and verification commands.
 | Requirement | Evidence target | Status |
 | --- | --- | --- |
 | REQ-PKG-001 | `README.md` | verified |
-| REQ-PKG-002 | `docs/v1-stability.md` | verified |
-| REQ-PKG-003 | `docs/release-checklist.md` | verified |
+| REQ-PKG-002 | `docs/v1/v1-stability.md` | verified |
+| REQ-PKG-003 | `docs/project/release-checklist.md` | verified |
 | REQ-PKG-004 | `.github/workflows/release.yml` | verified |
 | REQ-PKG-005 | README documentation links | verified |
 | REQ-PKG-006 | crate `Cargo.toml` package metadata and `publish = false` | verified |
 | REQ-PKG-007 | `scripts/package-check.sh` | verified |
-| REQ-PKG-008 | `docs/getting-started.md` | verified |
+| REQ-PKG-008 | `docs/v1/getting-started.md` | verified |

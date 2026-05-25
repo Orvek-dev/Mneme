@@ -38,4 +38,4 @@ secret-like text.
 | REQ-REDACT-003 | `review_exports_markdown_and_json_artifacts` | verified |
 | REQ-REDACT-004 | `review_exports_markdown_and_json_artifacts` | verified |
 | REQ-REDACT-005 | `scripts/quality-gate.sh` review redaction smoke | verified |
-| REQ-REDACT-006 | `docs/memory-review-artifacts.md` | verified |
+| REQ-REDACT-006 | `docs/v1/memory-review-artifacts.md` | verified |

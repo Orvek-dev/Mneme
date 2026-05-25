@@ -4,7 +4,7 @@ Mneme is pre-1.0 and the workspace crates are not published to a registry.
 Each crate is marked `publish = false` to prevent accidental crates.io
 publication while the project is still stabilizing its public license,
 distribution, and API policy.
-The current distribution policy is documented in `docs/distribution-policy.md`.
+The current distribution policy is documented in `docs/project/distribution-policy.md`.
 
 ## Current Packages
 
@@ -15,7 +15,7 @@ The current distribution policy is documented in `docs/distribution-policy.md`.
 All package manifests include a public repository URL, a description, a README
 reference, and the shared workspace version.
 
-The current Rust API policy is documented in `docs/api-contract.md`. API docs
+The current Rust API policy is documented in `docs/project/api-contract.md`. API docs
 must build with warnings denied before release:
 
 ```sh
@@ -86,5 +86,5 @@ Do not remove `publish = false` until all of the following are true:
 - `scripts/distribution-policy-check.sh` has been updated for the selected
   license and publication target;
 - package contents are reviewed against `scripts/package-check.sh`;
-- `docs/release-checklist.md` includes registry publication steps;
+- `docs/project/release-checklist.md` includes registry publication steps;
 - CI verifies the exact package or publish dry-run command intended for release.

@@ -73,7 +73,7 @@ Local users can install the CLI with `scripts/install-local.sh`. It installs
 the repository-local `mneme-cli` package as the `mneme` binary and runs a small
 doctor/help/review smoke check.
 
-Stable behavior remains defined by `docs/v1-stability.md`, public feature
+Stable behavior remains defined by `docs/v1/v1-stability.md`, public feature
 specs, eval scenarios, and the release quality gate.
 
 ## Example
@@ -114,7 +114,7 @@ and validation checks, public-safety checks, and package assembly checks.
 When changing public API shape, update the same PR with the relevant evidence:
 
 - crate-level docs or item docs;
-- `docs/api-contract.md` and `docs/v1-stability.md` when the intended API
+- `docs/project/api-contract.md` and `docs/v1/v1-stability.md` when the intended API
   surface changes;
 - compile-checked examples or unit tests;
 - feature specs and verification maps;

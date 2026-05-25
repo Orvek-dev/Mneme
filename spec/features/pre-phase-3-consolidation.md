@@ -31,4 +31,4 @@ ship in larger, lower-overhead phases.
 | REQ-P3-PREP-003 | `.github/workflows/ci.yml` | verified |
 | REQ-P3-PREP-004 | `.github/workflows/release.yml` | verified |
 | REQ-P3-PREP-005 | `scripts/live-baseline.sh` | verified |
-| REQ-P3-PREP-006 | `docs/phase-3-readiness.md` | verified |
+| REQ-P3-PREP-006 | `docs/project/phase-3-readiness.md` | verified |

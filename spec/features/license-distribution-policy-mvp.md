@@ -31,9 +31,9 @@ machine-checked without choosing a license on behalf of the owner.
 
 | Requirement | Evidence target | Status |
 | --- | --- | --- |
-| REQ-DIST-001 | `docs/distribution-policy.md` | verified |
+| REQ-DIST-001 | `docs/project/distribution-policy.md` | verified |
 | REQ-DIST-002 | crate `Cargo.toml` files and policy check | verified |
 | REQ-DIST-003 | `scripts/package-check.sh` | verified |
-| REQ-DIST-004 | `docs/distribution-policy.md` | verified |
+| REQ-DIST-004 | `docs/project/distribution-policy.md` | verified |
 | REQ-DIST-005 | package readiness and release checklist docs | verified |
 | REQ-DIST-006 | `scripts/distribution-policy-check.sh` | verified |

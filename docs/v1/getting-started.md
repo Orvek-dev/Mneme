@@ -14,7 +14,7 @@ evals, and provider-wrapper experiments. The crates are intentionally marked
 `publish = false` until the project has a final license and public distribution
 policy.
 The current distribution state is documented in
-`docs/distribution-policy.md`.
+`docs/project/distribution-policy.md`.
 
 ## First Run
 
