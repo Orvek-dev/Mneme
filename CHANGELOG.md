@@ -4,6 +4,20 @@ This project follows the spirit of Keep a Changelog.
 
 ## Unreleased
 
+## [0.41.0] - 2026-05-25
+
+### Added
+
+- Added `mneme-eval dogfood-summary <bundle-dir>` to triage v1 dogfood
+  evidence bundles and report `ready_for_manual_dogfood`.
+- Added dogfood summary checks for required readiness, eval, acceptance, and
+  CLI smoke artifacts.
+- Updated `scripts/v1-dogfood.sh` to write `dogfood-summary.json` into each
+  bundle.
+- Expanded the release quality gate to verify dogfood summary help, generated
+  bundle decisions, and command reruns.
+- Added the Phase 35 v1 dogfood evidence triage feature spec and docs.
+
 ## [0.40.0] - 2026-05-25
 
 ### Added

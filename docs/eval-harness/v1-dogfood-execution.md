@@ -40,7 +40,8 @@ The bundle includes:
 - CLI smoke reports for `doctor`, `init`, `remember`, `begin`, `end`,
   `context`, `quality`, and `validate`;
 - `summary.json` with the command, run label, status, output directory, and
-  report paths.
+  report paths;
+- `dogfood-summary.json` with the triage decision for the whole bundle.
 
 The script exits non-zero if any dogfood, readiness, or CLI smoke step fails.
 Provider/model extraction is intentionally excluded; use the baseline workflow

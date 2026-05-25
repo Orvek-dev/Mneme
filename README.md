@@ -177,6 +177,7 @@ cargo run -p mneme-eval -- validate --suite dogfood
 cargo run -p mneme-eval -- run --suite dogfood --target mneme-v1
 cargo run -p mneme-eval -- v1-readiness --json --report evals/reports/v1-readiness.json
 scripts/v1-dogfood.sh
+cargo run -p mneme-eval -- dogfood-summary evals/runs/v1-dogfood/<run-label>
 ```
 
 Run the opt-in command extraction suite:
@@ -264,6 +265,7 @@ cargo run -p mneme-eval -- baseline-summary --help
 cargo run -p mneme-eval -- baseline-compare --help
 cargo run -p mneme-eval -- candidate-promote --help
 cargo run -p mneme-eval -- v1-readiness --help
+cargo run -p mneme-eval -- dogfood-summary --help
 ```
 
 ## Development Checks
