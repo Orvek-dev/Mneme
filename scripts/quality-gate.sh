@@ -54,6 +54,7 @@ grep -q '"decision_status": "pilot_feedback_triaged"' "$REAL_USE_FEEDBACK"
 ONTOLOGY_CONTRACT="${TMP_ROOT}/mneme-quality-gate-ontology-contract.json"
 ONTOLOGY_FIXTURE="${TMP_ROOT}/mneme-quality-gate-ontology-fixture.json"
 ONTOLOGY_SCORER="${TMP_ROOT}/mneme-quality-gate-ontology-scorer.json"
+ONTOLOGY_GAP_ANALYSIS="${TMP_ROOT}/mneme-quality-gate-ontology-gap-analysis.json"
 scripts/v1-ontology-benchmark.py --check-contract > "$ONTOLOGY_CONTRACT"
 grep -q '"command": "v1-ontology-benchmark-contract"' "$ONTOLOGY_CONTRACT"
 scripts/v1-ontology-benchmark.py --check-fixture > "$ONTOLOGY_FIXTURE"
@@ -63,6 +64,10 @@ grep -q '"relation_count": 17' "$ONTOLOGY_FIXTURE"
 scripts/v1-ontology-benchmark.py --check-scorer > "$ONTOLOGY_SCORER"
 grep -q '"ok": true' "$ONTOLOGY_SCORER"
 grep -q '"dropped_relation"' "$ONTOLOGY_SCORER"
+scripts/v1-ontology-benchmark.py --check-gap-analysis > "$ONTOLOGY_GAP_ANALYSIS"
+grep -q '"command": "v1-ontology-benchmark-gap-analysis"' "$ONTOLOGY_GAP_ANALYSIS"
+grep -q '"readiness_status": "v1_ontology_design_needed"' "$ONTOLOGY_GAP_ANALYSIS"
+grep -q '"capability": "relation_mapping"' "$ONTOLOGY_GAP_ANALYSIS"
 
 cargo run -p mneme-cli -- doctor
 cargo run -p mneme-eval -- doctor

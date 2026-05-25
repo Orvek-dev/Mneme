@@ -67,12 +67,15 @@ Mneme is pre-1.0. The useful surface today is local development and evaluation:
   triage before any public issue or eval candidate is created;
 - natural-language ontology benchmarking can measure current v1 entity,
   relation, attribute, scope, temporal, provenance, context, and safety gaps
-  before ontology implementation changes;
+  before ontology implementation changes, then map those gaps to implementation
+  priorities;
 - workspace crates are package-checked locally but marked `publish = false`
   until the public license and distribution policy are finalized.
 
 See [Mneme v1 Stability](docs/v1/v1-stability.md) for the current stability
 contract.
+See [Mneme v1 Completion Criteria](docs/v1/v1-completion-criteria.md) for the
+public v1 readiness gate.
 See [API Contract](docs/project/api-contract.md) for the current Rust API
 surface and documentation gate.
 See [Distribution Policy](docs/project/distribution-policy.md) for the current
@@ -285,7 +288,7 @@ cargo run -p mneme-eval -- dogfood-summary --help
 
 ## Evaluation Evidence
 
-The latest public-safe local evidence snapshot was measured for `v0.46.0` on
+The latest public-safe local evidence snapshot was measured for `v0.47.0` on
 2026-05-25. These numbers are reproducible development evidence for Mneme v1,
 not claims against external production workloads. Full run bundles are ignored
 by git; the committed fixtures and scripts are safe to inspect and rerun.
@@ -297,13 +300,13 @@ by git; the committed fixtures and scripts are safe to inspect and rerun.
 | Hard dogfood | 100 normal records, 150 adversarial records, 30 agent handoff workflows | `30/30` workflows passed; `Recall@K=1.0`, `Precision@K=1.0`, `citation_coverage=1.0`, `handoff_success=1.0`, `scope_leak=0`, `secret_leak=0` |
 | Seeded faults | dropped citation, scope leak, secret leak, stale reuse, handoff miss | `5/5` detected |
 | Candidate bridge | hard-mode findings mirrored into official candidate YAML | `5/5` candidates valid with `mneme-eval candidate-check` |
-| Ontology benchmark | 13 golden ontology cases: 10 natural-language, 3 explicit-marker anchors | current v1 reports `ontology_design_needed`: `entity_f1=0.3429`, `relation_f1=0.3000`, `attribute_f1=0.0000`, `provenance_coverage=1.0`, `context_recall_at_k=0.2143`, `scope_leak=0`, `secret_leak=0` |
+| Ontology benchmark | 13 golden ontology cases: 10 natural-language, 3 explicit-marker anchors | current v1 reports `ontology_design_needed`: `entity_f1=0.3429`, `relation_f1=0.3000`, `attribute_f1=0.0000`, `scope_accuracy=0.1200`, `provenance_coverage=1.0`, `context_recall_at_k=0.2143`, `scope_leak=0`, `secret_leak=0`; gap analysis maps misses into implementation buckets |
 
 The ontology benchmark intentionally exposes current v1 gaps before ontology
 implementation changes. It is useful because it separates what v1 already does
 well, such as provenance and safety, from what still needs design work, such as
-natural-language entity resolution, attributes, temporal state, and multi-hop
-relations.
+natural-language extraction, relation mapping, entity resolution, attributes,
+temporal state, scoped ownership, and multi-hop context.
 
 ## Development Checks
 
