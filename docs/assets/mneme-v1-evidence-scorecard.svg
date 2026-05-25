@@ -1,0 +1,78 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="1120" height="760" viewBox="0 0 1120 760" role="img" aria-labelledby="title desc">
+  <title id="title">Mneme v1 evidence scorecard</title>
+  <desc id="desc">Public-safe local evidence summary for Mneme v1 measured on 2026-05-25.</desc>
+  <defs>
+    <style>
+      .bg { fill: #f7f4ed; }
+      .panel { fill: #fffdf8; stroke: #d7d0c2; stroke-width: 1.5; }
+      .ink { fill: #20242a; }
+      .muted { fill: #626a73; }
+      .blue { fill: #2f6f9f; }
+      .green { fill: #2c7a55; }
+      .red { fill: #b8463b; }
+      .gold { fill: #a66a00; }
+      .bar-bg { fill: #e8e2d5; }
+      .bar-blue { fill: #2f6f9f; }
+      .bar-green { fill: #2c7a55; }
+      .bar-gold { fill: #a66a00; }
+      text { font-family: Arial, Helvetica, sans-serif; }
+      .small { font-size: 18px; font-weight: 400; }
+      .label { font-size: 18px; font-weight: 600; }
+      .metric { font-size: 40px; font-weight: 700; }
+      .title { font-size: 44px; font-weight: 800; }
+      .subtitle { font-size: 21px; font-weight: 500; }
+      .caption { font-size: 15px; font-weight: 400; }
+    </style>
+  </defs>
+
+  <rect class="bg" width="1120" height="760" rx="0"/>
+
+  <text x="56" y="68" class="title ink">Mneme v1 Evidence Scorecard</text>
+  <text x="56" y="105" class="subtitle muted">Local-first personal memory runtime + eval harness | v0.49.0 | 2026-05-25</text>
+
+  <rect x="56" y="140" width="492" height="132" rx="8" class="panel"/>
+  <text x="86" y="180" class="label muted">Ontology readiness</text>
+  <text x="86" y="229" class="metric green">1.00</text>
+  <text x="220" y="222" class="small muted">entity / relation / attribute F1</text>
+  <text x="220" y="248" class="small muted">13 golden ontology cases</text>
+
+  <rect x="572" y="140" width="492" height="132" rx="8" class="panel"/>
+  <text x="602" y="180" class="label muted">Hard dogfood workflows</text>
+  <text x="602" y="229" class="metric blue">30/30</text>
+  <text x="750" y="222" class="small muted">agent handoffs passed</text>
+  <text x="750" y="248" class="small muted">100 normal + 150 adversarial records</text>
+
+  <rect x="56" y="296" width="492" height="132" rx="8" class="panel"/>
+  <text x="86" y="336" class="label muted">Safety guardrails</text>
+  <text x="86" y="385" class="metric red">0 leaks</text>
+  <text x="250" y="378" class="small muted">scope leaks: 0</text>
+  <text x="250" y="404" class="small muted">secret leaks: 0</text>
+
+  <rect x="572" y="296" width="492" height="132" rx="8" class="panel"/>
+  <text x="602" y="336" class="label muted">Public eval surface</text>
+  <text x="602" y="385" class="metric gold">36</text>
+  <text x="710" y="378" class="small muted">public scenarios</text>
+  <text x="710" y="404" class="small muted">core / runtime / agent / dogfood / model</text>
+
+  <rect x="56" y="466" width="1010" height="206" rx="8" class="panel"/>
+  <text x="82" y="508" class="label ink">Quality gates</text>
+  <text x="82" y="538" class="small muted">Measured against public-safe local fixtures and deterministic replay gates.</text>
+
+  <text x="82" y="582" class="small ink">Context Recall@K</text>
+  <rect x="292" y="561" width="560" height="24" rx="12" class="bar-bg"/>
+  <rect x="292" y="561" width="560" height="24" rx="12" class="bar-blue"/>
+  <text x="878" y="582" class="label blue">1.00</text>
+
+  <text x="82" y="626" class="small ink">Citation Coverage</text>
+  <rect x="292" y="605" width="560" height="24" rx="12" class="bar-bg"/>
+  <rect x="292" y="605" width="560" height="24" rx="12" class="bar-green"/>
+  <text x="878" y="626" class="label green">1.00</text>
+
+  <text x="82" y="670" class="small ink">Seeded Fault Detection</text>
+  <rect x="292" y="649" width="560" height="24" rx="12" class="bar-bg"/>
+  <rect x="292" y="649" width="560" height="24" rx="12" class="bar-gold"/>
+  <text x="878" y="670" class="label gold">5/5</text>
+
+  <line x1="56" y1="704" x2="1066" y2="704" stroke="#d7d0c2" stroke-width="1.5"/>
+  <text x="56" y="736" class="caption muted">Public-safe local evidence, not an external production benchmark claim. Full generated run bundles stay git-ignored.</text>
+</svg>
