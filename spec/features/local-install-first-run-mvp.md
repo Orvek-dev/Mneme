@@ -38,4 +38,4 @@ installer and release smoke checks for the installed binary.
 | REQ-INSTALL-003 | `scripts/install-local.sh --root` and quality gate | verified |
 | REQ-INSTALL-004 | installer smoke block | verified |
 | REQ-INSTALL-005 | `scripts/quality-gate.sh` install smoke | verified |
-| REQ-INSTALL-006 | `docs/getting-started.md` and `README.md` | verified |
+| REQ-INSTALL-006 | `docs/v1/getting-started.md` and `README.md` | verified |

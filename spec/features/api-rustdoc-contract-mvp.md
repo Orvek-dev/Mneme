@@ -34,7 +34,7 @@ documentation as part of the release gate.
 | --- | --- | --- |
 | REQ-API-DOC-001 | crate-level Rustdoc in workspace crates | verified |
 | REQ-API-DOC-002 | `crates/mneme-core/src/lib.rs` | verified |
-| REQ-API-DOC-003 | `docs/api-contract.md` and `docs/v1-stability.md` | verified |
+| REQ-API-DOC-003 | `docs/project/api-contract.md` and `docs/v1/v1-stability.md` | verified |
 | REQ-API-DOC-004 | `scripts/quality-gate.sh` | verified |
 | REQ-API-DOC-005 | `crates/mneme-core/examples/personal_memory.rs` | verified |
 | REQ-API-DOC-006 | README and package-readiness docs | verified |
