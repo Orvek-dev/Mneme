@@ -227,3 +227,9 @@ Phase 39 shipped the **Hard Candidate Promotion + Trend History MVP** in
 official `mneme.eval_candidate.v1` YAML candidates, validated with
 `mneme-eval candidate-check`, and recorded as public-safe history entries for
 trend comparison across local runs.
+
+Phase 40 shipped the **Natural-Language Ontology Benchmark MVP** in `v0.46.0`,
+adding `scripts/v1-ontology-benchmark.py` and a public-safe golden ontology
+fixture so current v1 can be measured against natural-language entity,
+relation, attribute, scope, temporal, provenance, context, and safety checks
+before ontology implementation changes are designed.
