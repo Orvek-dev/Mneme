@@ -4,6 +4,13 @@ This project follows the spirit of Keep a Changelog.
 
 ## Unreleased
 
+## [0.51.0] - 2026-05-25
+
+### Changed
+
+- Removed a maintainer-specific local username from the public-safety scanner
+  and now derive the local private path from `HOME` at runtime.
+
 ## [0.50.0] - 2026-05-25
 
 ### Added
