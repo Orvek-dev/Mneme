@@ -4,6 +4,19 @@ This project follows the spirit of Keep a Changelog.
 
 ## Unreleased
 
+## [0.45.0] - 2026-05-25
+
+### Added
+
+- Extended `scripts/v1-hard-dogfood.py` to mirror hard-mode findings into
+  official `mneme.eval_candidate.v1` YAML candidates and validate them with
+  `mneme-eval candidate-check`.
+- Added public-safe hard dogfood history entries and trend reports for
+  comparing hard-mode scorecards across repeated local runs.
+- Added lightweight quality-gate checks for the hard candidate bridge and
+  synthetic trend report contract.
+- Added Phase 39 hard candidate/trend docs and spec coverage.
+
 ## [0.44.0] - 2026-05-25
 
 ### Added
