@@ -174,3 +174,8 @@ Phase 29 shipped the **Agent Runtime Diagnostics & Cost Guardrails MVP** in
 `v0.35.0`, adding wrapper doctor runtime diagnostics and an explicit
 `--check-extractor` flag so routine diagnostics never run provider-backed
 extractors by default.
+
+Phase 30 shipped the **Live Provider Baseline Triage MVP** in `v0.36.0`, adding
+`mneme-eval baseline-summary` and live-baseline summary artifacts so failed
+provider runs can be inspected by category, scenario, check, and redaction risk
+before spending more live API budget.

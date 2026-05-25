@@ -32,15 +32,26 @@ export MNEME_LIVE_BASELINE_ITERATIONS=5
 export MNEME_LIVE_BASELINE_RUN_LABEL=local-YYYYMMDD
 export MNEME_LIVE_BASELINE_REPORT=evals/reports/openai-live-baseline.json
 export MNEME_LIVE_BASELINE_GATE_REPORT=evals/reports/openai-live-baseline.gate.json
+export MNEME_LIVE_BASELINE_SUMMARY_REPORT=evals/reports/openai-live-baseline.summary.json
 ./scripts/live-baseline.sh
 ```
 
 Use a `run_label` that identifies the local run without including private
 project names, account IDs, ticket IDs, or user names.
 
-The helper writes both the baseline report and a gate report. It still runs the
-gate when the baseline command reports failed scenario runs, so the output can
-identify which category, scenario, or check failed.
+The helper writes the baseline report, a gate report, and a summary report. It
+still runs the gate and summary when the baseline command reports failed
+scenario runs, so the output can identify which category, scenario, or check
+failed.
+
+Use the summary first when a run fails:
+
+```sh
+cargo run -p mneme-eval -- baseline-summary evals/reports/openai-live-baseline.json
+```
+
+The summary is local triage evidence. Do not share it until the redaction
+checklist below has passed.
 
 ## Success Criteria
 

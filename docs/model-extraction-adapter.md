@@ -104,4 +104,5 @@ environment. See [OpenAI Provider Wrapper](openai-provider-wrapper.md).
 
 For repeated provider-wrapper quality tracking, use
 [`mneme-eval baseline`](live-provider-baseline.md) instead of relying on a
-single suite run.
+single suite run. Use `mneme-eval baseline-summary` to triage saved baseline
+reports before spending more live provider budget.
