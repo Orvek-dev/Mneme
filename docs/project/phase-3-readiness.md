@@ -210,3 +210,9 @@ Phase 36 shipped the **V1 Manual Dogfood Protocol MVP** in `v0.42.0`, adding
 synthetic memory records and 25 realistic workflow checks. This phase also
 hardened v1 ID generation so compaction and restore cannot cause new event or
 claim IDs to collide with retained source references.
+
+Phase 37 shipped the **V1 Real-Use Pilot & Feedback Triage MVP** in `v0.43.0`,
+adding `scripts/v1-real-use-pilot.py` so private real-use pilot sessions can
+start only after manual dogfood preflight and any observed feedback can be
+sanitized, categorized, and routed toward fixes, docs, or eval candidates
+without committing private pilot evidence.

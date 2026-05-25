@@ -4,6 +4,18 @@ This project follows the spirit of Keep a Changelog.
 
 ## Unreleased
 
+## [0.43.0] - 2026-05-25
+
+### Added
+
+- Added `scripts/v1-real-use-pilot.py` to prepare ignored local v1 pilot
+  workspaces after manual dogfood preflight.
+- Added structured feedback contract checks, public-safe feedback triage, and
+  sanitized issue draft generation for real-use pilot findings.
+- Added a public-safe feedback example and Phase 37 real-use pilot docs/spec.
+- Expanded the quality gate to compile the pilot runner and verify its feedback
+  contract plus example feedback without running the full pilot in CI.
+
 ## [0.42.0] - 2026-05-25
 
 ### Added
