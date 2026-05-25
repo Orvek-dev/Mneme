@@ -140,9 +140,11 @@ MNEME_OPENAI_DRY_RUN=1 cargo run -p mneme-eval -- baseline --suite model \
 
 cargo run -p mneme-eval -- baseline-gate evals/reports/openai-dry-run-baseline.json
 cargo run -p mneme-eval -- baseline-summary evals/reports/openai-dry-run-baseline.json
+cargo run -p mneme-eval -- candidate evals/reports/openai-dry-run-baseline.json --out-dir evals/candidates/openai --limit 3
+cargo run -p mneme-eval -- candidate-check evals/candidates/openai
 ```
 
-`evals/reports/` is ignored by git.
+`evals/reports/` and `evals/candidates/` are ignored by git.
 
 ## Full Local Gate
 

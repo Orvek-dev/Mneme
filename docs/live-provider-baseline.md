@@ -55,6 +55,17 @@ actions. `baseline-summary` exits successfully for failed baseline reports so
 the failure can be inspected locally; it is not a replacement for
 `baseline-gate`.
 
+When a failed report should become future eval coverage, generate ignored local
+candidate artifacts first:
+
+```sh
+cargo run -p mneme-eval -- candidate evals/reports/openai-live-baseline.json --out-dir evals/candidates/openai --limit 3
+cargo run -p mneme-eval -- candidate-check evals/candidates/openai
+```
+
+Review and minimize the nested `scenario` block before promoting anything into
+`evals/scenarios/`.
+
 ## Live Local Baseline
 
 Live provider calls are local and opt-in. Keep credentials in the shell or an

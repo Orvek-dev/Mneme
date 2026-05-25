@@ -1,11 +1,11 @@
 use std::fs;
 use std::path::Path;
 
-use serde::Deserialize;
+use serde::{Deserialize, Serialize};
 
 use crate::error::EvalError;
 
-#[derive(Debug, Clone, Deserialize)]
+#[derive(Debug, Clone, Deserialize, Serialize)]
 #[serde(deny_unknown_fields)]
 pub(crate) struct Scenario {
     pub(crate) id: String,
@@ -23,7 +23,7 @@ pub(crate) struct Scenario {
     pub(crate) expected: Expected,
 }
 
-#[derive(Debug, Clone, Deserialize)]
+#[derive(Debug, Clone, Deserialize, Serialize)]
 #[serde(default, deny_unknown_fields)]
 pub(crate) struct Budget {
     pub(crate) daily_cloud_tokens: u32,
@@ -37,13 +37,13 @@ impl Default for Budget {
     }
 }
 
-#[derive(Debug, Clone, Deserialize)]
+#[derive(Debug, Clone, Deserialize, Serialize)]
 #[serde(deny_unknown_fields)]
 pub(crate) struct Persistence {
     pub(crate) restart_after_event: usize,
 }
 
-#[derive(Debug, Clone, Default, Deserialize)]
+#[derive(Debug, Clone, Default, Deserialize, Serialize)]
 #[serde(default, deny_unknown_fields)]
 pub(crate) struct Maintenance {
     pub(crate) export_import_roundtrip: bool,
@@ -53,14 +53,14 @@ pub(crate) struct Maintenance {
     pub(crate) restore_from_backup: bool,
 }
 
-#[derive(Debug, Clone, Default, Deserialize)]
+#[derive(Debug, Clone, Default, Deserialize, Serialize)]
 #[serde(default, deny_unknown_fields)]
 pub(crate) struct CurationMaintenance {
     pub(crate) apply: bool,
     pub(crate) compact: bool,
 }
 
-#[derive(Debug, Clone, Deserialize)]
+#[derive(Debug, Clone, Deserialize, Serialize)]
 #[serde(deny_unknown_fields)]
 pub(crate) struct AgentFlow {
     pub(crate) begin: AgentBegin,
@@ -68,7 +68,7 @@ pub(crate) struct AgentFlow {
     pub(crate) end: Option<AgentEnd>,
 }
 
-#[derive(Debug, Clone, Deserialize)]
+#[derive(Debug, Clone, Deserialize, Serialize)]
 #[serde(deny_unknown_fields)]
 pub(crate) struct AgentBegin {
     pub(crate) task: String,
@@ -80,7 +80,7 @@ pub(crate) struct AgentBegin {
     pub(crate) allowed_scopes: Vec<String>,
 }
 
-#[derive(Debug, Clone, Default, Deserialize)]
+#[derive(Debug, Clone, Default, Deserialize, Serialize)]
 #[serde(default, deny_unknown_fields)]
 pub(crate) struct AgentEnd {
     pub(crate) summary: Option<String>,
@@ -88,7 +88,7 @@ pub(crate) struct AgentEnd {
     pub(crate) extractor: AgentEndExtractor,
 }
 
-#[derive(Debug, Clone, Copy, Default, Eq, PartialEq, Deserialize)]
+#[derive(Debug, Clone, Copy, Default, Eq, PartialEq, Deserialize, Serialize)]
 #[serde(rename_all = "kebab-case")]
 pub(crate) enum AgentEndExtractor {
     #[default]
@@ -96,7 +96,7 @@ pub(crate) enum AgentEndExtractor {
     Command,
 }
 
-#[derive(Debug, Clone, Deserialize)]
+#[derive(Debug, Clone, Deserialize, Serialize)]
 #[serde(deny_unknown_fields)]
 pub(crate) struct InputEvent {
     pub(crate) speaker_id: String,
@@ -109,7 +109,7 @@ pub(crate) struct InputEvent {
     pub(crate) trust_level: String,
 }
 
-#[derive(Debug, Clone, Default, Deserialize)]
+#[derive(Debug, Clone, Default, Deserialize, Serialize)]
 #[serde(default, deny_unknown_fields)]
 pub(crate) struct Expected {
     pub(crate) event_append: Option<EventAppendExpected>,
@@ -137,13 +137,13 @@ impl Expected {
     }
 }
 
-#[derive(Debug, Clone, Deserialize)]
+#[derive(Debug, Clone, Deserialize, Serialize)]
 #[serde(deny_unknown_fields)]
 pub(crate) struct EventAppendExpected {
     pub(crate) count: usize,
 }
 
-#[derive(Debug, Clone, Default, Deserialize)]
+#[derive(Debug, Clone, Default, Deserialize, Serialize)]
 #[serde(default, deny_unknown_fields)]
 pub(crate) struct ClaimExpected {
     pub(crate) subject: String,
@@ -154,7 +154,7 @@ pub(crate) struct ClaimExpected {
     pub(crate) must_not_exist: bool,
 }
 
-#[derive(Debug, Clone, Default, Deserialize)]
+#[derive(Debug, Clone, Default, Deserialize, Serialize)]
 #[serde(default, deny_unknown_fields)]
 pub(crate) struct ContextPackExpected {
     pub(crate) query: String,
@@ -168,13 +168,13 @@ pub(crate) struct ContextPackExpected {
     pub(crate) citation_required: bool,
 }
 
-#[derive(Debug, Clone, Deserialize)]
+#[derive(Debug, Clone, Deserialize, Serialize)]
 #[serde(deny_unknown_fields)]
 pub(crate) struct BudgetExpected {
     pub(crate) hard_cap_violations: u32,
 }
 
-#[derive(Debug, Clone, Default, Deserialize)]
+#[derive(Debug, Clone, Default, Deserialize, Serialize)]
 #[serde(default, deny_unknown_fields)]
 pub(crate) struct AuditExpected {
     pub(crate) read_write_events_required: bool,
@@ -182,7 +182,7 @@ pub(crate) struct AuditExpected {
     pub(crate) session_events_required: bool,
 }
 
-#[derive(Debug, Clone, Default, Deserialize)]
+#[derive(Debug, Clone, Default, Deserialize, Serialize)]
 #[serde(default, deny_unknown_fields)]
 pub(crate) struct StoreExpected {
     pub(crate) schema_version: Option<u32>,
@@ -194,7 +194,7 @@ pub(crate) struct StoreExpected {
     pub(crate) imported: bool,
 }
 
-#[derive(Debug, Clone, Default, Deserialize)]
+#[derive(Debug, Clone, Default, Deserialize, Serialize)]
 #[serde(default, deny_unknown_fields)]
 pub(crate) struct SessionExpected {
     pub(crate) status: Option<String>,
@@ -205,7 +205,7 @@ pub(crate) struct SessionExpected {
     pub(crate) summary_contains: Option<String>,
 }
 
-#[derive(Debug, Clone, Default, Deserialize)]
+#[derive(Debug, Clone, Default, Deserialize, Serialize)]
 #[serde(default, deny_unknown_fields)]
 pub(crate) struct QualityExpected {
     pub(crate) duplicate_active_groups: Option<usize>,
@@ -216,7 +216,7 @@ pub(crate) struct QualityExpected {
     pub(crate) finding_kinds: Vec<String>,
 }
 
-#[derive(Debug, Clone, Default, Deserialize)]
+#[derive(Debug, Clone, Default, Deserialize, Serialize)]
 #[serde(default, deny_unknown_fields)]
 pub(crate) struct CurationExpected {
     pub(crate) duplicate_forget_count: Option<usize>,
@@ -236,7 +236,7 @@ pub(crate) fn load_scenario(path: &Path) -> Result<Scenario, EvalError> {
     Ok(scenario)
 }
 
-fn validate_scenario(scenario: &Scenario, path: &Path) -> Result<(), EvalError> {
+pub(crate) fn validate_scenario(scenario: &Scenario, path: &Path) -> Result<(), EvalError> {
     if scenario.id.trim().is_empty() {
         return Err(EvalError::scenario(format!(
             "scenario {} has an empty id",

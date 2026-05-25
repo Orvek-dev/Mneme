@@ -48,6 +48,8 @@ temp/
 # Eval outputs are generated; scenario fixtures should remain trackable.
 evals/reports/*
 !evals/reports/.gitkeep
+evals/candidates/*
+!evals/candidates/.gitkeep
 evals/runs/
 benchmarks/results/*
 !benchmarks/results/.gitkeep

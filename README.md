@@ -53,6 +53,8 @@ Mneme is pre-1.0. The useful surface today is local development and evaluation:
   adapter and expanded model eval suite without adding API keys to the repo;
 - a public OpenAI wrapper example can run through the same command protocol,
   with CI using deterministic dry-run mode;
+- failed eval or baseline reports can be converted into ignored, sanitized
+  scenario candidate artifacts for dogfood feedback review;
 - workspace crates are package-checked locally but marked `publish = false`
   until the public license and distribution policy are finalized.
 
@@ -207,6 +209,16 @@ Summarize a saved baseline report for local triage:
 cargo run -p mneme-eval -- baseline-summary evals/reports/openai-dry-run-baseline.json
 ```
 
+Create local candidate artifacts from a failed report before promoting any new
+public scenario:
+
+```sh
+cargo run -p mneme-eval -- candidate evals/reports/openai-dry-run-baseline.json \
+  --out-dir evals/candidates/openai \
+  --limit 3
+cargo run -p mneme-eval -- candidate-check evals/candidates/openai
+```
+
 Run the acceptance gate:
 
 ```sh
@@ -251,8 +263,8 @@ Build API docs with warnings denied:
 RUSTDOCFLAGS="-D warnings" cargo doc --workspace --no-deps
 ```
 
-Generated eval reports and local stores are ignored. Public scenarios under
-`evals/scenarios/` are tracked.
+Generated eval reports, candidate artifacts, and local stores are ignored.
+Public scenarios under `evals/scenarios/` are tracked.
 
 CI runs on pull requests and `main` pushes only. Branch pushes do not trigger
 the full gate, which keeps action usage aligned with phase-sized work.
@@ -282,6 +294,7 @@ spec/               feature specs and verification maps
 - [Agent Hook Contract](docs/agent-hook-contract.md)
 - [Agent Runtime Config](docs/agent-runtime-config.md)
 - [Eval Scenario Format](docs/eval-scenario-format.md)
+- [Eval Candidate Workflow](docs/eval-candidate-workflow.md)
 - [Eval Acceptance Gate](docs/eval-harness-acceptance.md)
 - [Eval Target Adapter Contract](docs/eval-target-adapter-contract.md)
 - [Extraction Adapter Contract](docs/extraction-adapter-contract.md)

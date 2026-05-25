@@ -179,3 +179,8 @@ Phase 30 shipped the **Live Provider Baseline Triage MVP** in `v0.36.0`, adding
 `mneme-eval baseline-summary` and live-baseline summary artifacts so failed
 provider runs can be inspected by category, scenario, check, and redaction risk
 before spending more live API budget.
+
+Phase 31 shipped the **Dogfood Scenario Candidate MVP** in `v0.37.0`, adding
+`mneme-eval candidate` and `mneme-eval candidate-check` so failed eval or
+baseline reports can become ignored, sanitized, review-only scenario candidate
+artifacts before any public suite promotion.
