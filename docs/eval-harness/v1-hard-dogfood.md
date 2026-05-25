@@ -72,8 +72,41 @@ evals/runs/v1-hard-dogfood/<run-label>/
 ```
 
 The bundle includes `summary.json`, `scorecard.json`, `regression.json`,
-`seeded-faults.json`, `report.md`, `report.html`, command artifacts, and local
-candidate artifacts.
+`trend.json`, `trend.md`, `seeded-faults.json`, `report.md`, `report.html`,
+command artifacts, local candidate artifacts, official candidate YAML files,
+and a `candidate-check` report for the official candidates.
+
+## Candidate Bridge
+
+Each seeded fault and failed hard workflow is written twice:
+
+- a local JSON triage artifact under `candidates/`;
+- an official `mneme.eval_candidate.v1` YAML artifact under
+  `candidates/official/`.
+
+The runner validates the official directory with `mneme-eval candidate-check`
+and writes the result to:
+
+```text
+candidates/official-candidate-check.json
+```
+
+The official candidates intentionally omit the final `scenario` block. A user
+must still minimize the hard-mode finding into a public scenario before running
+`mneme-eval candidate-promote`.
+
+## Trend History
+
+The runner writes one public-safe history entry per run. By default this is
+inside the ignored run bundle. Use `--history-dir <dir>` to keep a longer local
+history across runs:
+
+```sh
+scripts/v1-hard-dogfood.py --history-dir evals/runs/v1-hard-dogfood-history
+```
+
+`trend.json` compares the current scorecard with the latest passing history
+entry and reports metric deltas plus hard-mode regressions.
 
 ## Decision
 
@@ -87,4 +120,5 @@ Use `decision_status` as the hard-mode product signal:
 
 The full runner executes hundreds of local CLI commands and writes a large
 evidence bundle. CI checks only Python syntax, the hard-mode contract, dataset
-shape, and seeded-fault coverage to avoid unnecessary GitHub Actions cost.
+shape, seeded-fault coverage, official candidate bridge, and trend contract to
+avoid unnecessary GitHub Actions cost.

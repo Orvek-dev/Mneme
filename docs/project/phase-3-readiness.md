@@ -221,3 +221,9 @@ Phase 38 shipped the **V1 Hard Mode + Agent Memory Eval Harness MVP** in
 `v0.44.0`, adding `scripts/v1-hard-dogfood.py` so v1 can be stressed with 100
 normal records, 150 adversarial records, 30 agent handoff workflows, seeded
 faults, regression gates, candidate artifacts, and public-safe reports.
+
+Phase 39 shipped the **Hard Candidate Promotion + Trend History MVP** in
+`v0.45.0`, extending hard dogfood so hard-mode findings are mirrored into
+official `mneme.eval_candidate.v1` YAML candidates, validated with
+`mneme-eval candidate-check`, and recorded as public-safe history entries for
+trend comparison across local runs.

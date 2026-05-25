@@ -27,6 +27,7 @@ EXPECTED_NORMAL_RECORD_COUNT = 100
 EXPECTED_ADVERSARIAL_RECORD_COUNT = 150
 EXPECTED_AGENT_WORKFLOW_COUNT = 30
 RUN_LABEL_RE = re.compile(r"^[A-Za-z0-9._/-]+$")
+CANDIDATE_SCHEMA_VERSION = "mneme.eval_candidate.v1"
 SECRET_LITERALS = [
     "API_KEY=FAKE_TEST_VALUE",
     "TOKEN=FAKE_TOKEN_VALUE",
@@ -85,10 +86,15 @@ def contract() -> dict[str, Any]:
             "summary.json",
             "scorecard.json",
             "regression.json",
+            "trend.json",
             "report.md",
             "report.html",
             "candidates/candidate-index.json",
+            "candidates/official-candidate-index.json",
+            "candidates/official-candidate-check.json",
         ],
+        "candidate_bridge": "hard findings are mirrored into mneme.eval_candidate.v1 YAML files",
+        "history_policy": "history entries are public-safe reduced summaries for local trend comparison",
         "privacy_policy": "all generated data is synthetic and reports are public-safe by default",
         "thresholds": THRESHOLDS,
     }
@@ -398,6 +404,10 @@ class HardDogfoodRun:
         self.commands_dir = self.out_dir / "commands"
         self.reports_dir = self.out_dir / "reports"
         self.candidates_dir = self.out_dir / "candidates"
+        self.official_candidates_dir = self.candidates_dir / "official"
+        self.history_dir = (
+            Path(args.history_dir) if args.history_dir else self.out_dir / "history"
+        )
         self.command_index = 0
         self.command_artifacts: list[dict[str, Any]] = []
         self.claim_id_by_alias: dict[str, str] = {}
@@ -408,6 +418,8 @@ class HardDogfoodRun:
         self.seeded_faults: dict[str, Any] = {}
         self.scorecard: dict[str, Any] = {}
         self.regression: dict[str, Any] = {}
+        self.trend: dict[str, Any] = {}
+        self.official_candidate_check: dict[str, Any] = {}
         self.mneme_bin = Path(args.mneme_bin) if args.mneme_bin else ROOT / "target/debug/mneme"
 
     def prepare(self) -> None:
@@ -420,6 +432,8 @@ class HardDogfoodRun:
         self.commands_dir.mkdir(parents=True)
         self.reports_dir.mkdir(parents=True)
         self.candidates_dir.mkdir(parents=True)
+        self.official_candidates_dir.mkdir(parents=True)
+        self.history_dir.mkdir(parents=True, exist_ok=True)
         self.workspace_dir.mkdir(parents=True)
         write_json(
             self.out_dir / "dataset-summary.json",
@@ -775,18 +789,41 @@ class HardDogfoodRun:
         for failure in self.failures:
             self.write_candidate_artifact(failure)
         candidates = sorted(self.candidates_dir.glob("*.json"))
+        official_candidates = sorted(self.official_candidates_dir.glob("*.candidate.yaml"))
         index = {
             "schema_version": SCHEMA_VERSION,
             "command": "v1-hard-dogfood-candidate-index",
             "candidate_count": len(candidates),
+            "official_candidate_count": len(official_candidates),
             "candidates": [path.name for path in candidates],
+            "official_candidates": [path.name for path in official_candidates],
+            "official_candidate_index": str(
+                self.candidates_dir / "official-candidate-index.json"
+            ),
             "recommended_next_actions": [
                 "review each candidate locally before promoting a public scenario",
+                "run mneme-eval candidate-check on candidates/official before sharing candidates",
                 "convert only minimal, public-safe reproductions into evals/scenarios",
                 "rerun hard dogfood after any promoted regression is fixed",
             ],
         }
         write_json(self.candidates_dir / "candidate-index.json", index)
+        official_index = {
+            "schema_version": SCHEMA_VERSION,
+            "command": "v1-hard-dogfood-official-candidate-index",
+            "candidate_schema_version": CANDIDATE_SCHEMA_VERSION,
+            "candidate_count": len(official_candidates),
+            "candidates": [path.name for path in official_candidates],
+            "candidate_check_report": str(
+                self.candidates_dir / "official-candidate-check.json"
+            ),
+            "recommended_next_actions": [
+                "run `mneme-eval candidate-check candidates/official` before editing candidates",
+                "add a reviewed scenario block only after minimizing the hard-mode finding",
+                "use `mneme-eval candidate-promote` only after candidate-check passes",
+            ],
+        }
+        write_json(self.candidates_dir / "official-candidate-index.json", official_index)
 
     def write_candidate_artifact(self, failure: dict[str, Any]) -> None:
         candidate_id = sanitize_identifier(f"hard-{failure['id']}")
@@ -813,6 +850,34 @@ class HardDogfoodRun:
             ],
         }
         write_json(self.candidates_dir / f"{candidate_id}.json", artifact)
+        write_official_candidate_yaml(
+            self.official_candidates_dir / f"{candidate_id}.candidate.yaml",
+            candidate_id,
+            failure,
+        )
+
+    def validate_official_candidates(self) -> None:
+        report_path = self.candidates_dir / "official-candidate-check.json"
+        self.run_external(
+            "official-candidate-check",
+            [
+                "cargo",
+                "run",
+                "-q",
+                "-p",
+                "mneme-eval",
+                "--",
+                "candidate-check",
+                str(self.official_candidates_dir),
+                "--report",
+                str(report_path),
+                "--json",
+            ],
+        )
+        report = read_json(report_path)
+        if not report.get("ok"):
+            raise HardDogfoodFailure("official hard candidate check failed")
+        self.official_candidate_check = report
 
     def build_regression(self) -> None:
         previous_summary = read_json(Path(self.args.compare_summary)) if self.args.compare_summary else None
@@ -827,6 +892,27 @@ class HardDogfoodRun:
         }
         write_json(self.out_dir / "regression.json", self.regression)
 
+    def write_history_and_trend(self, status: str, preflight: dict[str, Any]) -> None:
+        previous_entries = load_history_entries(self.history_dir)
+        if self.args.compare_summary:
+            previous_entries.append(history_entry_from_summary(read_json(Path(self.args.compare_summary))))
+        previous_entries = [entry for entry in previous_entries if entry]
+        previous_entries.sort(key=lambda entry: entry.get("generated_at", ""))
+        current = history_entry(
+            run_label=self.run_label,
+            out_dir=self.out_dir,
+            status=status,
+            preflight=preflight,
+            scorecard=self.scorecard,
+            seeded_faults=self.seeded_faults,
+            regression=self.regression,
+        )
+        history_path = self.history_dir / f"{current['generated_at_slug']}-{sanitize_identifier(self.run_label)}.json"
+        write_json(history_path, current)
+        self.trend = build_trend_report(previous_entries, current, history_path)
+        write_json(self.out_dir / "trend.json", self.trend)
+        write_trend_markdown(self.out_dir / "trend.md", self.trend)
+
     def write_reports(self, status: str, preflight: dict[str, Any], error: str | None = None) -> dict[str, Any]:
         passed_workflows = sum(
             1 for workflow in self.workflow_results if workflow["status"] == "passed"
@@ -835,9 +921,13 @@ class HardDogfoodRun:
             1 for workflow in self.workflow_results if workflow["status"] == "failed"
         )
         candidate_index = read_json(self.candidates_dir / "candidate-index.json")
+        official_candidate_index = read_json(self.candidates_dir / "official-candidate-index.json")
         decision_status = (
             "v1_hard_dogfood_passed"
-            if status == "passed" and failed_workflows == 0 and self.regression.get("ok")
+            if status == "passed"
+            and failed_workflows == 0
+            and self.regression.get("ok")
+            and self.official_candidate_check.get("ok")
             else "blocked"
         )
         summary = {
@@ -857,15 +947,31 @@ class HardDogfoodRun:
             "scorecard": self.scorecard,
             "seeded_faults": self.seeded_faults,
             "regression": self.regression,
+            "trend": self.trend,
             "candidate_count": candidate_index["candidate_count"],
+            "official_candidate_count": official_candidate_index["candidate_count"],
+            "official_candidate_check": {
+                "ok": self.official_candidate_check.get("ok"),
+                "checked_count": self.official_candidate_check.get("checked_count"),
+                "valid": self.official_candidate_check.get("valid"),
+                "invalid": self.official_candidate_check.get("invalid"),
+            },
             "reports": {
                 "dataset_summary": str(self.out_dir / "dataset-summary.json"),
                 "scorecard": str(self.out_dir / "scorecard.json"),
                 "seeded_faults": str(self.out_dir / "seeded-faults.json"),
                 "regression": str(self.out_dir / "regression.json"),
+                "trend": str(self.out_dir / "trend.json"),
                 "markdown": str(self.out_dir / "report.md"),
                 "html": str(self.out_dir / "report.html"),
                 "candidate_index": str(self.candidates_dir / "candidate-index.json"),
+                "official_candidate_index": str(
+                    self.candidates_dir / "official-candidate-index.json"
+                ),
+                "official_candidate_check": str(
+                    self.candidates_dir / "official-candidate-check.json"
+                ),
+                "history_dir": str(self.history_dir),
                 "commands": str(self.commands_dir),
             },
             "recommended_next_actions": recommended_next_actions(decision_status),
@@ -1032,6 +1138,40 @@ def seeded_fault_has_handoff_miss() -> bool:
     return expected not in context_texts_after_end
 
 
+def write_official_candidate_yaml(path: Path, candidate_id: str, failure: dict[str, Any]) -> None:
+    check = str(failure.get("metric") or failure.get("category") or "hard_dogfood_failure")
+    reason = str(failure.get("reason") or "hard dogfood failure")
+    scenario_id = sanitize_identifier(str(failure.get("id") or candidate_id))
+    lines = [
+        f"schema_version: {CANDIDATE_SCHEMA_VERSION}",
+        f"id: {candidate_id}",
+        "status: proposed",
+        "source:",
+        "  report_kind: hard-dogfood",
+        "  report: summary.json",
+        "  target: mneme-v1",
+        "  suite: dogfood",
+        f"  scenario_id: {scenario_id}",
+        "failure:",
+        "  failed_attempts: 1",
+        "  failed_checks:",
+        f"    - check: {yaml_string(check)}",
+        "      count: 1",
+        "redaction:",
+        "  sanitized: false",
+        "  finding_codes: []",
+        "promotion_checklist:",
+        f"  - {yaml_string('Confirm the candidate contains no private user data, project paths, or provider secrets.')}",
+        f"  - {yaml_string('Minimize the hard-mode finding to one deterministic public scenario.')}",
+        f"  - {yaml_string(f'Preserve the source reason: {reason}')}",
+        f"  - {yaml_string('Run mneme-eval candidate-check before sharing or promoting the candidate.')}",
+        f"  - {yaml_string('Add a reviewed scenario block before running mneme-eval candidate-promote.')}",
+        "",
+    ]
+    path.parent.mkdir(parents=True, exist_ok=True)
+    path.write_text("\n".join(lines), encoding="utf-8")
+
+
 def regression_gates(
     scorecard: dict[str, Any],
     seeded_faults: dict[str, Any],
@@ -1103,6 +1243,219 @@ def regression_gates(
     return gates
 
 
+def history_entry(
+    *,
+    run_label: str,
+    out_dir: Path,
+    status: str,
+    preflight: dict[str, Any],
+    scorecard: dict[str, Any],
+    seeded_faults: dict[str, Any],
+    regression: dict[str, Any],
+) -> dict[str, Any]:
+    generated_at = time.strftime("%Y-%m-%dT%H:%M:%SZ", time.gmtime())
+    return {
+        "schema_version": SCHEMA_VERSION,
+        "command": "v1-hard-dogfood-history-entry",
+        "generated_at": generated_at,
+        "generated_at_slug": generated_at.replace(":", "").replace("-", "").replace("T", "-").replace("Z", "Z"),
+        "run_label": run_label,
+        "version": current_version(),
+        "out_dir": str(out_dir),
+        "status": status,
+        "decision_status": "v1_hard_dogfood_passed"
+        if status == "passed" and regression.get("ok")
+        else "blocked",
+        "preflight_decision": preflight.get("decision_status"),
+        "scorecard": reduced_scorecard(scorecard),
+        "seeded_fault_detection_rate": seeded_faults.get("detection_rate", 0.0),
+        "regression_ok": regression.get("ok", False),
+    }
+
+
+def history_entry_from_summary(summary: dict[str, Any]) -> dict[str, Any]:
+    return {
+        "schema_version": SCHEMA_VERSION,
+        "command": "v1-hard-dogfood-history-entry",
+        "generated_at": summary.get("generated_at", "0000-00-00T00:00:00Z"),
+        "generated_at_slug": "compare-summary",
+        "run_label": summary.get("run_label", "compare-summary"),
+        "version": summary.get("version", "unknown"),
+        "out_dir": summary.get("out_dir"),
+        "status": summary.get("status"),
+        "decision_status": summary.get("decision_status"),
+        "preflight_decision": (summary.get("preflight") or {}).get("decision_status"),
+        "scorecard": reduced_scorecard(summary.get("scorecard") or {}),
+        "seeded_fault_detection_rate": (summary.get("seeded_faults") or {}).get(
+            "detection_rate", 0.0
+        ),
+        "regression_ok": (summary.get("regression") or {}).get("ok", False),
+    }
+
+
+def reduced_scorecard(scorecard: dict[str, Any]) -> dict[str, Any]:
+    keys = [
+        "recall_at_k",
+        "precision_at_k",
+        "scope_leak_count",
+        "secret_leak_count",
+        "citation_coverage",
+        "handoff_success_rate",
+        "agent_memory_score",
+        "stale_reuse_count",
+        "agent_attribution_error_count",
+    ]
+    return {key: scorecard.get(key, 0) for key in keys}
+
+
+def load_history_entries(history_dir: Path) -> list[dict[str, Any]]:
+    if not history_dir.exists():
+        return []
+    entries = []
+    for path in sorted(history_dir.glob("*.json")):
+        if path.name in {"trend.json", "summary.json"}:
+            continue
+        try:
+            entry = read_json(path)
+        except (OSError, json.JSONDecodeError):
+            continue
+        if (
+            entry.get("command") == "v1-hard-dogfood-history-entry"
+            and entry.get("decision_status") == "v1_hard_dogfood_passed"
+            and "recall_at_k" in (entry.get("scorecard") or {})
+        ):
+            entries.append(entry)
+    return entries
+
+
+def build_trend_report(
+    previous_entries: list[dict[str, Any]],
+    current: dict[str, Any],
+    history_path: Path,
+) -> dict[str, Any]:
+    previous = previous_entries[-1] if previous_entries else None
+    metric_deltas = []
+    regression_detected = False
+    if previous:
+        before_scorecard = previous.get("scorecard") or {}
+        after_scorecard = current.get("scorecard") or {}
+        for metric in [
+            "recall_at_k",
+            "precision_at_k",
+            "citation_coverage",
+            "handoff_success_rate",
+            "agent_memory_score",
+        ]:
+            before = float(before_scorecard.get(metric, 0.0))
+            after = float(after_scorecard.get(metric, 0.0))
+            delta = round(after - before, 4)
+            status = "improved" if delta > 0 else "regressed" if delta < 0 else "unchanged"
+            if delta < 0:
+                regression_detected = True
+            metric_deltas.append(
+                {"metric": metric, "before": before, "after": after, "delta": delta, "status": status}
+            )
+        for metric in [
+            "scope_leak_count",
+            "secret_leak_count",
+            "stale_reuse_count",
+            "agent_attribution_error_count",
+        ]:
+            before = int(before_scorecard.get(metric, 0))
+            after = int(after_scorecard.get(metric, 0))
+            delta = after - before
+            status = "improved" if delta < 0 else "regressed" if delta > 0 else "unchanged"
+            if delta > 0:
+                regression_detected = True
+            metric_deltas.append(
+                {"metric": metric, "before": before, "after": after, "delta": delta, "status": status}
+            )
+    return {
+        "schema_version": SCHEMA_VERSION,
+        "command": "v1-hard-dogfood-trend",
+        "status": "compared" if previous else "baseline_recorded",
+        "ok": not regression_detected,
+        "history_path": str(history_path),
+        "history_entry_count": len(previous_entries) + 1,
+        "current": {
+            "run_label": current.get("run_label"),
+            "version": current.get("version"),
+            "decision_status": current.get("decision_status"),
+        },
+        "previous": None
+        if previous is None
+        else {
+            "run_label": previous.get("run_label"),
+            "version": previous.get("version"),
+            "decision_status": previous.get("decision_status"),
+        },
+        "regression_detected": regression_detected,
+        "metric_deltas": metric_deltas,
+        "recommended_next_actions": trend_next_actions(regression_detected, bool(previous)),
+    }
+
+
+def trend_next_actions(regression_detected: bool, compared: bool) -> list[str]:
+    if not compared:
+        return [
+            "keep this history entry as the first local hard-mode baseline",
+            "rerun with --history-dir to compare future hard dogfood runs",
+        ]
+    if regression_detected:
+        return [
+            "review metric_deltas before promoting v1 changes",
+            "turn regressed categories into hard dogfood candidates",
+            "rerun hard dogfood after the regression is fixed",
+        ]
+    return [
+        "history comparison has no hard-mode regression",
+        "use this trend report as release evidence with the hard dogfood summary",
+    ]
+
+
+def check_trend_report() -> dict[str, Any]:
+    previous = {
+        "schema_version": SCHEMA_VERSION,
+        "command": "v1-hard-dogfood-history-entry",
+        "generated_at": "2026-05-25T00:00:00Z",
+        "run_label": "synthetic-before",
+        "version": "0.0.0",
+        "decision_status": "v1_hard_dogfood_passed",
+        "scorecard": {
+            "recall_at_k": 0.95,
+            "precision_at_k": 0.95,
+            "citation_coverage": 1.0,
+            "handoff_success_rate": 0.95,
+            "agent_memory_score": 0.95,
+            "scope_leak_count": 0,
+            "secret_leak_count": 0,
+            "stale_reuse_count": 0,
+            "agent_attribution_error_count": 0,
+        },
+    }
+    current = {
+        "schema_version": SCHEMA_VERSION,
+        "command": "v1-hard-dogfood-history-entry",
+        "generated_at": "2026-05-25T00:01:00Z",
+        "generated_at_slug": "synthetic-after",
+        "run_label": "synthetic-after",
+        "version": "0.0.1",
+        "decision_status": "v1_hard_dogfood_passed",
+        "scorecard": {
+            "recall_at_k": 1.0,
+            "precision_at_k": 1.0,
+            "citation_coverage": 1.0,
+            "handoff_success_rate": 1.0,
+            "agent_memory_score": 1.0,
+            "scope_leak_count": 0,
+            "secret_leak_count": 0,
+            "stale_reuse_count": 0,
+            "agent_attribution_error_count": 0,
+        },
+    }
+    return build_trend_report([previous], current, Path("synthetic-history.json"))
+
+
 def gate(name: str, passed: bool, detail: str) -> dict[str, Any]:
     return {"name": name, "status": "pass" if passed else "fail", "detail": detail}
 
@@ -1133,6 +1486,7 @@ def write_markdown_report(path: Path, summary: dict[str, Any]) -> None:
         f"- Passed workflows: `{summary.get('passed_workflows')}`",
         f"- Failed workflows: `{summary.get('failed_workflows')}`",
         f"- Candidate artifacts: `{summary.get('candidate_count')}`",
+        f"- Official candidate artifacts: `{summary.get('official_candidate_count')}`",
         "",
         "## Scorecard",
         "",
@@ -1156,6 +1510,18 @@ def write_markdown_report(path: Path, summary: dict[str, Any]) -> None:
         lines.append(
             f"| `{item.get('name')}` | `{item.get('status')}` | {item.get('detail')} |"
         )
+    trend = summary.get("trend") or {}
+    lines.extend(
+        [
+            "",
+            "## Trend",
+            "",
+            f"- Status: `{trend.get('status')}`",
+            f"- Regression detected: `{trend.get('regression_detected')}`",
+            f"- History entries: `{trend.get('history_entry_count')}`",
+            "",
+        ]
+    )
     lines.append("")
     path.write_text("\n".join(lines), encoding="utf-8")
 
@@ -1202,14 +1568,38 @@ def write_html_report(path: Path, summary: dict[str, Any]) -> None:
   <p>Records: <code>{summary.get('normal_record_count')}</code> normal,
   <code>{summary.get('adversarial_record_count')}</code> adversarial.
   Workflows: <code>{summary.get('agent_workflow_count')}</code>.</p>
+  <p>Official candidates: <code>{summary.get('official_candidate_count')}</code>.</p>
   <h2>Scorecard</h2>
   <table><tbody>{metric_rows}</tbody></table>
   <h2>Regression Gates</h2>
   <table><thead><tr><th>Gate</th><th>Status</th><th>Detail</th></tr></thead><tbody>{gate_rows}</tbody></table>
+  <h2>Trend</h2>
+  <p>Status: <code>{html.escape(str((summary.get('trend') or {}).get('status')))}</code>,
+  regression detected: <code>{html.escape(str((summary.get('trend') or {}).get('regression_detected')))}</code>.</p>
 </body>
 </html>
 """
     path.write_text(document, encoding="utf-8")
+
+
+def write_trend_markdown(path: Path, trend: dict[str, Any]) -> None:
+    lines = [
+        "# Mneme V1 Hard Dogfood Trend",
+        "",
+        f"- Status: `{trend.get('status')}`",
+        f"- Regression detected: `{trend.get('regression_detected')}`",
+        f"- History entries: `{trend.get('history_entry_count')}`",
+        "",
+        "| Metric | Before | After | Delta | Status |",
+        "|---|---:|---:|---:|---|",
+    ]
+    for item in trend.get("metric_deltas", []):
+        lines.append(
+            f"| `{item.get('metric')}` | `{item.get('before')}` | `{item.get('after')}` | "
+            f"`{item.get('delta')}` | `{item.get('status')}` |"
+        )
+    lines.append("")
+    path.write_text("\n".join(lines), encoding="utf-8")
 
 
 def context_texts(report: dict[str, Any]) -> list[str]:
@@ -1238,6 +1628,17 @@ def ratio(numerator: int, denominator: int) -> float:
     return numerator / denominator
 
 
+def current_version() -> str:
+    cargo = (ROOT / "Cargo.toml").read_text(encoding="utf-8")
+    match = re.search(r'(?m)^version = "([^"]+)"', cargo)
+    return match.group(1) if match else "unknown"
+
+
+def yaml_string(value: str) -> str:
+    escaped = value.replace("\\", "\\\\").replace('"', '\\"')
+    return f'"{escaped}"'
+
+
 def sanitize_identifier(value: str) -> str:
     sanitized = []
     previous_dash = False
@@ -1264,6 +1665,10 @@ def parse_args(argv: list[str]) -> argparse.Namespace:
     parser.add_argument("--out-dir", help="Explicit output directory for the evidence bundle.")
     parser.add_argument("--mneme-bin", help="Use an existing mneme binary instead of target/debug/mneme.")
     parser.add_argument("--compare-summary", help="Previous hard dogfood summary.json for regression comparison.")
+    parser.add_argument(
+        "--history-dir",
+        help="Directory for public-safe hard dogfood history entries used by trend reports.",
+    )
     parser.add_argument("--force", action="store_true", help="Replace an existing output directory.")
     parser.add_argument("--skip-preflight", action="store_true", help="Skip scripts/v1-dogfood.sh preflight.")
     parser.add_argument("--no-build", action="store_true", help="Do not build mneme-cli before running.")
@@ -1278,6 +1683,16 @@ def parse_args(argv: list[str]) -> argparse.Namespace:
         action="store_true",
         help="Validate seeded-fault detector coverage without running CLI workflows.",
     )
+    parser.add_argument(
+        "--check-official-candidate",
+        action="store_true",
+        help="Print one official hard candidate YAML sample for contract checks.",
+    )
+    parser.add_argument(
+        "--check-trend",
+        action="store_true",
+        help="Print a synthetic hard dogfood trend report for contract checks.",
+    )
     return parser.parse_args(argv)
 
 
@@ -1290,6 +1705,30 @@ def main(argv: list[str]) -> int:
         report = seeded_fault_report()
         print(json.dumps(report, ensure_ascii=False, indent=2, sort_keys=True))
         return 0 if report["ok"] else 1
+    if args.check_official_candidate:
+        failure = seeded_fault_report()["faults"][0]
+        candidate_id = sanitize_identifier(f"hard-seeded-{failure['id']}")
+        sample_path = Path(os.environ.get("TMPDIR", "/tmp")) / f"{candidate_id}.candidate.yaml"
+        write_official_candidate_yaml(
+            sample_path,
+            candidate_id,
+            {
+                "id": f"seeded-{failure['id']}",
+                "category": "seeded_fault",
+                "reason": failure["detected_by"],
+                "metric": failure["metric"],
+            },
+        )
+        print(sample_path.read_text(encoding="utf-8"), end="")
+        try:
+            sample_path.unlink()
+        except OSError:
+            pass
+        return 0
+    if args.check_trend:
+        report = check_trend_report()
+        print(json.dumps(report, ensure_ascii=False, indent=2, sort_keys=True))
+        return 0 if report["ok"] and report["status"] == "compared" else 1
 
     normal_records = load_manual_records()
     adversarial_records = build_adversarial_records()
@@ -1309,7 +1748,9 @@ def main(argv: list[str]) -> int:
         run.run_workflows()
         run.run_seeded_faults()
         run.write_failure_candidates()
+        run.validate_official_candidates()
         run.build_regression()
+        run.write_history_and_trend("passed", preflight)
         report = run.write_reports("passed", preflight)
         print(f"v1-hard-dogfood: wrote {run.out_dir}")
         print(f"v1-hard-dogfood: summary {run.out_dir / 'summary.json'}")
@@ -1324,6 +1765,10 @@ def main(argv: list[str]) -> int:
                 run.scorecard = MetricAccumulator().scorecard()
             if not run.regression:
                 run.build_regression()
+            if not run.official_candidate_check:
+                run.validate_official_candidates()
+            if not run.trend:
+                run.write_history_and_trend("failed", preflight)
             run.write_reports("failed", preflight, error=str(exc))
         except Exception as summary_exc:  # noqa: BLE001 - preserve original failure.
             print(f"v1-hard-dogfood: failed while writing summary: {summary_exc}", file=sys.stderr)

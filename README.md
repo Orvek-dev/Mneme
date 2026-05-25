@@ -61,7 +61,8 @@ Mneme is pre-1.0. The useful surface today is local development and evaluation:
   and 25 workflow checks before product promotion;
 - v1 hard dogfood can run 100 normal records, 150 adversarial records, and 30
   agent handoff workflows with scorecards, seeded-fault checks, regression
-  gates, and public-safe reports;
+  gates, official candidate-check artifacts, trend history, and public-safe
+  reports;
 - real-use v1 pilots can use a local-only workspace and sanitized feedback
   triage before any public issue or eval candidate is created;
 - workspace crates are package-checked locally but marked `publish = false`
