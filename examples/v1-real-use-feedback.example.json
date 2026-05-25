@@ -1,0 +1,28 @@
+{
+  "schema_version": 1,
+  "pilot_label": "public-example",
+  "findings": [
+    {
+      "id": "pilot-001",
+      "title": "Context recall missed release evidence preference",
+      "category": "recall_miss",
+      "severity": "medium",
+      "summary": "A release planning task did not surface the expected release-evidence preference.",
+      "expected": "The context pack should include a release-evidence memory.",
+      "actual": "The context pack returned lower-relevance release workflow memories first.",
+      "next_action": "candidate",
+      "notes": "Synthetic example with no private project text."
+    },
+    {
+      "id": "pilot-002",
+      "title": "Pilot runbook needs a shorter setup path",
+      "category": "docs_gap",
+      "severity": "low",
+      "summary": "The pilot setup steps are correct but require too much command scanning.",
+      "expected": "A first-time user can find the minimal pilot start command quickly.",
+      "actual": "The setup guidance is split across multiple dogfood documents.",
+      "next_action": "docs",
+      "notes": "Synthetic example with no private project text."
+    }
+  ]
+}

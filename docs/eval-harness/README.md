@@ -29,6 +29,7 @@ Useful commands:
 - [V1 Dogfood Execution](v1-dogfood-execution.md)
 - [V1 Dogfood Triage](v1-dogfood-triage.md)
 - [V1 Manual Dogfood](v1-manual-dogfood.md)
+- [V1 Real-Use Pilot](v1-real-use-pilot.md)
 
 Useful commands:
 
@@ -39,3 +40,4 @@ Useful commands:
 - `mneme-eval dogfood-summary <bundle-dir>`
 - `scripts/v1-dogfood.sh`
 - `scripts/v1-manual-dogfood.py`
+- `scripts/v1-real-use-pilot.py`
