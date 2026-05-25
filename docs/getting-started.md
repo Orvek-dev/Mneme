@@ -139,6 +139,7 @@ MNEME_OPENAI_DRY_RUN=1 cargo run -p mneme-eval -- baseline --suite model \
   --report evals/reports/openai-dry-run-baseline.json
 
 cargo run -p mneme-eval -- baseline-gate evals/reports/openai-dry-run-baseline.json
+cargo run -p mneme-eval -- baseline-summary evals/reports/openai-dry-run-baseline.json
 ```
 
 `evals/reports/` is ignored by git.

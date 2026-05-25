@@ -43,6 +43,18 @@ category pass rate `1.0`, no failed iterations, no failed scenario runs, provide
 and model labels present, command extractor target metadata present, and no
 obvious secret or local-path redaction findings.
 
+Summarize a saved report before deciding what to inspect next:
+
+```sh
+cargo run -p mneme-eval -- baseline-summary evals/reports/openai-dry-run-baseline.json
+```
+
+Summary output includes triage status, redaction findings, top failed
+categories, top failed scenarios, top failed checks, and recommended next
+actions. `baseline-summary` exits successfully for failed baseline reports so
+the failure can be inspected locally; it is not a replacement for
+`baseline-gate`.
+
 ## Live Local Baseline
 
 Live provider calls are local and opt-in. Keep credentials in the shell or an
@@ -76,6 +88,13 @@ For live runs, require the live-provider metadata and a safe run label:
 cargo run -p mneme-eval -- baseline-gate evals/reports/openai-live-baseline.json \
   --require-live-provider \
   --require-run-label
+```
+
+Write a local triage summary next to the live report:
+
+```sh
+cargo run -p mneme-eval -- baseline-summary evals/reports/openai-live-baseline.json \
+  --report evals/reports/openai-live-baseline.summary.json
 ```
 
 ## MVP Acceptance

@@ -106,7 +106,8 @@ The full local gate runs:
 ```
 
 That gate includes the Rustdoc build, unit tests, CLI smoke checks, eval suites,
-baseline checks, public-safety checks, and package assembly checks.
+baseline checks, baseline-summary triage checks, public-safety checks, and
+package assembly checks.
 
 ## Change Rule
 
