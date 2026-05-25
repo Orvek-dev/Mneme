@@ -1454,20 +1454,22 @@ fn run_event_command(
 ) -> Result<(), CliError> {
     let store_path = resolve_store_path(&options.common)?;
     let extractor_name = options.extractor.name().to_owned();
-    let extractor = build_extractor(&options.extractor)?;
     let mut engine = load_engine(&store_path)?;
-    engine
-        .ingest_event_with_extractor(
-            EventInput {
-                speaker_id: options.speaker_id,
-                actor_agent_id: options.actor_agent_id,
-                text: event_text,
-                scope: options.scope,
-                trust_level: options.trust_level,
-            },
-            extractor.as_ref(),
-        )
-        .map_err(CliError::extractor)?;
+    let input = EventInput {
+        speaker_id: options.speaker_id,
+        actor_agent_id: options.actor_agent_id,
+        text: event_text,
+        scope: options.scope,
+        trust_level: options.trust_level,
+    };
+    match &options.extractor {
+        ExtractorOptions::Rule => engine.ingest_event(input),
+        ExtractorOptions::Command { .. } => {
+            let extractor = build_extractor(&options.extractor)?;
+            engine.ingest_event_with_extractor(input, extractor.as_ref())
+        }
+    }
+    .map_err(CliError::extractor)?;
     persist_engine(&store_path, &engine)?;
     let snapshot = engine.snapshot();
     let report = EventCommandReport {

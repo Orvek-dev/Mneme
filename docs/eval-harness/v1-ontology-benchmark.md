@@ -106,9 +106,14 @@ on natural-language ontology extraction, entity resolution, attributes, temporal
 state, and multi-hop context. Those gaps are the input for later v1 ontology
 design, not a reason to change v1 before measuring it.
 
-`gap-analysis.json` maps low scores into implementation buckets such as
+When v1 is below target, `gap-analysis.json` maps low scores into implementation
+buckets such as
 `natural_language_extraction`, `relation_mapping`, `entity_resolution`,
 `attribute_capture`, `temporal_state`, `multi_hop_context`, `scope_ownership`,
 `provenance`, and `safety`. A complete v1 ontology run should report
 `v1_ontology_ready`; otherwise the gap analysis names the next development
 phase.
+
+As of the natural-language ontology extraction phase, the full public fixture is
+also run in `scripts/quality-gate.sh` against a temporary output directory and
+must report `ontology_benchmark_passed`.

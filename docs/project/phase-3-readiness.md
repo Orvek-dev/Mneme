@@ -238,3 +238,8 @@ Phase 41 shipped the **V1 Completion Gap Analysis MVP** in `v0.47.0`, adding
 public v1 completion criteria and ontology gap-analysis outputs that turn raw
 benchmark misses into capability-level implementation priorities before the
 next v1 completion phase.
+
+Phase 42 shipped the **Natural-Language Ontology Extraction MVP** in `v0.48.0`,
+adding the default v1 schema-lite natural-language extractor and
+source-event-aware retrieval so the public ontology benchmark reports
+`ontology_benchmark_passed` and `v1_ontology_ready`.
