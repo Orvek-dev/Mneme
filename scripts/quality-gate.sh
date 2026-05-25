@@ -15,10 +15,17 @@ cargo test --workspace --all-targets
 RUSTDOCFLAGS="-D warnings" cargo doc --workspace --no-deps
 python3 -m py_compile wrappers/openai_extractor.py
 python3 -m py_compile scripts/v1-manual-dogfood.py
+python3 -m py_compile scripts/v1-real-use-pilot.py
 MANUAL_DOGFOOD_DATASET="${TMP_ROOT}/mneme-quality-gate-manual-dogfood-dataset.json"
 scripts/v1-manual-dogfood.py --check-dataset > "$MANUAL_DOGFOOD_DATASET"
 grep -q '"mock_record_count": 100' "$MANUAL_DOGFOOD_DATASET"
 grep -q '"workflow_count": 25' "$MANUAL_DOGFOOD_DATASET"
+REAL_USE_CONTRACT="${TMP_ROOT}/mneme-quality-gate-real-use-contract.json"
+REAL_USE_FEEDBACK="${TMP_ROOT}/mneme-quality-gate-real-use-feedback.json"
+scripts/v1-real-use-pilot.py --check-contract > "$REAL_USE_CONTRACT"
+grep -q '"command": "v1-real-use-pilot-contract"' "$REAL_USE_CONTRACT"
+scripts/v1-real-use-pilot.py --check-feedback examples/v1-real-use-feedback.example.json > "$REAL_USE_FEEDBACK"
+grep -q '"decision_status": "pilot_feedback_triaged"' "$REAL_USE_FEEDBACK"
 
 cargo run -p mneme-cli -- doctor
 cargo run -p mneme-eval -- doctor

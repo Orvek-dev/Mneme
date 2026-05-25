@@ -73,6 +73,9 @@ eval update land in the same PR.
 - `scripts/v1-manual-dogfood.py` runs a local-only manual dogfood protocol with
   100 public-safe synthetic records and 25 workflow checks, writing ignored
   evidence under `evals/runs/v1-manual-dogfood/`.
+- `scripts/v1-real-use-pilot.py` prepares an ignored local pilot workspace and
+  sanitizes structured pilot feedback before any public issue or eval candidate
+  is created.
 - The opt-in `model` suite covers command-backed extraction quality for durable
   preferences, no-claim cases, secret blocking, and lifecycle correction.
 - The `core`, `runtime`, `agent`, and `dogfood` suites must pass for `fake`
@@ -118,6 +121,8 @@ eval update land in the same PR.
 - `scripts/quality-gate.sh` is the local and release verification entry point.
 - Full manual dogfood evidence is local-only; CI checks the dataset shape and
   script syntax to avoid unnecessary GitHub Actions cost.
+- Full real-use pilot evidence is local-only; CI checks the feedback contract,
+  example feedback, and script syntax.
 - `RUSTDOCFLAGS="-D warnings" cargo doc --workspace --no-deps` must pass before
   release.
 - `scripts/public-safety-check.sh` guards against known private/public-safety
