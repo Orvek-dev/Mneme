@@ -40,6 +40,28 @@ ONTOLOGY_TARGETS = {
     "provenance_coverage": 1.0,
     "context_recall_at_k": 0.8,
 }
+CAPABILITY_ORDER = [
+    "natural_language_extraction",
+    "relation_mapping",
+    "entity_resolution",
+    "attribute_capture",
+    "temporal_state",
+    "multi_hop_context",
+    "scope_ownership",
+    "provenance",
+    "safety",
+]
+CAPABILITY_LABELS = {
+    "natural_language_extraction": "Natural-language extraction",
+    "relation_mapping": "Relation mapping",
+    "entity_resolution": "Entity resolution",
+    "attribute_capture": "Attribute capture",
+    "temporal_state": "Temporal state",
+    "multi_hop_context": "Multi-hop context recall",
+    "scope_ownership": "Scope ownership",
+    "provenance": "Provenance coverage",
+    "safety": "Safety and leak prevention",
+}
 
 
 class BenchmarkFailure(RuntimeError):
@@ -87,6 +109,11 @@ def contract() -> dict[str, Any]:
             "ontology_design_needed instead of a process failure"
         ),
         "privacy_policy": "fixture data is synthetic and public-safe; run bundles are ignored by git",
+        "gap_analysis": {
+            "command": "v1-ontology-benchmark-gap-analysis",
+            "capability_buckets": CAPABILITY_ORDER,
+            "readiness_statuses": ["v1_ontology_ready", "v1_ontology_design_needed"],
+        },
     }
 
 
@@ -331,6 +358,7 @@ class BenchmarkRun:
         self.command_artifacts: list[dict[str, Any]] = []
         self.case_runs: list[dict[str, Any]] = []
         self.scorecard: dict[str, Any] = {}
+        self.gap_analysis: dict[str, Any] = {}
 
     def prepare(self) -> None:
         if self.out_dir.exists():
@@ -356,6 +384,9 @@ class BenchmarkRun:
         write_json(self.reports_dir / "case-runs.json", {"cases": self.case_runs})
         self.scorecard = score_benchmark(self.fixture, self.case_runs)
         write_json(self.out_dir / "scorecard.json", self.scorecard)
+        self.gap_analysis = build_gap_analysis(self.fixture, self.scorecard)
+        write_json(self.out_dir / "gap-analysis.json", self.gap_analysis)
+        write_gap_analysis_markdown(self.out_dir / "gap-analysis.md", self.gap_analysis)
 
     def run_case(self, case: dict[str, Any]) -> dict[str, Any]:
         case_dir = self.reports_dir / case["id"]
@@ -476,17 +507,24 @@ class BenchmarkRun:
             "out_dir": str(self.out_dir),
             "fixture": self.fixture_summary,
             "scorecard": self.scorecard,
+            "gap_analysis": self.gap_analysis,
             "reports": {
                 "fixture": str(self.out_dir / "fixture.json"),
                 "fixture_summary": str(self.out_dir / "fixture-summary.json"),
                 "scorecard": str(self.out_dir / "scorecard.json"),
+                "gap_analysis": str(self.out_dir / "gap-analysis.json"),
+                "gap_analysis_markdown": str(self.out_dir / "gap-analysis.md"),
                 "case_runs": str(self.reports_dir / "case-runs.json"),
                 "markdown": str(self.out_dir / "report.md"),
                 "html": str(self.out_dir / "report.html"),
                 "commands": str(self.commands_dir),
             },
             "command_artifacts": self.command_artifacts,
-            "recommended_next_actions": recommended_next_actions(decision_status, self.scorecard),
+            "recommended_next_actions": recommended_next_actions(
+                decision_status,
+                self.scorecard,
+                self.gap_analysis,
+            ),
         }
         if error:
             summary["error"] = error
@@ -519,6 +557,290 @@ def score_benchmark(fixture: dict[str, Any], case_runs: list[dict[str, Any]]) ->
         }
     )
     return scorecard
+
+
+def build_gap_analysis(fixture: dict[str, Any], scorecard: dict[str, Any]) -> dict[str, Any]:
+    capabilities = {capability: empty_capability(capability) for capability in CAPABILITY_ORDER}
+    case_gaps = []
+    for case_score in scorecard.get("case_scores", []):
+        counts = case_score["counts"]
+        case_id = case_score["case_id"]
+        case_gap_total = 0
+
+        if case_score["input_style"] == "natural_language":
+            expected = (
+                counts["entity_expected"]
+                + counts["relation_expected"]
+                + counts["attribute_expected"]
+                + counts["temporal_checks"]
+            )
+            matched = (
+                counts["entity_matched"]
+                + counts["relation_matched"]
+                + counts["attribute_matched"]
+                + counts["temporal_correct"]
+            )
+            case_gap_total += add_capability_counts(
+                capabilities["natural_language_extraction"],
+                case_id,
+                expected,
+                matched,
+            )
+
+        case_gap_total += add_capability_counts(
+            capabilities["entity_resolution"],
+            case_id,
+            counts["entity_expected"],
+            counts["entity_matched"],
+        )
+        case_gap_total += add_capability_counts(
+            capabilities["relation_mapping"],
+            case_id,
+            counts["relation_expected"],
+            counts["relation_matched"],
+        )
+        case_gap_total += add_capability_counts(
+            capabilities["attribute_capture"],
+            case_id,
+            counts["attribute_expected"],
+            counts["attribute_matched"],
+        )
+        case_gap_total += add_capability_counts(
+            capabilities["temporal_state"],
+            case_id,
+            counts["temporal_checks"],
+            counts["temporal_correct"],
+        )
+        case_gap_total += add_capability_counts(
+            capabilities["multi_hop_context"],
+            case_id,
+            counts["context_recall_attempts"],
+            counts["context_recall_successes"],
+        )
+
+        scope_expected = counts["scope_checks"] + counts["context_items"]
+        scope_matched = counts["scope_correct"] + max(
+            counts["context_items"] - counts["scope_leak_count"],
+            0,
+        )
+        case_gap_total += add_capability_counts(
+            capabilities["scope_ownership"],
+            case_id,
+            scope_expected,
+            scope_matched,
+        )
+        case_gap_total += add_capability_counts(
+            capabilities["provenance"],
+            case_id,
+            counts["provenance_checks"],
+            counts["provenance_with_source"],
+        )
+
+        safety_violations = (
+            counts["scope_leak_count"]
+            + counts["secret_leak_count"]
+            + counts["prohibited_relation_count"]
+        )
+        case_gap_total += add_safety_counts(
+            capabilities["safety"],
+            case_id,
+            safety_violations,
+        )
+
+        if case_gap_total:
+            case_gaps.append(
+                {
+                    "case_id": case_id,
+                    "category": case_score["category"],
+                    "input_style": case_score["input_style"],
+                    "missing_or_violating_signals": case_gap_total,
+                }
+            )
+
+    capability_summaries = [finalize_capability(capabilities[key]) for key in CAPABILITY_ORDER]
+    top_gaps = [
+        summary
+        for summary in sorted(capability_summaries, key=capability_gap_rank)
+        if summary["severity"] != "ok"
+    ]
+    readiness_status = (
+        "v1_ontology_ready"
+        if decision_from_scorecard(scorecard) == "ontology_benchmark_passed" and not top_gaps
+        else "v1_ontology_design_needed"
+    )
+    return {
+        "schema_version": SCHEMA_VERSION,
+        "command": "v1-ontology-benchmark-gap-analysis",
+        "benchmark_id": fixture["benchmark_id"],
+        "readiness_status": readiness_status,
+        "decision_status": decision_from_scorecard(scorecard),
+        "target_misses": target_misses(scorecard),
+        "capabilities": capability_summaries,
+        "top_gaps": top_gaps[:5],
+        "case_gap_summary": sorted(
+            case_gaps,
+            key=lambda item: (-item["missing_or_violating_signals"], item["case_id"]),
+        ),
+        "by_category": aggregate_case_scores(scorecard, "category"),
+        "by_input_style": aggregate_case_scores(scorecard, "input_style"),
+        "recommended_implementation_order": implementation_priorities(top_gaps),
+        "public_v1_gate": {
+            "status": "pass" if readiness_status == "v1_ontology_ready" else "blocked",
+            "reason": (
+                "ontology targets passed"
+                if readiness_status == "v1_ontology_ready"
+                else "ontology capability gaps remain measurable"
+            ),
+        },
+    }
+
+
+def empty_capability(capability: str) -> dict[str, Any]:
+    return {
+        "capability": capability,
+        "label": CAPABILITY_LABELS[capability],
+        "expected": 0,
+        "matched": 0,
+        "missed": 0,
+        "violations": 0,
+        "affected_cases": set(),
+    }
+
+
+def add_capability_counts(capability: dict[str, Any], case_id: str, expected: int, matched: int) -> int:
+    missed = max(expected - matched, 0)
+    capability["expected"] += expected
+    capability["matched"] += matched
+    capability["missed"] += missed
+    if missed:
+        capability["affected_cases"].add(case_id)
+    return missed
+
+
+def add_safety_counts(capability: dict[str, Any], case_id: str, violations: int) -> int:
+    capability["violations"] += violations
+    capability["missed"] += violations
+    if violations:
+        capability["affected_cases"].add(case_id)
+    return violations
+
+
+def finalize_capability(capability: dict[str, Any]) -> dict[str, Any]:
+    expected = capability["expected"]
+    matched = capability["matched"]
+    missed = capability["missed"]
+    violations = capability["violations"]
+    if capability["capability"] == "safety":
+        health = 1.0 if violations == 0 else 0.0
+    elif expected == 0:
+        health = 1.0
+    else:
+        health = ratio(matched, expected)
+    return {
+        "capability": capability["capability"],
+        "label": capability["label"],
+        "expected": expected,
+        "matched": matched,
+        "missed": missed,
+        "violations": violations,
+        "health": round(health, 4),
+        "severity": gap_severity(health, missed, violations),
+        "affected_cases": sorted(capability["affected_cases"]),
+    }
+
+
+def gap_severity(health: float, missed: int, violations: int) -> str:
+    if violations:
+        return "blocker"
+    if missed == 0:
+        return "ok"
+    if health < 0.5:
+        return "high"
+    if health < 0.8:
+        return "medium"
+    return "low"
+
+
+def capability_gap_rank(summary: dict[str, Any]) -> tuple[int, int, float, str]:
+    severity_rank = {"blocker": 0, "high": 1, "medium": 2, "low": 3, "ok": 4}
+    return (
+        severity_rank.get(summary["severity"], 9),
+        -int(summary["missed"]),
+        float(summary["health"]),
+        summary["capability"],
+    )
+
+
+def target_misses(scorecard: dict[str, Any]) -> list[dict[str, Any]]:
+    misses = []
+    for metric, target in ONTOLOGY_TARGETS.items():
+        value = float(scorecard.get(metric, 0.0))
+        if value < target:
+            misses.append(
+                {
+                    "metric": metric,
+                    "value": round(value, 4),
+                    "target": target,
+                    "gap": round(target - value, 4),
+                }
+            )
+    for metric in ["scope_leak_count", "secret_leak_count", "prohibited_relation_count"]:
+        value = int(scorecard.get(metric, 0))
+        if value:
+            misses.append({"metric": metric, "value": value, "target": 0, "gap": value})
+    return misses
+
+
+def aggregate_case_scores(scorecard: dict[str, Any], field: str) -> dict[str, dict[str, Any]]:
+    groups: dict[str, ScoreTotals] = {}
+    for case_score in scorecard.get("case_scores", []):
+        group_key = case_score.get(field, "unknown")
+        groups.setdefault(group_key, ScoreTotals()).add(case_score)
+    return {
+        key: group_totals.scorecard()
+        for key, group_totals in sorted(groups.items())
+    }
+
+
+def implementation_priorities(top_gaps: list[dict[str, Any]]) -> list[dict[str, Any]]:
+    gap_by_capability = {gap["capability"]: gap for gap in top_gaps}
+    priorities = []
+    for capability in CAPABILITY_ORDER:
+        gap = gap_by_capability.get(capability)
+        if not gap:
+            continue
+        priorities.append(
+            {
+                "capability": capability,
+                "label": gap["label"],
+                "severity": gap["severity"],
+                "reason": implementation_reason(capability, gap),
+                "affected_cases": gap["affected_cases"][:5],
+            }
+        )
+    return priorities
+
+
+def implementation_reason(capability: str, gap: dict[str, Any]) -> str:
+    if capability == "safety":
+        return "Safety violations block public v1 readiness even if recall scores improve."
+    if capability == "natural_language_extraction":
+        return "Natural-language inputs are the main user path and must produce structured claims."
+    if capability == "relation_mapping":
+        return "Relations are the minimum ontology layer needed for useful agent context."
+    if capability == "entity_resolution":
+        return "Entity resolution keeps aliases, pronouns, and project names from fragmenting memory."
+    if capability == "attribute_capture":
+        return "Attributes preserve stable preferences and project settings without overloading relations."
+    if capability == "temporal_state":
+        return "Temporal state prevents superseded decisions from being reused as current context."
+    if capability == "multi_hop_context":
+        return "Agent handoff quality depends on retrieving linked context, not only lexical matches."
+    if capability == "scope_ownership":
+        return "Scope ownership keeps personal, project, and team memories separated."
+    if capability == "provenance":
+        return "Public reports and reviews require every surfaced claim to cite its source event."
+    return f"{gap['label']} remains below the public v1 target."
 
 
 class ScoreTotals:
@@ -859,7 +1181,11 @@ def decision_from_scorecard(scorecard: dict[str, Any]) -> str:
     return "ontology_benchmark_passed" if not misses else "ontology_design_needed"
 
 
-def recommended_next_actions(decision_status: str, scorecard: dict[str, Any]) -> list[str]:
+def recommended_next_actions(
+    decision_status: str,
+    scorecard: dict[str, Any],
+    gap_analysis: dict[str, Any] | None = None,
+) -> list[str]:
     if decision_status == "ontology_benchmark_passed":
         return [
             "Keep this benchmark as the baseline before changing ontology extraction.",
@@ -873,6 +1199,13 @@ def recommended_next_actions(decision_status: str, scorecard: dict[str, Any]) ->
     ]
     if weakest:
         actions.append("Current weakest metrics: " + ", ".join(weakest))
+    if gap_analysis:
+        priorities = [
+            item["capability"]
+            for item in gap_analysis.get("recommended_implementation_order", [])[:3]
+        ]
+        if priorities:
+            actions.append("Implementation priority order: " + ", ".join(priorities))
     return actions
 
 
@@ -924,6 +1257,40 @@ def check_scorer(fixture: dict[str, Any]) -> dict[str, Any]:
             "provenance_coverage": faulted_scorecard["provenance_coverage"],
             "secret_leak_count": faulted_scorecard["secret_leak_count"],
         },
+    }
+
+
+def check_gap_analysis(fixture: dict[str, Any]) -> dict[str, Any]:
+    validate_fixture(fixture)
+    perfect_scorecard = score_benchmark(fixture, synthetic_case_runs(fixture, mode="perfect"))
+    faulted_scorecard = score_benchmark(fixture, synthetic_case_runs(fixture, mode="faulted"))
+    perfect_analysis = build_gap_analysis(fixture, perfect_scorecard)
+    faulted_analysis = build_gap_analysis(fixture, faulted_scorecard)
+    faulted_capabilities = {gap["capability"] for gap in faulted_analysis["top_gaps"]}
+    expected_faulted_capabilities = {"relation_mapping", "multi_hop_context", "safety", "provenance"}
+    ok = (
+        perfect_analysis["readiness_status"] == "v1_ontology_ready"
+        and faulted_analysis["readiness_status"] == "v1_ontology_design_needed"
+        and expected_faulted_capabilities.issubset(faulted_capabilities)
+        and faulted_analysis["public_v1_gate"]["status"] == "blocked"
+    )
+    return {
+        "schema_version": SCHEMA_VERSION,
+        "command": "v1-ontology-benchmark-gap-analysis",
+        "benchmark_id": fixture["benchmark_id"],
+        "ok": ok,
+        "perfect": {
+            "readiness_status": perfect_analysis["readiness_status"],
+            "top_gaps": perfect_analysis["top_gaps"],
+            "public_v1_gate": perfect_analysis["public_v1_gate"],
+        },
+        "faulted": {
+            "readiness_status": faulted_analysis["readiness_status"],
+            "top_gaps": faulted_analysis["top_gaps"],
+            "recommended_implementation_order": faulted_analysis["recommended_implementation_order"],
+            "public_v1_gate": faulted_analysis["public_v1_gate"],
+        },
+        "expected_faulted_capabilities": sorted(expected_faulted_capabilities),
     }
 
 
@@ -1062,10 +1429,12 @@ def f1(precision: float, recall: float) -> float:
 
 def write_markdown_report(path: Path, summary: dict[str, Any]) -> None:
     scorecard = summary.get("scorecard") or {}
+    gap_analysis = summary.get("gap_analysis") or {}
     lines = [
         "# V1 Ontology Benchmark Report",
         "",
         f"- Decision: `{summary.get('decision_status')}`",
+        f"- Readiness: `{gap_analysis.get('readiness_status')}`",
         f"- Benchmark: `{summary.get('benchmark_id')}`",
         f"- Cases: `{(summary.get('fixture') or {}).get('case_count')}`",
         "",
@@ -1086,14 +1455,51 @@ def write_markdown_report(path: Path, summary: dict[str, Any]) -> None:
         "prohibited_relation_count",
     ]:
         lines.append(f"- `{key}`: `{scorecard.get(key)}`")
+    lines.extend(["", "## Top Gaps", ""])
+    for gap in gap_analysis.get("top_gaps", []):
+        lines.append(
+            f"- `{gap['capability']}`: severity `{gap['severity']}`, "
+            f"health `{gap['health']}`, missed `{gap['missed']}`"
+        )
     lines.extend(["", "## Next Actions", ""])
     for action in summary.get("recommended_next_actions", []):
         lines.append(f"- {action}")
     path.write_text("\n".join(lines) + "\n", encoding="utf-8")
 
 
+def write_gap_analysis_markdown(path: Path, analysis: dict[str, Any]) -> None:
+    lines = [
+        "# V1 Ontology Gap Analysis",
+        "",
+        f"- Readiness: `{analysis.get('readiness_status')}`",
+        f"- Decision: `{analysis.get('decision_status')}`",
+        f"- Public v1 gate: `{(analysis.get('public_v1_gate') or {}).get('status')}`",
+        "",
+        "## Capability Gaps",
+        "",
+    ]
+    for capability in analysis.get("capabilities", []):
+        lines.append(
+            f"- `{capability['capability']}`: severity `{capability['severity']}`, "
+            f"health `{capability['health']}`, missed `{capability['missed']}`, "
+            f"violations `{capability['violations']}`"
+        )
+    lines.extend(["", "## Recommended Implementation Order", ""])
+    for index, item in enumerate(analysis.get("recommended_implementation_order", []), start=1):
+        cases = ", ".join(item.get("affected_cases", [])) or "none"
+        lines.append(f"{index}. `{item['capability']}` ({item['severity']}): {item['reason']} Cases: {cases}.")
+    lines.extend(["", "## Target Misses", ""])
+    for miss in analysis.get("target_misses", []):
+        lines.append(
+            f"- `{miss['metric']}`: value `{miss['value']}`, "
+            f"target `{miss['target']}`, gap `{miss['gap']}`"
+        )
+    path.write_text("\n".join(lines) + "\n", encoding="utf-8")
+
+
 def write_html_report(path: Path, summary: dict[str, Any]) -> None:
     scorecard = summary.get("scorecard") or {}
+    gap_analysis = summary.get("gap_analysis") or {}
     rows = []
     for key in [
         "entity_f1",
@@ -1110,6 +1516,20 @@ def write_html_report(path: Path, summary: dict[str, Any]) -> None:
         rows.append(
             f"<tr><th>{html.escape(key)}</th><td><code>{html.escape(str(scorecard.get(key)))}</code></td></tr>"
         )
+    gap_items = "".join(
+        (
+            "<li><code>"
+            + html.escape(gap["capability"])
+            + "</code>: "
+            + html.escape(gap["severity"])
+            + ", health <code>"
+            + html.escape(str(gap["health"]))
+            + "</code>, missed <code>"
+            + html.escape(str(gap["missed"]))
+            + "</code></li>"
+        )
+        for gap in gap_analysis.get("top_gaps", [])
+    )
     content = f"""<!doctype html>
 <html lang="en">
 <head>
@@ -1124,7 +1544,10 @@ def write_html_report(path: Path, summary: dict[str, Any]) -> None:
 <body>
   <h1>Mneme v1 Ontology Benchmark</h1>
   <p>Decision: <code>{html.escape(str(summary.get('decision_status')))}</code></p>
+  <p>Readiness: <code>{html.escape(str(gap_analysis.get('readiness_status')))}</code></p>
   <table>{''.join(rows)}</table>
+  <h2>Top Gaps</h2>
+  <ul>{gap_items}</ul>
 </body>
 </html>
 """
@@ -1158,6 +1581,7 @@ def parse_args(argv: list[str]) -> argparse.Namespace:
     parser.add_argument("--check-contract", action="store_true", help="Print benchmark contract and exit.")
     parser.add_argument("--check-fixture", action="store_true", help="Validate and summarize the fixture.")
     parser.add_argument("--check-scorer", action="store_true", help="Validate scorer fault detection.")
+    parser.add_argument("--check-gap-analysis", action="store_true", help="Validate capability gap analysis.")
     return parser.parse_args(argv)
 
 
@@ -1172,6 +1596,10 @@ def main(argv: list[str]) -> int:
         return 0
     if args.check_scorer:
         report = check_scorer(fixture)
+        print(json.dumps(report, ensure_ascii=False, indent=2, sort_keys=True))
+        return 0 if report["ok"] else 1
+    if args.check_gap_analysis:
+        report = check_gap_analysis(fixture)
         print(json.dumps(report, ensure_ascii=False, indent=2, sort_keys=True))
         return 0 if report["ok"] else 1
 

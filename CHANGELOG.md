@@ -4,6 +4,20 @@ This project follows the spirit of Keep a Changelog.
 
 ## Unreleased
 
+## [0.47.0] - 2026-05-25
+
+### Added
+
+- Added public Mneme v1 completion criteria so the project can distinguish
+  public preview status from complete v1 readiness.
+- Added ontology capability gap analysis with JSON and Markdown outputs that
+  map score misses into implementation buckets such as natural-language
+  extraction, relation mapping, entity resolution, attributes, temporal state,
+  context recall, scope ownership, provenance, and safety.
+- Added `scripts/v1-ontology-benchmark.py --check-gap-analysis` and included it
+  in the quality gate without running the full local ontology benchmark in CI.
+- Documented Phase 41 completion-gap-analysis coverage.
+
 ## [0.46.0] - 2026-05-25
 
 ### Added
