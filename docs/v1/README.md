@@ -7,6 +7,8 @@ through the shared Rust workspace crates rather than a separate duplicated
 ## User Docs
 
 - [Getting Started](getting-started.md)
+- [Quickstart](quickstart.md)
+- [Evidence Scorecard](evidence-scorecard.md)
 - [Local Install](local-install.md)
 - [Local CLI](local-cli.md)
 - [Personal Runtime](personal-runtime.md)

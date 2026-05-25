@@ -16,8 +16,28 @@ Mneme currently provides:
 - `mneme-cli`: a local CLI over the v1 engine and JSON file store.
 - `mneme-eval`: a scenario-based eval harness with acceptance gates.
 - `scripts/install-local.sh`: a local installer for the `mneme` CLI.
+- `scripts/quickstart-smoke.sh`: an isolated first-run smoke test for public
+  onboarding.
 - `scripts/quality-gate.sh`: the single local gate used before PRs and
   releases.
+
+## 5-Minute Quickstart
+
+Run this from a fresh clone with Rust stable installed:
+
+```sh
+./scripts/install-local.sh
+scripts/quickstart-smoke.sh
+```
+
+That smoke test creates a temporary local store, initializes Mneme, records a
+preference, retrieves cited context, opens and closes an agent session, exports
+a review artifact, and validates the store. It does not write private data to
+the repository.
+
+For the same flow as manual commands, see
+[Quickstart](docs/v1/quickstart.md). For the broader developer path, see
+[Getting Started](docs/v1/getting-started.md).
 
 ## Why Mneme v1
 
@@ -43,11 +63,16 @@ privacy, provenance, scope discipline, and repeatable agent-memory evaluation.
 
 ## Evidence at a Glance
 
-![Mneme v1 evidence scorecard](docs/assets/mneme-v1-evidence-scorecard.svg)
+| Evidence surface | Public-safe signal | Current result |
+| --- | --- | --- |
+| Ontology readiness | 13 golden ontology cases | `1.00` entity/relation/attribute F1, `v1_ontology_ready` |
+| Hard dogfood | 100 normal records, 150 adversarial records, 30 agent handoffs | `30/30` workflows passed |
+| Safety guardrails | scope leak and secret leak checks | `0` scope leaks, `0` secret leaks |
+| Public eval surface | core, runtime, agent, dogfood, and model suites | `36` public scenarios |
+| Regression detection | seeded dropped-citation, scope, secret, stale, and handoff faults | `5/5` detected |
 
-The scorecard is committed as SVG so the public metrics remain reviewable in
-version control. See [Evaluation Evidence](#evaluation-evidence) for the source
-table and reproducibility notes.
+For a GitHub-native scorecard with metric bars and reproducibility notes, see
+[Mneme v1 Evidence Scorecard](docs/v1/evidence-scorecard.md).
 
 ## Current Status
 
@@ -119,83 +144,9 @@ surface and documentation gate.
 See [Distribution Policy](docs/project/distribution-policy.md) for the current
 license and registry publication policy.
 
-For a step-by-step first run, see [Getting Started](docs/v1/getting-started.md).
-
-## Quickstart
-
-Install Rust, then install the local CLI:
-
-```sh
-./scripts/install-local.sh
-mneme doctor
-mneme init
-mneme doctor --json
-mneme help
-cargo run -p mneme-eval -- doctor
-cargo run -p mneme-eval -- help
-```
-
-Try the local CLI with an isolated store:
-
-```sh
-STORE=/tmp/mneme.json
-mneme remember "user prefers local-first tools" --store "$STORE"
-mneme claims --status active --store "$STORE" --json
-mneme context "local-first" --store "$STORE" --json
-mneme remember "user prefers project launch reviews" --scope project-alpha --store "$STORE"
-mneme context "project launch" --scope project-alpha --max-items 3 --store "$STORE" --json
-mneme correct "user prefers local-first tools" "user prefers desktop IDE" --store "$STORE"
-mneme forget "user prefers desktop IDE" --store "$STORE"
-mneme quality --store "$STORE" --json
-mneme curate --store "$STORE" --json
-mneme review /tmp/mneme-review.md --store "$STORE"
-mneme snapshot --store "$STORE" --json
-mneme validate --store "$STORE"
-mneme repair --check --store "$STORE" --json
-mneme restore --check --store "$STORE" --json
-mneme compact --store "$STORE"
-mneme begin "Draft setup plan" --query "local-first" --agent codex --store "$STORE" --json
-mneme end session-001 --summary "Prepared a concise setup plan" --remember "user prefers concise setup plans" --store "$STORE" --json
-mneme hook doctor --store "$STORE"
-mneme hook begin "Draft setup plan" --query "local-first" --agent codex --store "$STORE"
-mneme hook end session-002 --summary "Prepared setup plan" --store "$STORE"
-scripts/mneme-agent-hook.sh doctor
-```
-
-Use a local ignored runtime profile when wiring an agent:
-
-```sh
-mneme init
-mneme init --extractor-command ./mneme-extractor-wrapper
-mneme doctor
-scripts/mneme-agent-hook.sh doctor
-```
-
-`scripts/mneme-agent-hook.sh doctor` does not run configured command extractors
-by default. Use `scripts/mneme-agent-hook.sh doctor --check-extractor` only
-when you intentionally want to smoke the configured extractor command.
-
-Without `--store`, the CLI writes to `.mneme/mneme-v1.json` in the current
-directory. `.mneme/` is ignored by git.
-
-For model-backed extraction experiments, use `ingest` with a local wrapper:
-
-```sh
-cargo run -p mneme-cli -- ingest "the user prefers local-first tools" \
-  --extractor command \
-  --extractor-command ./mneme-extractor-wrapper \
-  --store "$STORE"
-```
-
-The same command extractor can be used for session-end memory notes:
-
-```sh
-cargo run -p mneme-cli -- hook end session-001 \
-  --remember "For future planning docs, keep explanations direct and skip motivational language." \
-  --extractor command \
-  --extractor-command ./mneme-extractor-wrapper \
-  --store "$STORE"
-```
+For local CLI details, see [Local CLI](docs/v1/local-cli.md). Without
+`--store`, the CLI writes to `.mneme/mneme-v1.json` in the current directory.
+`.mneme/` is ignored by git.
 
 ## Eval Harness
 
@@ -326,13 +277,13 @@ cargo run -p mneme-eval -- dogfood-summary --help
 
 ## Evaluation Evidence
 
-The latest public-safe local evidence snapshot was measured for `v0.49.0` on
+The latest public-safe local evidence snapshot was measured for `v0.50.0` on
 2026-05-25. These numbers are reproducible development evidence for Mneme v1,
 not claims against external production workloads. Full run bundles are ignored
 by git; the committed fixtures and scripts are safe to inspect and rerun.
 
-The same evidence is summarized visually in
-[docs/assets/mneme-v1-evidence-scorecard.svg](docs/assets/mneme-v1-evidence-scorecard.svg).
+The same evidence is summarized in the GitHub-native
+[Mneme v1 Evidence Scorecard](docs/v1/evidence-scorecard.md).
 
 | Surface | Public-safe data | Latest result |
 | --- | --- | --- |
