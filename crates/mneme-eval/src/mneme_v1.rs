@@ -378,6 +378,7 @@ fn run_with_optional_persistence(
         store: persistence_path.map(|path| store_actual(path, &store_run)),
         quality: None,
         curation: curation_actual,
+        team: None,
     };
     apply_seeded_fault(&mut actual, options.fault_mode);
     if scenario.expected.quality.is_some() {
@@ -597,5 +598,6 @@ fn apply_seeded_fault(actual: &mut ActualState, fault_mode: FaultMode) {
                 }
             }
         }
+        FaultMode::BypassAcl | FaultMode::UnapprovedPromotion | FaultMode::IgnoreRevocation => {}
     }
 }

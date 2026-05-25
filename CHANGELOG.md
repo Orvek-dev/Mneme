@@ -4,6 +4,28 @@ This project follows the spirit of Keep a Changelog.
 
 ## Unreleased
 
+## [0.60.0] - 2026-05-25
+
+### Added
+
+- Added the v2 team-memory policy core with local users, owned agents,
+  projects, scoped memory, reviewed team promotion, admin revocation, audit
+  records, secret blocking, JSON-file storage, and state validation.
+- Added `mneme team ...` CLI workflows for initializing a team store,
+  registering users/agents/projects, writing scoped memory, promoting and
+  reviewing team memory, reading team context, revoking users/agents, and
+  validating snapshots.
+- Added the `mneme-v2` eval target, the public `team` scenario suite, v2
+  seeded-fault checks, and `mneme-eval v2-readiness`.
+- Added `scripts/v2-team-dogfood.py` for public-safe v2 team dogfood contract,
+  dataset-shape, seeded-fault, scorecard, and report generation.
+- Added v2 team-memory docs and a feature spec for the policy core.
+
+### Changed
+
+- Expanded the release quality gate, README evidence tables, API contract, and
+  roadmap docs to cover v2 team-memory verification.
+
 ## [0.52.0] - 2026-05-25
 
 ### Added

@@ -19,6 +19,9 @@ pub(crate) struct Scenario {
     pub(crate) maintenance: Maintenance,
     #[serde(default)]
     pub(crate) agent_flow: Option<AgentFlow>,
+    #[serde(default)]
+    pub(crate) team_flow: Option<TeamFlow>,
+    #[serde(default)]
     pub(crate) events: Vec<InputEvent>,
     pub(crate) expected: Expected,
 }
@@ -111,6 +114,99 @@ pub(crate) struct InputEvent {
 
 #[derive(Debug, Clone, Default, Deserialize, Serialize)]
 #[serde(default, deny_unknown_fields)]
+pub(crate) struct TeamFlow {
+    pub(crate) workspace_id: Option<String>,
+    pub(crate) users: Vec<TeamFlowUser>,
+    pub(crate) agents: Vec<TeamFlowAgent>,
+    pub(crate) projects: Vec<TeamFlowProject>,
+    pub(crate) grants: Vec<TeamFlowGrant>,
+    pub(crate) memories: Vec<TeamFlowMemory>,
+    pub(crate) promotions: Vec<TeamFlowPromotion>,
+    pub(crate) reviews: Vec<TeamFlowReview>,
+    pub(crate) revoke_users: Vec<TeamFlowRevocation>,
+    pub(crate) revoke_agents: Vec<TeamFlowRevocation>,
+    pub(crate) contexts: Vec<TeamFlowContext>,
+}
+
+#[derive(Debug, Clone, Deserialize, Serialize)]
+#[serde(deny_unknown_fields)]
+pub(crate) struct TeamFlowUser {
+    pub(crate) id: String,
+    pub(crate) role: String,
+}
+
+#[derive(Debug, Clone, Deserialize, Serialize)]
+#[serde(deny_unknown_fields)]
+pub(crate) struct TeamFlowAgent {
+    pub(crate) id: String,
+    pub(crate) owner_user_id: String,
+}
+
+#[derive(Debug, Clone, Default, Deserialize, Serialize)]
+#[serde(default, deny_unknown_fields)]
+pub(crate) struct TeamFlowProject {
+    pub(crate) id: String,
+    pub(crate) members: Vec<String>,
+}
+
+#[derive(Debug, Clone, Deserialize, Serialize)]
+#[serde(deny_unknown_fields)]
+pub(crate) struct TeamFlowGrant {
+    pub(crate) project_id: String,
+    pub(crate) user_id: String,
+}
+
+#[derive(Debug, Clone, Deserialize, Serialize)]
+#[serde(deny_unknown_fields)]
+pub(crate) struct TeamFlowMemory {
+    pub(crate) actor: TeamFlowActor,
+    pub(crate) text: String,
+    pub(crate) scope: String,
+}
+
+#[derive(Debug, Clone, Deserialize, Serialize)]
+#[serde(deny_unknown_fields)]
+pub(crate) struct TeamFlowPromotion {
+    pub(crate) actor: TeamFlowActor,
+    pub(crate) source_memory_id: String,
+    #[serde(default)]
+    pub(crate) note: Option<String>,
+}
+
+#[derive(Debug, Clone, Deserialize, Serialize)]
+#[serde(deny_unknown_fields)]
+pub(crate) struct TeamFlowReview {
+    pub(crate) actor: TeamFlowActor,
+    pub(crate) promotion_id: String,
+    pub(crate) approve: bool,
+}
+
+#[derive(Debug, Clone, Deserialize, Serialize)]
+#[serde(deny_unknown_fields)]
+pub(crate) struct TeamFlowRevocation {
+    pub(crate) actor: TeamFlowActor,
+    pub(crate) target_id: String,
+}
+
+#[derive(Debug, Clone, Deserialize, Serialize)]
+#[serde(deny_unknown_fields)]
+pub(crate) struct TeamFlowContext {
+    pub(crate) actor: TeamFlowActor,
+    pub(crate) query: String,
+    #[serde(default)]
+    pub(crate) max_items: Option<usize>,
+}
+
+#[derive(Debug, Clone, Deserialize, Serialize)]
+#[serde(deny_unknown_fields)]
+pub(crate) struct TeamFlowActor {
+    pub(crate) user_id: String,
+    #[serde(default)]
+    pub(crate) agent_id: Option<String>,
+}
+
+#[derive(Debug, Clone, Default, Deserialize, Serialize)]
+#[serde(default, deny_unknown_fields)]
 pub(crate) struct Expected {
     pub(crate) event_append: Option<EventAppendExpected>,
     pub(crate) claims: Vec<ClaimExpected>,
@@ -121,6 +217,7 @@ pub(crate) struct Expected {
     pub(crate) session: Option<SessionExpected>,
     pub(crate) quality: Option<QualityExpected>,
     pub(crate) curation: Option<CurationExpected>,
+    pub(crate) team: Option<TeamExpected>,
 }
 
 impl Expected {
@@ -134,6 +231,7 @@ impl Expected {
             && self.session.is_none()
             && self.quality.is_none()
             && self.curation.is_none()
+            && self.team.is_none()
     }
 }
 
@@ -228,6 +326,28 @@ pub(crate) struct CurationExpected {
     pub(crate) after_quality: Option<QualityExpected>,
 }
 
+#[derive(Debug, Clone, Default, Deserialize, Serialize)]
+#[serde(default, deny_unknown_fields)]
+pub(crate) struct TeamExpected {
+    pub(crate) validation_ok: Option<bool>,
+    pub(crate) memory_count: Option<usize>,
+    pub(crate) active_memory_count: Option<usize>,
+    pub(crate) blocked_secret_count: Option<usize>,
+    pub(crate) promotion_count: Option<usize>,
+    pub(crate) pending_promotion_count: Option<usize>,
+    pub(crate) approved_promotion_count: Option<usize>,
+    pub(crate) rejected_promotion_count: Option<usize>,
+    pub(crate) denied_count: Option<usize>,
+    pub(crate) scope_leak_count: Option<usize>,
+    pub(crate) secret_leak_count: Option<usize>,
+    pub(crate) context_item_count: Option<usize>,
+    pub(crate) context_must_include: Vec<String>,
+    pub(crate) context_must_not_include: Vec<String>,
+    pub(crate) omitted_reason_contains: Vec<String>,
+    pub(crate) citation_required: bool,
+    pub(crate) audit_kinds: Vec<String>,
+}
+
 pub(crate) fn load_scenario(path: &Path) -> Result<Scenario, EvalError> {
     let text = fs::read_to_string(path).map_err(|source| EvalError::io("read", path, source))?;
     let scenario: Scenario =
@@ -260,9 +380,9 @@ pub(crate) fn validate_scenario(scenario: &Scenario, path: &Path) -> Result<(), 
             scenario.id
         )));
     }
-    if scenario.events.is_empty() {
+    if scenario.events.is_empty() && scenario.team_flow.is_none() {
         return Err(EvalError::scenario(format!(
-            "scenario {} has no events",
+            "scenario {} has no events or team_flow",
             scenario.id
         )));
     }
@@ -327,6 +447,9 @@ pub(crate) fn validate_scenario(scenario: &Scenario, path: &Path) -> Result<(), 
                 )));
             }
         }
+    }
+    if let Some(team_flow) = &scenario.team_flow {
+        validate_team_flow(team_flow, &scenario.id)?;
     }
     for (idx, event) in scenario.events.iter().enumerate() {
         if event.speaker_id.trim().is_empty() {
@@ -457,6 +580,161 @@ pub(crate) fn validate_scenario(scenario: &Scenario, path: &Path) -> Result<(), 
         if let Some(after_quality) = &curation.after_quality {
             validate_quality_expected(after_quality, &scenario.id, "curation.after_quality")?;
         }
+    }
+    if let Some(team) = &scenario.expected.team {
+        validate_team_expected(team, &scenario.id)?;
+    }
+    Ok(())
+}
+
+fn validate_team_flow(team_flow: &TeamFlow, scenario_id: &str) -> Result<(), EvalError> {
+    for (idx, user) in team_flow.users.iter().enumerate() {
+        if user.id.trim().is_empty() {
+            return Err(EvalError::scenario(format!(
+                "scenario {scenario_id} team_flow user {} has empty id",
+                idx + 1
+            )));
+        }
+        if !matches!(user.role.as_str(), "admin" | "maintainer" | "member") {
+            return Err(EvalError::scenario(format!(
+                "scenario {scenario_id} team_flow user {} has unknown role {}",
+                idx + 1,
+                user.role
+            )));
+        }
+    }
+    for (idx, agent) in team_flow.agents.iter().enumerate() {
+        if agent.id.trim().is_empty() || agent.owner_user_id.trim().is_empty() {
+            return Err(EvalError::scenario(format!(
+                "scenario {scenario_id} team_flow agent {} must include id and owner_user_id",
+                idx + 1
+            )));
+        }
+    }
+    for (idx, project) in team_flow.projects.iter().enumerate() {
+        if project.id.trim().is_empty() {
+            return Err(EvalError::scenario(format!(
+                "scenario {scenario_id} team_flow project {} has empty id",
+                idx + 1
+            )));
+        }
+        if project
+            .members
+            .iter()
+            .any(|member| member.trim().is_empty())
+        {
+            return Err(EvalError::scenario(format!(
+                "scenario {scenario_id} team_flow project {} has empty member",
+                idx + 1
+            )));
+        }
+    }
+    for (idx, grant) in team_flow.grants.iter().enumerate() {
+        if grant.project_id.trim().is_empty() || grant.user_id.trim().is_empty() {
+            return Err(EvalError::scenario(format!(
+                "scenario {scenario_id} team_flow grant {} must include project_id and user_id",
+                idx + 1
+            )));
+        }
+    }
+    for (idx, memory) in team_flow.memories.iter().enumerate() {
+        validate_team_actor(&memory.actor, scenario_id, "memory", idx + 1)?;
+        if memory.text.trim().is_empty() || memory.scope.trim().is_empty() {
+            return Err(EvalError::scenario(format!(
+                "scenario {scenario_id} team_flow memory {} must include text and scope",
+                idx + 1
+            )));
+        }
+    }
+    for (idx, promotion) in team_flow.promotions.iter().enumerate() {
+        validate_team_actor(&promotion.actor, scenario_id, "promotion", idx + 1)?;
+        if promotion.source_memory_id.trim().is_empty() {
+            return Err(EvalError::scenario(format!(
+                "scenario {scenario_id} team_flow promotion {} has empty source_memory_id",
+                idx + 1
+            )));
+        }
+    }
+    for (idx, review) in team_flow.reviews.iter().enumerate() {
+        validate_team_actor(&review.actor, scenario_id, "review", idx + 1)?;
+        if review.promotion_id.trim().is_empty() {
+            return Err(EvalError::scenario(format!(
+                "scenario {scenario_id} team_flow review {} has empty promotion_id",
+                idx + 1
+            )));
+        }
+    }
+    for (idx, revocation) in team_flow.revoke_users.iter().enumerate() {
+        validate_team_actor(&revocation.actor, scenario_id, "revoke_user", idx + 1)?;
+        if revocation.target_id.trim().is_empty() {
+            return Err(EvalError::scenario(format!(
+                "scenario {scenario_id} team_flow revoke_user {} has empty target_id",
+                idx + 1
+            )));
+        }
+    }
+    for (idx, revocation) in team_flow.revoke_agents.iter().enumerate() {
+        validate_team_actor(&revocation.actor, scenario_id, "revoke_agent", idx + 1)?;
+        if revocation.target_id.trim().is_empty() {
+            return Err(EvalError::scenario(format!(
+                "scenario {scenario_id} team_flow revoke_agent {} has empty target_id",
+                idx + 1
+            )));
+        }
+    }
+    for (idx, context) in team_flow.contexts.iter().enumerate() {
+        validate_team_actor(&context.actor, scenario_id, "context", idx + 1)?;
+        if context.query.trim().is_empty() {
+            return Err(EvalError::scenario(format!(
+                "scenario {scenario_id} team_flow context {} has empty query",
+                idx + 1
+            )));
+        }
+        if context.max_items == Some(0) {
+            return Err(EvalError::scenario(format!(
+                "scenario {scenario_id} team_flow context {} has zero max_items",
+                idx + 1
+            )));
+        }
+    }
+    Ok(())
+}
+
+fn validate_team_actor(
+    actor: &TeamFlowActor,
+    scenario_id: &str,
+    label: &str,
+    idx: usize,
+) -> Result<(), EvalError> {
+    if actor.user_id.trim().is_empty() {
+        return Err(EvalError::scenario(format!(
+            "scenario {scenario_id} team_flow {label} {idx} has empty actor user_id"
+        )));
+    }
+    if actor
+        .agent_id
+        .as_ref()
+        .is_some_and(|agent_id| agent_id.trim().is_empty())
+    {
+        return Err(EvalError::scenario(format!(
+            "scenario {scenario_id} team_flow {label} {idx} has empty actor agent_id"
+        )));
+    }
+    Ok(())
+}
+
+fn validate_team_expected(team: &TeamExpected, scenario_id: &str) -> Result<(), EvalError> {
+    if team
+        .context_must_include
+        .iter()
+        .chain(team.context_must_not_include.iter())
+        .chain(team.omitted_reason_contains.iter())
+        .chain(team.audit_kinds.iter())
+        .any(|value| value.trim().is_empty())
+    {
+        return Err(EvalError::scenario(format!(
+            "scenario {scenario_id} expected team entries must not be empty"
+        )));
     }
     Ok(())
 }

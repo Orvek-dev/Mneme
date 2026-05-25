@@ -2,7 +2,7 @@ use crate::error::EvalError;
 use crate::report::{CheckReport, ScenarioReport};
 use crate::scenario::{
     AuditExpected, ClaimExpected, ContextPackExpected, CurationExpected, Expected, QualityExpected,
-    Scenario, SessionExpected, StoreExpected,
+    Scenario, SessionExpected, StoreExpected, TeamExpected,
 };
 use crate::target::{ActualState, ContextPack, EvalTarget, QualityActual, TargetRunOptions};
 
@@ -73,6 +73,9 @@ fn check_expected(scenario: &Scenario, actual: &ActualState) -> Vec<CheckReport>
     }
     if let Some(expected) = &scenario.expected.curation {
         checks.extend(check_curation(expected, actual));
+    }
+    if let Some(expected) = &scenario.expected.team {
+        checks.extend(check_team(expected, actual));
     }
     checks
 }
@@ -755,6 +758,230 @@ fn check_bool(name: &str, expected: bool, actual: bool, artifact: &str) -> Check
     }
 }
 
+fn check_team(expected: &TeamExpected, actual: &ActualState) -> Vec<CheckReport> {
+    let Some(team) = &actual.team else {
+        return vec![CheckReport::fail(
+            "team.present",
+            "present",
+            "missing",
+            "actual.team",
+        )];
+    };
+    let mut checks = Vec::new();
+    if let Some(value) = expected.validation_ok {
+        checks.push(check_bool(
+            "team.validation_ok",
+            value,
+            team.validation_ok,
+            "actual.team",
+        ));
+    }
+    if let Some(count) = expected.memory_count {
+        checks.push(check_quality_count(
+            "team.memory_count",
+            count,
+            team.memory_count,
+            "actual.team",
+        ));
+    }
+    if let Some(count) = expected.active_memory_count {
+        checks.push(check_quality_count(
+            "team.active_memory_count",
+            count,
+            team.active_memory_count,
+            "actual.team",
+        ));
+    }
+    if let Some(count) = expected.blocked_secret_count {
+        checks.push(check_quality_count(
+            "team.blocked_secret_count",
+            count,
+            team.blocked_secret_count,
+            "actual.team",
+        ));
+    }
+    if let Some(count) = expected.promotion_count {
+        checks.push(check_quality_count(
+            "team.promotion_count",
+            count,
+            team.promotion_count,
+            "actual.team",
+        ));
+    }
+    if let Some(count) = expected.pending_promotion_count {
+        checks.push(check_quality_count(
+            "team.pending_promotion_count",
+            count,
+            team.pending_promotion_count,
+            "actual.team",
+        ));
+    }
+    if let Some(count) = expected.approved_promotion_count {
+        checks.push(check_quality_count(
+            "team.approved_promotion_count",
+            count,
+            team.approved_promotion_count,
+            "actual.team",
+        ));
+    }
+    if let Some(count) = expected.rejected_promotion_count {
+        checks.push(check_quality_count(
+            "team.rejected_promotion_count",
+            count,
+            team.rejected_promotion_count,
+            "actual.team",
+        ));
+    }
+    if let Some(count) = expected.denied_count {
+        checks.push(check_quality_count(
+            "team.denied_count",
+            count,
+            team.denied_count,
+            "actual.team",
+        ));
+    }
+    if let Some(count) = expected.scope_leak_count {
+        checks.push(check_quality_count(
+            "team.scope_leak_count",
+            count,
+            team.scope_leak_count,
+            "actual.team",
+        ));
+    }
+    if let Some(count) = expected.secret_leak_count {
+        checks.push(check_quality_count(
+            "team.secret_leak_count",
+            count,
+            team.secret_leak_count,
+            "actual.team",
+        ));
+    }
+
+    let context_items = team
+        .context_pack
+        .as_ref()
+        .map(|context| context.items.as_slice())
+        .unwrap_or(&[]);
+    let omitted_items = team
+        .context_pack
+        .as_ref()
+        .map(|context| context.omitted.as_slice())
+        .unwrap_or(&[]);
+    let joined = context_items
+        .iter()
+        .map(|item| item.memory_text.as_str())
+        .collect::<Vec<_>>()
+        .join("\n");
+    let joined_lower = joined.to_ascii_lowercase();
+    let item_summary = context_items
+        .iter()
+        .map(|item| format!("{}:{}:{}", item.memory_id, item.scope, item.score))
+        .collect::<Vec<_>>()
+        .join(",");
+    let omitted_summary = omitted_items
+        .iter()
+        .map(|item| format!("{}:{}:{}", item.memory_id, item.memory_text, item.reason))
+        .collect::<Vec<_>>()
+        .join(",");
+
+    if let Some(count) = expected.context_item_count {
+        checks.push(check_quality_count(
+            "team.context_item_count",
+            count,
+            context_items.len(),
+            &format!("actual.team.context.items={item_summary}"),
+        ));
+    }
+    for value in &expected.context_must_include {
+        let value_lower = value.to_ascii_lowercase();
+        if joined_lower.contains(&value_lower) {
+            checks.push(CheckReport::pass(
+                format!("team.context_must_include.{value}"),
+                "included",
+                "included",
+            ));
+        } else {
+            checks.push(CheckReport::fail(
+                format!("team.context_must_include.{value}"),
+                "included",
+                "missing",
+                format!("actual.team.context.items={item_summary} omitted={omitted_summary}"),
+            ));
+        }
+    }
+    for value in &expected.context_must_not_include {
+        let value_lower = value.to_ascii_lowercase();
+        if joined_lower.contains(&value_lower) {
+            checks.push(CheckReport::fail(
+                format!("team.context_must_not_include.{value}"),
+                "absent",
+                "included",
+                "actual.team.context.items",
+            ));
+        } else {
+            checks.push(CheckReport::pass(
+                format!("team.context_must_not_include.{value}"),
+                "absent",
+                "absent",
+            ));
+        }
+    }
+    for value in &expected.omitted_reason_contains {
+        if omitted_summary.contains(value) {
+            checks.push(CheckReport::pass(
+                format!("team.omitted_reason_contains.{value}"),
+                "present",
+                "present",
+            ));
+        } else {
+            checks.push(CheckReport::fail(
+                format!("team.omitted_reason_contains.{value}"),
+                "present",
+                "missing",
+                format!("actual.team.context.omitted={omitted_summary}"),
+            ));
+        }
+    }
+    if expected.citation_required {
+        let missing = context_items
+            .iter()
+            .filter(|item| item.source_event_ids.is_empty())
+            .map(|item| item.memory_id.clone())
+            .collect::<Vec<_>>();
+        if missing.is_empty() {
+            checks.push(CheckReport::pass(
+                "team.citation_required",
+                "all items cited",
+                "all items cited",
+            ));
+        } else {
+            checks.push(CheckReport::fail(
+                "team.citation_required",
+                "all items cited",
+                format!("missing citations for {}", missing.join(",")),
+                "actual.team.context.items",
+            ));
+        }
+    }
+    for kind in &expected.audit_kinds {
+        if actual.audit.iter().any(|event| event.kind == *kind) {
+            checks.push(CheckReport::pass(
+                format!("team.audit_kind.{kind}"),
+                "present",
+                "present",
+            ));
+        } else {
+            checks.push(CheckReport::fail(
+                format!("team.audit_kind.{kind}"),
+                "present",
+                "missing",
+                "actual.audit",
+            ));
+        }
+    }
+    checks
+}
+
 fn option_matches(expected: Option<&String>, actual: &str) -> bool {
     match expected {
         Some(expected) => expected == actual,
@@ -783,6 +1010,7 @@ mod tests {
             persistence: None,
             maintenance: Maintenance::default(),
             agent_flow: None,
+            team_flow: None,
             events: vec![InputEvent {
                 speaker_id: "user".to_owned(),
                 actor_agent_id: Some("codex".to_owned()),
@@ -823,6 +1051,7 @@ mod tests {
                 session: None,
                 quality: None,
                 curation: None,
+                team: None,
             },
         };
         let target = FakeEvalTarget;
@@ -845,6 +1074,7 @@ mod tests {
             persistence: None,
             maintenance: Maintenance::default(),
             agent_flow: None,
+            team_flow: None,
             events: vec![InputEvent {
                 speaker_id: "user".to_owned(),
                 actor_agent_id: None,
@@ -869,6 +1099,7 @@ mod tests {
                 session: None,
                 quality: None,
                 curation: None,
+                team: None,
             },
         };
         let target = FakeEvalTarget;

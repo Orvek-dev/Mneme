@@ -32,6 +32,16 @@ const BASELINE_SUMMARY_LIMIT: usize = 5;
 const V1_READINESS_SCHEMA_VERSION: u32 = 1;
 const V1_READINESS_SUITES: &[&str] = &["core", "runtime", "agent", "dogfood"];
 const V1_READINESS_MIN_DOGFOOD_SCENARIOS: usize = 4;
+const V2_READINESS_SCHEMA_VERSION: u32 = 1;
+const V2_READINESS_SUITES: &[&str] = &["team"];
+const V2_READINESS_MIN_TEAM_SCENARIOS: usize = 6;
+const V2_READINESS_FAULTS: &[FaultMode] = &[
+    FaultMode::BypassAcl,
+    FaultMode::LeakSecrets,
+    FaultMode::DropCitations,
+    FaultMode::UnapprovedPromotion,
+    FaultMode::IgnoreRevocation,
+];
 
 /// Runs the Mneme eval harness command-line interface.
 pub fn run_cli(args: impl IntoIterator<Item = String>) -> Result<(), EvalError> {
@@ -80,11 +90,12 @@ pub fn run_cli(args: impl IntoIterator<Item = String>) -> Result<(), EvalError> 
             run_command_or_help("candidate-promote", raw_args, run_candidate_promote)
         }
         "v1-readiness" => run_command_or_help("v1-readiness", raw_args, run_v1_readiness),
+        "v2-readiness" => run_command_or_help("v2-readiness", raw_args, run_v2_readiness),
         "dogfood-summary" => run_command_or_help("dogfood-summary", raw_args, run_dogfood_summary),
         "replay" => run_command_or_help("replay", raw_args, run_replay),
         "run" => run_command_or_help("run", raw_args, run_suite),
         _ => Err(EvalError::invalid_cli(format!(
-            "unknown mneme-eval command: {command}\navailable commands: doctor, version, validate, acceptance, baseline, baseline-gate, baseline-summary, baseline-compare, candidate, candidate-check, candidate-promote, v1-readiness, dogfood-summary, replay, run"
+            "unknown mneme-eval command: {command}\navailable commands: doctor, version, validate, acceptance, baseline, baseline-gate, baseline-summary, baseline-compare, candidate, candidate-check, candidate-promote, v1-readiness, v2-readiness, dogfood-summary, replay, run"
         ))),
     }
 }
@@ -124,7 +135,7 @@ fn print_help(command: Option<&str>) -> Result<(), EvalError> {
         None => MNEME_EVAL_HELP,
         Some(command) => command_help(command).ok_or_else(|| {
             EvalError::invalid_cli(format!(
-                "unknown mneme-eval help topic: {command}\navailable help topics: doctor, version, validate, acceptance, baseline, baseline-gate, baseline-summary, baseline-compare, candidate, candidate-check, candidate-promote, v1-readiness, dogfood-summary, replay, run"
+                "unknown mneme-eval help topic: {command}\navailable help topics: doctor, version, validate, acceptance, baseline, baseline-gate, baseline-summary, baseline-compare, candidate, candidate-check, candidate-promote, v1-readiness, v2-readiness, dogfood-summary, replay, run"
             ))
         })?,
     };
@@ -146,6 +157,7 @@ fn command_help(command: &str) -> Option<&'static str> {
         "candidate-check" => Some(MNEME_EVAL_CANDIDATE_CHECK_HELP),
         "candidate-promote" => Some(MNEME_EVAL_CANDIDATE_PROMOTE_HELP),
         "v1-readiness" => Some(MNEME_EVAL_V1_READINESS_HELP),
+        "v2-readiness" => Some(MNEME_EVAL_V2_READINESS_HELP),
         "dogfood-summary" => Some(MNEME_EVAL_DOGFOOD_SUMMARY_HELP),
         "replay" => Some(MNEME_EVAL_REPLAY_HELP),
         "run" => Some(MNEME_EVAL_RUN_HELP),
@@ -178,11 +190,12 @@ Commands:
   candidate-promote
                  Promote a reviewed candidate into a scenario suite.
   v1-readiness  Run deterministic v1 product-readiness gates.
+  v2-readiness  Run deterministic v2 team-memory readiness gates.
   dogfood-summary
                  Summarize a v1 dogfood evidence bundle.
 
 Targets:
-  fake, mneme-v1, mneme-v1-command
+  fake, mneme-v1, mneme-v1-command, mneme-v2
 
 Examples:
   mneme-eval validate --suite core
@@ -192,6 +205,7 @@ Examples:
   mneme-eval help baseline-compare
   mneme-eval help candidate
   mneme-eval v1-readiness --json --report evals/reports/v1-readiness.json
+  mneme-eval v2-readiness --json --report evals/reports/v2-readiness.json
   mneme-eval dogfood-summary evals/runs/v1-dogfood/local-20260525 --json"#;
 
 const MNEME_EVAL_DOCTOR_HELP: &str = r#"Usage: mneme-eval doctor
@@ -211,7 +225,7 @@ Validate scenario files without running a target.
 Example:
   mneme-eval validate --suite core"#;
 
-const MNEME_EVAL_RUN_HELP: &str = r#"Usage: mneme-eval run [--suite <name>] [--target fake|mneme-v1|mneme-v1-command] [--extractor-command <program>] [--extractor-arg <arg>]... [--seeded-fault <name>] [--json] [--report <path>]
+const MNEME_EVAL_RUN_HELP: &str = r#"Usage: mneme-eval run [--suite <name>] [--target fake|mneme-v1|mneme-v1-command|mneme-v2] [--extractor-command <program>] [--extractor-arg <arg>]... [--seeded-fault <name>] [--json] [--report <path>]
 
 Replay a scenario suite against a target. Defaults are --suite core and
 --target fake.
@@ -219,21 +233,21 @@ Replay a scenario suite against a target. Defaults are --suite core and
 Example:
   mneme-eval run --suite core --target mneme-v1"#;
 
-const MNEME_EVAL_REPLAY_HELP: &str = r#"Usage: mneme-eval replay <scenario.yaml> [--target fake|mneme-v1|mneme-v1-command] [--extractor-command <program>] [--extractor-arg <arg>]... [--seeded-fault <name>] [--json] [--report <path>]
+const MNEME_EVAL_REPLAY_HELP: &str = r#"Usage: mneme-eval replay <scenario.yaml> [--target fake|mneme-v1|mneme-v1-command|mneme-v2] [--extractor-command <program>] [--extractor-arg <arg>]... [--seeded-fault <name>] [--json] [--report <path>]
 
 Replay one scenario against a target.
 
 Example:
   mneme-eval replay evals/scenarios/core/same-turn-explicit-remember.yaml --target mneme-v1"#;
 
-const MNEME_EVAL_ACCEPTANCE_HELP: &str = r#"Usage: mneme-eval acceptance [--suite <name>] [--target fake|mneme-v1|mneme-v1-command] [--extractor-command <program>] [--extractor-arg <arg>]... [--json] [--report <path>]
+const MNEME_EVAL_ACCEPTANCE_HELP: &str = r#"Usage: mneme-eval acceptance [--suite <name>] [--target fake|mneme-v1|mneme-v1-command|mneme-v2] [--extractor-command <program>] [--extractor-arg <arg>]... [--json] [--report <path>]
 
 Run acceptance gates for a suite and target.
 
 Example:
   mneme-eval acceptance --suite core --target mneme-v1"#;
 
-const MNEME_EVAL_BASELINE_HELP: &str = r#"Usage: mneme-eval baseline [--suite <name>] [--target fake|mneme-v1|mneme-v1-command] [--extractor-command <program>] [--extractor-arg <arg>]... [--seeded-fault <name>] [--iterations <n>] [--provider-label <label>] [--model-label <label>] [--run-label <label>] [--live-provider] [--json] [--report <path>]
+const MNEME_EVAL_BASELINE_HELP: &str = r#"Usage: mneme-eval baseline [--suite <name>] [--target fake|mneme-v1|mneme-v1-command|mneme-v2] [--extractor-command <program>] [--extractor-arg <arg>]... [--seeded-fault <name>] [--iterations <n>] [--provider-label <label>] [--model-label <label>] [--run-label <label>] [--live-provider] [--json] [--report <path>]
 
 Repeat a suite and summarize aggregate, category, and per-scenario pass rates.
 
@@ -299,6 +313,16 @@ requiring provider credentials.
 
 Example:
   mneme-eval v1-readiness --json --report evals/reports/v1-readiness.json"#;
+
+const MNEME_EVAL_V2_READINESS_HELP: &str = r#"Usage: mneme-eval v2-readiness [--json] [--report <path>]
+
+Run deterministic v2 team-memory readiness gates against the mneme-v2 target.
+The gate validates and replays the team suite, then verifies seeded faults for
+ACL bypass, secret leak, dropped citations, unreviewed promotion, and ignored
+revocation are detected.
+
+Example:
+  mneme-eval v2-readiness --json --report evals/reports/v2-readiness.json"#;
 
 const MNEME_EVAL_DOGFOOD_SUMMARY_HELP: &str = r#"Usage: mneme-eval dogfood-summary <bundle-dir> [--json] [--report <path>]
 
@@ -394,6 +418,12 @@ struct V1ReadinessOptions {
 }
 
 #[derive(Debug, Clone, Default)]
+struct V2ReadinessOptions {
+    json: bool,
+    report_path: Option<PathBuf>,
+}
+
+#[derive(Debug, Clone, Default)]
 struct DogfoodSummaryOptions {
     json: bool,
     report_path: Option<PathBuf>,
@@ -427,6 +457,25 @@ struct BaselineSummaryReport {
 
 #[derive(Debug, Clone, Serialize)]
 struct V1ReadinessReport {
+    report_schema_version: u32,
+    command: &'static str,
+    target: String,
+    ok: bool,
+    readiness_status: String,
+    required_suites: Vec<String>,
+    suite_count: usize,
+    passed_suites: usize,
+    failed_suites: usize,
+    scenario_count: usize,
+    passed_scenarios: usize,
+    failed_scenarios: usize,
+    suites: Vec<V1ReadinessSuiteReport>,
+    criteria: Vec<AcceptanceGateReport>,
+    recommended_next_actions: Vec<String>,
+}
+
+#[derive(Debug, Clone, Serialize)]
+struct V2ReadinessReport {
     report_schema_version: u32,
     command: &'static str,
     target: String,
@@ -678,11 +727,7 @@ fn build_acceptance_report(suite: &str, options: &CommandOptions) -> AcceptanceR
         }
     }
 
-    for fault_mode in [
-        FaultMode::SkipClaims,
-        FaultMode::LeakSecrets,
-        FaultMode::DropCitations,
-    ] {
+    for &fault_mode in seeded_faults_for_target(target_kind) {
         gates.push(check_seeded_fault_is_detected(
             &paths,
             target_kind,
@@ -692,6 +737,17 @@ fn build_acceptance_report(suite: &str, options: &CommandOptions) -> AcceptanceR
     }
 
     AcceptanceReport::from_gates(target_name, gates)
+}
+
+fn seeded_faults_for_target(target_kind: TargetKind) -> &'static [FaultMode] {
+    match target_kind {
+        TargetKind::MnemeV2 => V2_READINESS_FAULTS,
+        TargetKind::Fake | TargetKind::MnemeV1 | TargetKind::MnemeV1Command => &[
+            FaultMode::SkipClaims,
+            FaultMode::LeakSecrets,
+            FaultMode::DropCitations,
+        ],
+    }
 }
 
 fn check_invalid_fixtures_are_rejected() -> AcceptanceGateReport {
@@ -890,6 +946,17 @@ fn run_v1_readiness(raw_args: Vec<String>) -> Result<(), EvalError> {
     }
 }
 
+fn run_v2_readiness(raw_args: Vec<String>) -> Result<(), EvalError> {
+    let options = parse_v2_readiness_args(raw_args)?;
+    let report = build_v2_readiness_report();
+    emit_v2_readiness_report(&report, &options)?;
+    if report.ok {
+        Ok(())
+    } else {
+        Err(EvalError::scenario("v2 readiness gate failed"))
+    }
+}
+
 fn run_dogfood_summary(raw_args: Vec<String>) -> Result<(), EvalError> {
     let (bundle_dir, options) = parse_dogfood_summary_args(raw_args)?;
     let report = build_dogfood_summary_report(&bundle_dir);
@@ -942,6 +1009,50 @@ fn build_v1_readiness_report() -> V1ReadinessReport {
         suites,
         criteria,
         recommended_next_actions: v1_readiness_next_actions(ok, failed_scenarios),
+    }
+}
+
+fn build_v2_readiness_report() -> V2ReadinessReport {
+    let target_kind = TargetKind::MnemeV2;
+    let target = target_kind.as_str().to_owned();
+    let suites = V2_READINESS_SUITES
+        .iter()
+        .map(|suite| build_v1_readiness_suite_report(suite, target_kind))
+        .collect::<Vec<_>>();
+    let criteria = v2_readiness_criteria(&suites);
+    let ok = criteria
+        .iter()
+        .all(|criterion| criterion.status == CheckStatus::Pass);
+    let suite_count = suites.len();
+    let passed_suites = suites.iter().filter(|suite| suite.ok()).count();
+    let failed_suites = suite_count.saturating_sub(passed_suites);
+    let scenario_count = suites.iter().map(|suite| suite.scenario_count).sum();
+    let passed_scenarios = suites.iter().map(|suite| suite.passed).sum();
+    let failed_scenarios = suites.iter().map(|suite| suite.failed).sum();
+    V2ReadinessReport {
+        report_schema_version: V2_READINESS_SCHEMA_VERSION,
+        command: "v2-readiness",
+        target,
+        ok,
+        readiness_status: if ok {
+            "ready_for_team_v2_dogfood"
+        } else {
+            "blocked"
+        }
+        .to_owned(),
+        required_suites: V2_READINESS_SUITES
+            .iter()
+            .map(|suite| (*suite).to_owned())
+            .collect(),
+        suite_count,
+        passed_suites,
+        failed_suites,
+        scenario_count,
+        passed_scenarios,
+        failed_scenarios,
+        suites,
+        criteria,
+        recommended_next_actions: v2_readiness_next_actions(ok, failed_scenarios),
     }
 }
 
@@ -1165,6 +1276,169 @@ fn v1_readiness_next_actions(ok: bool, failed_scenarios: usize) -> Vec<String> {
     if failed_scenarios > 0 {
         actions.push(format!(
             "Fix or explicitly re-scope {failed_scenarios} failed scenario(s) before continuing v1 product work."
+        ));
+    }
+    actions
+}
+
+fn v2_readiness_criteria(suites: &[V1ReadinessSuiteReport]) -> Vec<AcceptanceGateReport> {
+    let mut criteria = Vec::new();
+    let missing = V2_READINESS_SUITES
+        .iter()
+        .filter(|required| !suites.iter().any(|suite| suite.suite == **required))
+        .copied()
+        .collect::<Vec<_>>();
+    if missing.is_empty() {
+        criteria.push(AcceptanceGateReport::pass(
+            "required-suites.present",
+            format!(
+                "required suites present: {}",
+                V2_READINESS_SUITES.join(", ")
+            ),
+        ));
+    } else {
+        criteria.push(AcceptanceGateReport::fail(
+            "required-suites.present",
+            format!("missing required suite(s): {}", missing.join(", ")),
+        ));
+    }
+
+    let discovery_failed = suites
+        .iter()
+        .filter(|suite| !suite.discovery_ok)
+        .map(|suite| suite.suite.as_str())
+        .collect::<Vec<_>>();
+    if discovery_failed.is_empty() {
+        criteria.push(AcceptanceGateReport::pass(
+            "suite.discovery",
+            "all required suite directories were discovered",
+        ));
+    } else {
+        criteria.push(AcceptanceGateReport::fail(
+            "suite.discovery",
+            format!("suite discovery failed for {}", discovery_failed.join(", ")),
+        ));
+    }
+
+    let validation_failed = suites
+        .iter()
+        .filter(|suite| !suite.validation_ok)
+        .map(|suite| suite.suite.as_str())
+        .collect::<Vec<_>>();
+    if validation_failed.is_empty() {
+        criteria.push(AcceptanceGateReport::pass(
+            "scenario.validation",
+            "all required team scenarios are valid",
+        ));
+    } else {
+        criteria.push(AcceptanceGateReport::fail(
+            "scenario.validation",
+            format!(
+                "scenario validation failed for {}",
+                validation_failed.join(", ")
+            ),
+        ));
+    }
+
+    let team_count = suites
+        .iter()
+        .find(|suite| suite.suite == "team")
+        .map(|suite| suite.scenario_count)
+        .unwrap_or_default();
+    if team_count >= V2_READINESS_MIN_TEAM_SCENARIOS {
+        criteria.push(AcceptanceGateReport::pass(
+            "team.coverage",
+            format!("{team_count} team scenario(s) cover v2 policy workflows"),
+        ));
+    } else {
+        criteria.push(AcceptanceGateReport::fail(
+            "team.coverage",
+            format!(
+                "{team_count} team scenario(s) found; expected at least {V2_READINESS_MIN_TEAM_SCENARIOS}"
+            ),
+        ));
+    }
+
+    let run_failed = suites
+        .iter()
+        .filter(|suite| !suite.run_ok)
+        .map(|suite| suite.suite.as_str())
+        .collect::<Vec<_>>();
+    if run_failed.is_empty() {
+        criteria.push(AcceptanceGateReport::pass(
+            "target.mneme-v2",
+            "mneme-v2 passed all deterministic team readiness suites",
+        ));
+    } else {
+        criteria.push(AcceptanceGateReport::fail(
+            "target.mneme-v2",
+            format!("mneme-v2 failed suite(s): {}", run_failed.join(", ")),
+        ));
+    }
+
+    criteria.extend(v2_seeded_fault_criteria());
+    criteria
+}
+
+fn v2_seeded_fault_criteria() -> Vec<AcceptanceGateReport> {
+    let paths = match scenario_paths_for_suite("team") {
+        Ok(paths) => paths,
+        Err(error) => {
+            return vec![AcceptanceGateReport::fail(
+                "seeded-fault.discovery",
+                error.to_string(),
+            )];
+        }
+    };
+    V2_READINESS_FAULTS
+        .iter()
+        .map(|fault_mode| {
+            let options = CommandOptions {
+                target_kind: TargetKind::MnemeV2,
+                fault_mode: *fault_mode,
+                ..Default::default()
+            };
+            match eval_report_for_paths(&paths, &options) {
+                Ok(report) if !report.ok => AcceptanceGateReport::pass(
+                    format!("seeded-fault.{}", fault_mode.as_str()),
+                    format!(
+                        "fault detected by {} failed team scenario(s)",
+                        report.failed
+                    ),
+                ),
+                Ok(report) => AcceptanceGateReport::fail(
+                    format!("seeded-fault.{}", fault_mode.as_str()),
+                    format!(
+                        "fault unexpectedly passed across {} team scenario(s)",
+                        report.scenario_count
+                    ),
+                ),
+                Err(error) => AcceptanceGateReport::fail(
+                    format!("seeded-fault.{}", fault_mode.as_str()),
+                    error.to_string(),
+                ),
+            }
+        })
+        .collect()
+}
+
+fn v2_readiness_next_actions(ok: bool, failed_scenarios: usize) -> Vec<String> {
+    if ok {
+        return vec![
+            "Use this report as the deterministic gate before v2 team-memory releases.".to_owned(),
+            "Run team dogfood against real handoff workflows before changing sync/server behavior."
+                .to_owned(),
+        ];
+    }
+    let mut actions = vec![
+        "Inspect failed team suite entries and replay the listed scenarios with `mneme-eval replay`."
+            .to_owned(),
+        "Do not treat v2 as team-dogfood-ready until this command reports ready_for_team_v2_dogfood."
+            .to_owned(),
+    ];
+    if failed_scenarios > 0 {
+        actions.push(format!(
+            "Fix or explicitly re-scope {failed_scenarios} failed team scenario(s) before continuing v2 product work."
         ));
     }
     actions
@@ -1825,7 +2099,7 @@ fn parse_replay_args(raw_args: Vec<String>) -> Result<(PathBuf, CommandOptions),
     }
     let Some(path) = path else {
         return Err(EvalError::invalid_cli(
-            "usage: mneme-eval replay <scenario.yaml> [--target fake|mneme-v1|mneme-v1-command] [--extractor-command <program>] [--extractor-arg <arg>]... [--json] [--report <path>]",
+            "usage: mneme-eval replay <scenario.yaml> [--target fake|mneme-v1|mneme-v1-command|mneme-v2] [--extractor-command <program>] [--extractor-arg <arg>]... [--json] [--report <path>]",
         ));
     };
     Ok((path, options))
@@ -2176,6 +2450,30 @@ fn parse_v1_readiness_args(raw_args: Vec<String>) -> Result<V1ReadinessOptions, 
             value => {
                 return Err(EvalError::invalid_cli(format!(
                     "unknown v1-readiness option: {value}"
+                )));
+            }
+        }
+        idx += 1;
+    }
+    Ok(options)
+}
+
+fn parse_v2_readiness_args(raw_args: Vec<String>) -> Result<V2ReadinessOptions, EvalError> {
+    let mut options = V2ReadinessOptions::default();
+    let mut idx = 0;
+    while idx < raw_args.len() {
+        match raw_args[idx].as_str() {
+            "--json" => options.json = true,
+            "--report" => {
+                idx += 1;
+                let Some(value) = raw_args.get(idx) else {
+                    return Err(EvalError::invalid_cli("--report requires a path"));
+                };
+                options.report_path = Some(PathBuf::from(value));
+            }
+            value => {
+                return Err(EvalError::invalid_cli(format!(
+                    "unknown v2-readiness option: {value}"
                 )));
             }
         }
@@ -2688,6 +2986,23 @@ fn emit_v1_readiness_report(
     Ok(())
 }
 
+fn emit_v2_readiness_report(
+    report: &V2ReadinessReport,
+    options: &V2ReadinessOptions,
+) -> Result<(), EvalError> {
+    if let Some(path) = &options.report_path {
+        write_report(path, report)?;
+    }
+    if options.json {
+        let json = serde_json::to_string_pretty(report)
+            .map_err(|source| EvalError::json(Path::new("<stdout>"), source))?;
+        println!("{json}");
+    } else {
+        print_v2_readiness_report(report);
+    }
+    Ok(())
+}
+
 fn emit_dogfood_summary_report(
     report: &DogfoodSummaryReport,
     options: &DogfoodSummaryOptions,
@@ -3085,6 +3400,52 @@ fn print_v1_readiness_report(report: &V1ReadinessReport) {
     }
 }
 
+fn print_v2_readiness_report(report: &V2ReadinessReport) {
+    println!(
+        "v2-readiness: status={}, target={}, suites={}/{}, scenarios={}/{}",
+        report.readiness_status,
+        report.target,
+        report.passed_suites,
+        report.suite_count,
+        report.passed_scenarios,
+        report.scenario_count
+    );
+    for suite in &report.suites {
+        let status = if suite.ok() { "PASS" } else { "FAIL" };
+        println!(
+            "- {status} suite {}: discovery={}, validation={}, run={}, {}/{} scenario(s)",
+            suite.suite,
+            suite.discovery_ok,
+            suite.validation_ok,
+            suite.run_ok,
+            suite.passed,
+            suite.scenario_count
+        );
+        if let Some(error) = &suite.error {
+            println!("  - error={error}");
+        }
+        if !suite.failed_scenarios.is_empty() {
+            println!("  - failed scenarios={}", suite.failed_scenarios.join(", "));
+        }
+        for check in &suite.failed_checks {
+            println!("  - {} failed check={}", check.scenario_id, check.check);
+        }
+    }
+    println!("criteria:");
+    for criterion in &report.criteria {
+        let status = if criterion.status == CheckStatus::Pass {
+            "PASS"
+        } else {
+            "FAIL"
+        };
+        println!("- {status} {}: {}", criterion.name, criterion.detail);
+    }
+    println!("next:");
+    for action in &report.recommended_next_actions {
+        println!("- {action}");
+    }
+}
+
 fn print_dogfood_summary_report(report: &DogfoodSummaryReport) {
     println!(
         "dogfood-summary: status={}, source={}, artifacts={}/{}, gates={}/{}",
@@ -3169,6 +3530,10 @@ mod tests {
         assert!(v1_readiness_help.contains("Usage: mneme-eval v1-readiness"));
         assert!(v1_readiness_help.contains("core, runtime, agent, and dogfood"));
 
+        let v2_readiness_help = command_help("v2-readiness").expect("v2-readiness help");
+        assert!(v2_readiness_help.contains("Usage: mneme-eval v2-readiness"));
+        assert!(v2_readiness_help.contains("ACL bypass"));
+
         let dogfood_summary_help = command_help("dogfood-summary").expect("dogfood-summary help");
         assert!(dogfood_summary_help.contains("Usage: mneme-eval dogfood-summary"));
         assert!(dogfood_summary_help.contains("ready_for_manual_dogfood"));
@@ -3209,9 +3574,21 @@ mod tests {
             "--suite".to_owned(),
             "core".to_owned(),
             "--target".to_owned(),
-            "mneme-v2".to_owned(),
+            "mneme-v3".to_owned(),
         ]);
         assert!(result.is_err());
+    }
+
+    #[test]
+    fn parse_suite_accepts_mneme_v2_target() -> Result<(), EvalError> {
+        let (_, options) = parse_suite_args(vec![
+            "--suite".to_owned(),
+            "team".to_owned(),
+            "--target".to_owned(),
+            "mneme-v2".to_owned(),
+        ])?;
+        assert_eq!(options.target_kind, TargetKind::MnemeV2);
+        Ok(())
     }
 
     #[test]
@@ -3294,6 +3671,27 @@ mod tests {
     #[test]
     fn parse_v1_readiness_rejects_positional_args() {
         let result = parse_v1_readiness_args(vec!["core".to_owned()]);
+        assert!(result.is_err());
+    }
+
+    #[test]
+    fn parse_v2_readiness_accepts_report_options() -> Result<(), EvalError> {
+        let options = parse_v2_readiness_args(vec![
+            "--json".to_owned(),
+            "--report".to_owned(),
+            "evals/reports/v2-readiness.json".to_owned(),
+        ])?;
+        assert!(options.json);
+        assert_eq!(
+            options.report_path,
+            Some(PathBuf::from("evals/reports/v2-readiness.json"))
+        );
+        Ok(())
+    }
+
+    #[test]
+    fn parse_v2_readiness_rejects_positional_args() {
+        let result = parse_v2_readiness_args(vec!["team".to_owned()]);
         assert!(result.is_err());
     }
 

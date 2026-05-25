@@ -80,7 +80,7 @@ Acceptance:
 Goal: useful local-first memory gateway for one power user using multiple AI
 agents.
 
-Status: active. The current implementation is the v1 personal-memory profile.
+Status: shipped as the current personal-memory profile.
 
 Suggested slices:
 
@@ -129,15 +129,17 @@ Suggested slices:
 
 Goal: safe team memory control plane with personal/project/team boundaries.
 
-Status: planned. Team/shared memory behavior is not implemented yet.
+Status: active local preview. The current implementation includes the v2 local
+team-memory policy core, CLI workflow, team eval suite, v2 readiness gate, and
+team dogfood evidence script. Hosted sync/server deployment is still planned.
 
 Suggested slices:
 
-- workspace model
-- user / project / team scopes
-- ACL
-- agent permissions
-- team promotion workflow
+- workspace model: shipped locally
+- user / project / team scopes: shipped locally
+- ACL: shipped locally
+- agent permissions: shipped locally
+- team promotion workflow: shipped locally
 - self-hosted sync server
 - admin audit
 - offboarding
@@ -227,8 +229,8 @@ not separate implementation trees.
 The current public documentation tree follows that positioning:
 
 ```text
-docs/v1/             current personal-memory runtime and local CLI
-docs/v2/             future team/shared-memory product scope
+docs/v1/             personal-memory runtime and local CLI
+docs/v2/             team/shared-memory policy core and local CLI
 docs/eval-harness/   scenario, baseline, candidate, and provider eval workflow
 docs/project/        roadmap, release, packaging, and policy material
 ```
@@ -253,13 +255,11 @@ Public users should be able to:
 
 ## Current Next Step
 
-The next large product-supporting phase should close the v1 eval feedback loop:
+The next large product-supporting phase should harden v2 beyond the local
+policy core:
 
-1. Promote reviewed candidate artifacts into official eval scenarios.
-2. Compare current and previous baseline reports for regressions and trend
-   signals.
-3. Use those reports to decide whether v1 behavior is improving before opening
-   v2 team/shared-memory work.
-
-Do not start team sync before the eval harness can preserve real v1 failures as
-stable regression scenarios and compare quality across releases.
+1. Run real team dogfood with sanitized handoff feedback.
+2. Add sync/server design only after local ACL, promotion, revoke, citation, and
+   seeded-fault gates stay green.
+3. Preserve any dogfood failures as public-safe team scenarios or local
+   candidate artifacts before changing storage or deployment behavior.

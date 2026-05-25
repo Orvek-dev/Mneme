@@ -3,6 +3,7 @@ use std::collections::BTreeMap;
 use crate::error::EvalError;
 use crate::fake::FakeEvalTarget;
 use crate::mneme_v1::{MnemeV1CommandEvalTarget, MnemeV1EvalTarget};
+use crate::mneme_v2::MnemeV2EvalTarget;
 use crate::scenario::Scenario;
 use serde::{Deserialize, Serialize};
 
@@ -20,6 +21,7 @@ pub(crate) enum TargetKind {
     Fake,
     MnemeV1,
     MnemeV1Command,
+    MnemeV2,
 }
 
 impl TargetKind {
@@ -28,12 +30,13 @@ impl TargetKind {
             "fake" => Some(Self::Fake),
             "mneme-v1" => Some(Self::MnemeV1),
             "mneme-v1-command" => Some(Self::MnemeV1Command),
+            "mneme-v2" => Some(Self::MnemeV2),
             _ => None,
         }
     }
 
     pub(crate) fn available() -> &'static str {
-        "fake, mneme-v1, mneme-v1-command"
+        "fake, mneme-v1, mneme-v1-command, mneme-v2"
     }
 
     pub(crate) fn as_str(self) -> &'static str {
@@ -41,6 +44,7 @@ impl TargetKind {
             Self::Fake => "fake",
             Self::MnemeV1 => "mneme-v1",
             Self::MnemeV1Command => "mneme-v1-command",
+            Self::MnemeV2 => "mneme-v2",
         }
     }
 }
@@ -51,6 +55,9 @@ pub(crate) enum FaultMode {
     SkipClaims,
     LeakSecrets,
     DropCitations,
+    BypassAcl,
+    UnapprovedPromotion,
+    IgnoreRevocation,
 }
 
 impl FaultMode {
@@ -60,6 +67,9 @@ impl FaultMode {
             "skip-claims" => Some(Self::SkipClaims),
             "leak-secrets" => Some(Self::LeakSecrets),
             "drop-citations" => Some(Self::DropCitations),
+            "bypass-acl" => Some(Self::BypassAcl),
+            "unapproved-promotion" => Some(Self::UnapprovedPromotion),
+            "ignore-revocation" => Some(Self::IgnoreRevocation),
             _ => None,
         }
     }
@@ -70,6 +80,9 @@ impl FaultMode {
             Self::SkipClaims => "skip-claims",
             Self::LeakSecrets => "leak-secrets",
             Self::DropCitations => "drop-citations",
+            Self::BypassAcl => "bypass-acl",
+            Self::UnapprovedPromotion => "unapproved-promotion",
+            Self::IgnoreRevocation => "ignore-revocation",
         }
     }
 }
@@ -138,6 +151,7 @@ pub(crate) fn build_target(kind: TargetKind) -> Box<dyn EvalTarget> {
         TargetKind::Fake => Box::new(FakeEvalTarget),
         TargetKind::MnemeV1 => Box::new(MnemeV1EvalTarget),
         TargetKind::MnemeV1Command => Box::new(MnemeV1CommandEvalTarget),
+        TargetKind::MnemeV2 => Box::new(MnemeV2EvalTarget),
     }
 }
 
@@ -213,6 +227,46 @@ pub(crate) struct ActualState {
     pub(crate) store: Option<StoreActual>,
     pub(crate) quality: Option<QualityActual>,
     pub(crate) curation: Option<CurationActual>,
+    pub(crate) team: Option<TeamActual>,
+}
+
+#[derive(Debug, Clone, Default)]
+pub(crate) struct TeamActual {
+    pub(crate) validation_ok: bool,
+    pub(crate) memory_count: usize,
+    pub(crate) active_memory_count: usize,
+    pub(crate) blocked_secret_count: usize,
+    pub(crate) promotion_count: usize,
+    pub(crate) pending_promotion_count: usize,
+    pub(crate) approved_promotion_count: usize,
+    pub(crate) rejected_promotion_count: usize,
+    pub(crate) denied_count: usize,
+    pub(crate) scope_leak_count: usize,
+    pub(crate) secret_leak_count: usize,
+    pub(crate) context_pack: Option<TeamContextActual>,
+}
+
+#[derive(Debug, Clone, Default)]
+pub(crate) struct TeamContextActual {
+    pub(crate) items: Vec<TeamContextItemActual>,
+    pub(crate) omitted: Vec<TeamOmittedItemActual>,
+}
+
+#[derive(Debug, Clone)]
+pub(crate) struct TeamContextItemActual {
+    pub(crate) memory_id: String,
+    pub(crate) memory_text: String,
+    pub(crate) scope: String,
+    pub(crate) source_event_ids: Vec<String>,
+    pub(crate) source_memory_ids: Vec<String>,
+    pub(crate) score: u32,
+}
+
+#[derive(Debug, Clone)]
+pub(crate) struct TeamOmittedItemActual {
+    pub(crate) memory_id: String,
+    pub(crate) memory_text: String,
+    pub(crate) reason: String,
 }
 
 #[derive(Debug, Clone)]

@@ -1,0 +1,53 @@
+id: team-revoked-agent-denied
+tags:
+  - team
+  - revoke
+  - agent
+budget:
+  daily_cloud_tokens: 100
+team_flow:
+  workspace_id: engineering
+  users:
+    - id: alice
+      role: admin
+    - id: bob
+      role: member
+  agents:
+    - id: codex-bob
+      owner_user_id: bob
+  projects:
+    - id: atlas
+      members:
+        - bob
+  memories:
+    - actor:
+        user_id: bob
+        agent_id: codex-bob
+      scope: project:atlas
+      text: "remember: Atlas handoff uses build checklist"
+  revoke_agents:
+    - actor:
+        user_id: alice
+      target_id: codex-bob
+  contexts:
+    - actor:
+        user_id: bob
+        agent_id: codex-bob
+      query: "build checklist"
+expected:
+  team:
+    validation_ok: true
+    memory_count: 1
+    active_memory_count: 1
+    blocked_secret_count: 0
+    denied_count: 1
+    scope_leak_count: 0
+    secret_leak_count: 0
+    context_item_count: 0
+    context_must_not_include:
+      - build checklist
+    omitted_reason_contains:
+      - agent codex-bob is revoked
+    audit_kinds:
+      - team.agent.revoke
+      - team.policy.deny

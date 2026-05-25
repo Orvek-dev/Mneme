@@ -13,6 +13,7 @@ mod dogfood;
 mod error;
 mod fake;
 mod mneme_v1;
+mod mneme_v2;
 mod redaction;
 mod report;
 mod runtime;

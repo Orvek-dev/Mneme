@@ -1,0 +1,49 @@
+id: team-project-member-access
+tags:
+  - team
+  - project
+  - recall
+budget:
+  daily_cloud_tokens: 100
+team_flow:
+  workspace_id: engineering
+  users:
+    - id: alice
+      role: admin
+    - id: bob
+      role: member
+  agents:
+    - id: codex-bob
+      owner_user_id: bob
+  projects:
+    - id: atlas
+      members:
+        - bob
+  memories:
+    - actor:
+        user_id: bob
+        agent_id: codex-bob
+      scope: project:atlas
+      text: "remember: Atlas handoff uses build checklist"
+  contexts:
+    - actor:
+        user_id: bob
+        agent_id: codex-bob
+      query: "build checklist"
+expected:
+  team:
+    validation_ok: true
+    memory_count: 1
+    active_memory_count: 1
+    blocked_secret_count: 0
+    denied_count: 0
+    scope_leak_count: 0
+    secret_leak_count: 0
+    context_item_count: 1
+    context_must_include:
+      - build checklist
+    citation_required: true
+    audit_kinds:
+      - team.project.upsert
+      - team.memory.write
+      - team.context.read

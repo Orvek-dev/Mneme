@@ -37,6 +37,7 @@
 //! ```
 
 mod v1;
+mod v2;
 
 pub use v1::{
     validate_state, AuditKind, AuditRecord, BudgetState, ClaimRecord, ClaimStatus,
@@ -50,6 +51,16 @@ pub use v1::{
     StoreInspection, StoreRepairReport, StoreRestoreReport, ValidationSeverity,
     DEFAULT_CONTEXT_MAX_ITEMS, EXTRACTOR_COMMAND_SCHEMA_VERSION, MNEME_STATE_SCHEMA_VERSION,
 };
+pub use v2::{
+    validate_team_state, JsonTeamFileStore, TeamActor, TeamAgentInput, TeamAgentRecord,
+    TeamAuditKind, TeamAuditRecord, TeamContextItem, TeamContextPack, TeamContextQuery,
+    TeamEventRecord, TeamMemoryConfig, TeamMemoryEngine, TeamMemoryRecord, TeamMemoryState,
+    TeamMemoryStatus, TeamMemoryStore, TeamOmittedContextItem, TeamPolicyError, TeamProjectInput,
+    TeamProjectRecord, TeamPromotionCreateInput, TeamPromotionRecord, TeamPromotionReviewInput,
+    TeamPromotionStatus, TeamRememberInput, TeamRole, TeamStateValidationIssue,
+    TeamStateValidationReport, TeamStoreError, TeamUserInput, TeamUserRecord,
+    TeamValidationSeverity, DEFAULT_TEAM_CONTEXT_MAX_ITEMS, MNEME_TEAM_STATE_SCHEMA_VERSION,
+};
 
 /// Public product name.
 pub const PRODUCT_NAME: &str = "Mneme";
@@ -61,6 +72,8 @@ pub enum BuildStage {
     Bootstrap,
     /// Personal-memory v1 core is available behind eval harness gates.
     PersonalCoreV1,
+    /// Team-memory v2 policy core is available behind eval harness gates.
+    TeamCoreV2,
 }
 
 impl BuildStage {
@@ -70,6 +83,7 @@ impl BuildStage {
         match self {
             Self::Bootstrap => "bootstrap",
             Self::PersonalCoreV1 => "personal-core-v1",
+            Self::TeamCoreV2 => "team-core-v2",
         }
     }
 }
@@ -83,5 +97,6 @@ mod tests {
         assert_eq!(PRODUCT_NAME, "Mneme");
         assert_eq!(BuildStage::Bootstrap.as_str(), "bootstrap");
         assert_eq!(BuildStage::PersonalCoreV1.as_str(), "personal-core-v1");
+        assert_eq!(BuildStage::TeamCoreV2.as_str(), "team-core-v2");
     }
 }

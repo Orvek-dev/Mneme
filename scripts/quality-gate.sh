@@ -16,6 +16,7 @@ RUSTDOCFLAGS="-D warnings" cargo doc --workspace --no-deps
 python3 -m py_compile wrappers/openai_extractor.py
 python3 -m py_compile scripts/v1-manual-dogfood.py
 python3 -m py_compile scripts/v1-hard-dogfood.py
+python3 -m py_compile scripts/v2-team-dogfood.py
 python3 -m py_compile scripts/v1-real-use-pilot.py
 python3 -m py_compile scripts/v1-ontology-benchmark.py
 MANUAL_DOGFOOD_DATASET="${TMP_ROOT}/mneme-quality-gate-manual-dogfood-dataset.json"
@@ -45,6 +46,17 @@ grep -q '"ok": true' "$HARD_DOGFOOD_CANDIDATE_CHECK"
 scripts/v1-hard-dogfood.py --check-trend > "$HARD_DOGFOOD_TREND"
 grep -q '"command": "v1-hard-dogfood-trend"' "$HARD_DOGFOOD_TREND"
 grep -q '"status": "compared"' "$HARD_DOGFOOD_TREND"
+V2_TEAM_CONTRACT="${TMP_ROOT}/mneme-quality-gate-v2-team-contract.json"
+V2_TEAM_DATASET="${TMP_ROOT}/mneme-quality-gate-v2-team-dataset.json"
+V2_TEAM_FAULTS="${TMP_ROOT}/mneme-quality-gate-v2-team-seeded-faults.json"
+scripts/v2-team-dogfood.py --check-contract > "$V2_TEAM_CONTRACT"
+grep -q '"command": "v2-team-dogfood-contract"' "$V2_TEAM_CONTRACT"
+grep -q '"team_record_count": 120' "$V2_TEAM_CONTRACT"
+scripts/v2-team-dogfood.py --check-dataset > "$V2_TEAM_DATASET"
+grep -q '"adversarial_record_count": 80' "$V2_TEAM_DATASET"
+grep -q '"handoff_workflow_count": 25' "$V2_TEAM_DATASET"
+scripts/v2-team-dogfood.py --check-seeded-faults > "$V2_TEAM_FAULTS"
+grep -q '"detection_rate": 1.0' "$V2_TEAM_FAULTS"
 REAL_USE_CONTRACT="${TMP_ROOT}/mneme-quality-gate-real-use-contract.json"
 REAL_USE_FEEDBACK="${TMP_ROOT}/mneme-quality-gate-real-use-feedback.json"
 scripts/v1-real-use-pilot.py --check-contract > "$REAL_USE_CONTRACT"
@@ -235,6 +247,9 @@ grep -q -- "--scenario-root <dir>" "$MNEME_EVAL_HELP"
 cargo run -p mneme-eval -- v1-readiness --help > "$MNEME_EVAL_HELP"
 grep -q "Usage: mneme-eval v1-readiness" "$MNEME_EVAL_HELP"
 grep -q "dogfood" "$MNEME_EVAL_HELP"
+cargo run -p mneme-eval -- v2-readiness --help > "$MNEME_EVAL_HELP"
+grep -q "Usage: mneme-eval v2-readiness" "$MNEME_EVAL_HELP"
+grep -q "team-memory readiness" "$MNEME_EVAL_HELP"
 cargo run -p mneme-eval -- dogfood-summary --help > "$MNEME_EVAL_HELP"
 grep -q "Usage: mneme-eval dogfood-summary" "$MNEME_EVAL_HELP"
 grep -q "ready_for_manual_dogfood" "$MNEME_EVAL_HELP"
@@ -248,6 +263,22 @@ cargo run -p mneme-cli -- claims --status active --store "$STORE" --json > "$CLA
 grep -q '"claim_count": 1' "$CLAIMS_REPORT"
 grep -q '"id": "claim-001"' "$CLAIMS_REPORT"
 cargo run -p mneme-cli -- context "local-first" --store "$STORE" --json | grep -q "local-first tools"
+TEAM_STORE="${TMP_ROOT}/mneme-quality-gate-team-v2.json"
+TEAM_CONTEXT="${TMP_ROOT}/mneme-quality-gate-team-context.json"
+TEAM_VALIDATE="${TMP_ROOT}/mneme-quality-gate-team-validate.json"
+rm -f "$TEAM_STORE" "$TEAM_CONTEXT" "$TEAM_VALIDATE"
+cargo run -p mneme-cli -- team init --admin alice --store "$TEAM_STORE" --json | grep -q '"command": "team.init"'
+cargo run -p mneme-cli -- team user add bob --role member --store "$TEAM_STORE" --json | grep -q '"command": "team.user.add"'
+cargo run -p mneme-cli -- team agent add codex-bob --owner bob --store "$TEAM_STORE" --json | grep -q '"command": "team.agent.add"'
+cargo run -p mneme-cli -- team project add atlas --member bob --store "$TEAM_STORE" --json | grep -q '"command": "team.project.add"'
+cargo run -p mneme-cli -- team remember "Atlas deploys require rollback notes" --actor bob --agent codex-bob --scope project:atlas --store "$TEAM_STORE" --json | grep -q '"id": "team-memory-001"'
+cargo run -p mneme-cli -- team promote team-memory-001 --actor bob --agent codex-bob --store "$TEAM_STORE" --json | grep -q '"status": "pending"'
+cargo run -p mneme-cli -- team review team-promotion-001 --actor alice --approve --store "$TEAM_STORE" --json | grep -q '"status": "approved"'
+cargo run -p mneme-cli -- team context "rollback notes" --actor alice --store "$TEAM_STORE" --json > "$TEAM_CONTEXT"
+grep -q '"item_count": 1' "$TEAM_CONTEXT"
+grep -q 'rollback notes' "$TEAM_CONTEXT"
+cargo run -p mneme-cli -- team validate --store "$TEAM_STORE" --json > "$TEAM_VALIDATE"
+grep -q '"ok": true' "$TEAM_VALIDATE"
 REVIEW_STORE="${TMP_ROOT}/mneme-quality-gate-review.json"
 REVIEW_MD="${TMP_ROOT}/mneme-quality-gate-review.md"
 REVIEW_JSON="${TMP_ROOT}/mneme-quality-gate-review-artifact.json"
@@ -611,6 +642,7 @@ cargo run -p mneme-eval -- validate --suite model
 cargo run -p mneme-eval -- validate --suite runtime
 cargo run -p mneme-eval -- validate --suite agent
 cargo run -p mneme-eval -- validate --suite dogfood
+cargo run -p mneme-eval -- validate --suite team
 
 for scenario in evals/fixtures/invalid/*.yaml; do
   if cargo run -p mneme-eval -- validate "$scenario"; then
@@ -627,6 +659,7 @@ cargo run -p mneme-eval -- run --suite agent --target fake
 cargo run -p mneme-eval -- run --suite agent --target mneme-v1
 cargo run -p mneme-eval -- run --suite dogfood --target fake
 cargo run -p mneme-eval -- run --suite dogfood --target mneme-v1
+cargo run -p mneme-eval -- run --suite team --target mneme-v2
 cargo run -p mneme-eval -- run --suite model --target mneme-v1-command --extractor-command evals/fixtures/command-extractor.sh
 
 MNEME_OPENAI_DRY_RUN=1 cargo run -p mneme-eval -- run --suite model \
@@ -635,6 +668,10 @@ MNEME_OPENAI_DRY_RUN=1 cargo run -p mneme-eval -- run --suite model \
 
 if cargo run -p mneme-eval -- run --suite core --target fake --seeded-fault skip-claims; then
   echo "quality-gate: seeded fault unexpectedly passed" >&2
+  exit 1
+fi
+if cargo run -p mneme-eval -- run --suite team --target mneme-v2 --seeded-fault bypass-acl; then
+  echo "quality-gate: v2 seeded fault unexpectedly passed" >&2
   exit 1
 fi
 
@@ -646,6 +683,7 @@ cargo run -p mneme-eval -- acceptance --suite agent --target fake
 cargo run -p mneme-eval -- acceptance --suite agent --target mneme-v1
 cargo run -p mneme-eval -- acceptance --suite dogfood --target fake
 cargo run -p mneme-eval -- acceptance --suite dogfood --target mneme-v1
+cargo run -p mneme-eval -- acceptance --suite team --target mneme-v2
 cargo run -p mneme-eval -- acceptance --suite model --target mneme-v1-command --extractor-command evals/fixtures/command-extractor.sh
 
 MNEME_OPENAI_DRY_RUN=1 cargo run -p mneme-eval -- acceptance --suite model \
@@ -676,14 +714,17 @@ CANDIDATE_PROMOTE_REPORT="${TMP_ROOT}/mneme-quality-gate-candidate-promote.json"
 CANDIDATE_PROMOTE_STDOUT="${TMP_ROOT}/mneme-quality-gate-candidate-promote.stdout.json"
 V1_READINESS_REPORT="${TMP_ROOT}/mneme-quality-gate-v1-readiness.json"
 V1_READINESS_STDOUT="${TMP_ROOT}/mneme-quality-gate-v1-readiness.stdout.json"
+V2_READINESS_REPORT="${TMP_ROOT}/mneme-quality-gate-v2-readiness.json"
+V2_READINESS_STDOUT="${TMP_ROOT}/mneme-quality-gate-v2-readiness.stdout.json"
 DOGFOOD_OUT_DIR="${TMP_ROOT}/mneme-quality-gate-v1-dogfood"
+V2_DOGFOOD_OUT_DIR="${TMP_ROOT}/mneme-quality-gate-v2-dogfood"
 PROMOTED_SCENARIO="${CANDIDATE_PROMOTE_ROOT}/dogfood/dogfood-curation-restore-from-backup.yaml"
-rm -rf "$CANDIDATE_DIR" "$CANDIDATE_PROMOTE_ROOT" "$DOGFOOD_OUT_DIR"
+rm -rf "$CANDIDATE_DIR" "$CANDIDATE_PROMOTE_ROOT" "$DOGFOOD_OUT_DIR" "$V2_DOGFOOD_OUT_DIR"
 rm -f "$CANDIDATE_REPORT" "$CANDIDATE_STDOUT" "$CANDIDATE_CHECK_REPORT" "$CANDIDATE_CHECK_STDOUT" \
   "$CANDIDATE_PROMOTE_REPORT" "$CANDIDATE_PROMOTE_STDOUT" \
   "$CORE_BASELINE_REPORT" "$CORE_BASELINE_STDOUT" "$BASELINE_COMPARE_REPORT" \
   "$BASELINE_COMPARE_STDOUT" "$BASELINE_COMPARE_FAIL_STDOUT" \
-  "$V1_READINESS_REPORT" "$V1_READINESS_STDOUT"
+  "$V1_READINESS_REPORT" "$V1_READINESS_STDOUT" "$V2_READINESS_REPORT" "$V2_READINESS_STDOUT"
 MNEME_OPENAI_DRY_RUN=1 cargo run -p mneme-eval -- baseline --suite model \
   --target mneme-v1-command \
   --extractor-command wrappers/openai_extractor.py \
@@ -800,6 +841,14 @@ grep -q '"readiness_status": "ready_for_v1_dogfood"' "$V1_READINESS_REPORT"
 grep -q '"suite": "dogfood"' "$V1_READINESS_REPORT"
 grep -q '"scenario_count": 22' "$V1_READINESS_REPORT"
 
+cargo run -p mneme-eval -- v2-readiness \
+  --report "$V2_READINESS_REPORT" \
+  --json > "$V2_READINESS_STDOUT"
+grep -q '"command": "v2-readiness"' "$V2_READINESS_STDOUT"
+grep -q '"readiness_status": "ready_for_team_v2_dogfood"' "$V2_READINESS_REPORT"
+grep -q '"suite": "team"' "$V2_READINESS_REPORT"
+grep -q '"scenario_count": 6' "$V2_READINESS_REPORT"
+
 MNEME_DOGFOOD_RUN_LABEL="quality-gate" \
 MNEME_DOGFOOD_OUT_DIR="$DOGFOOD_OUT_DIR" \
   ./scripts/v1-dogfood.sh
@@ -812,6 +861,12 @@ grep -q '"decision_status": "ready_for_manual_dogfood"' "$DOGFOOD_OUT_DIR/dogfoo
 cargo run -p mneme-eval -- dogfood-summary "$DOGFOOD_OUT_DIR" \
   --json > "${DOGFOOD_OUT_DIR}/dogfood-summary-rerun.stdout.json"
 grep -q '"decision_status": "ready_for_manual_dogfood"' "${DOGFOOD_OUT_DIR}/dogfood-summary-rerun.stdout.json"
+
+scripts/v2-team-dogfood.py --out-dir "$V2_DOGFOOD_OUT_DIR" --force
+grep -q '"command": "v2-team-dogfood"' "$V2_DOGFOOD_OUT_DIR/summary.json"
+grep -q '"status": "passed"' "$V2_DOGFOOD_OUT_DIR/summary.json"
+grep -q '"command": "v2-team-dogfood-scorecard"' "$V2_DOGFOOD_OUT_DIR/scorecard.json"
+grep -q '"seeded_fault_detection_rate": 1.0' "$V2_DOGFOOD_OUT_DIR/scorecard.json"
 
 cargo run -p mneme-eval -- baseline-gate "$BASELINE_REPORT" \
   --report "$BASELINE_GATE_REPORT" \

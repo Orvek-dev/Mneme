@@ -19,7 +19,8 @@ drive the command-line contracts.
 
 ## Core API Surface
 
-The current `mneme-core` entry point is `MnemeEngine`.
+The current `mneme-core` entry points are `MnemeEngine` for v1 personal memory
+and `TeamMemoryEngine` for v2 team memory.
 
 Primary runtime flow:
 
@@ -60,6 +61,14 @@ store and `.mneme/mneme-agent-hook.env` profile before wiring an agent runtime.
 They can use `mneme doctor --json` to inspect store/profile health and
 recommendations without mutating workspace files.
 
+CLI-bound team workflows can use `mneme team init`, `mneme team user add`,
+`mneme team agent add`, `mneme team project add`, `mneme team remember`,
+`mneme team promote`, `mneme team review`, `mneme team context`, and
+`mneme team validate` against the local `.mneme/mneme-team-v2.json` store.
+Direct integrations can use `TeamMemoryEngine`, `TeamMemoryStore`,
+`JsonTeamFileStore`, team role/scope inputs, promotion review inputs, and
+`validate_team_state`.
+
 Agent runtimes can use `scripts/mneme-agent-hook.sh` as the repository-local
 installation wrapper. It delegates to an installed `MNEME_BIN`, otherwise runs
 cargo from the repository, and uses a local debug binary only when cargo is
@@ -73,8 +82,9 @@ Local users can install the CLI with `scripts/install-local.sh`. It installs
 the repository-local `mneme-cli` package as the `mneme` binary and runs a small
 doctor/help/review smoke check.
 
-Stable behavior remains defined by `docs/v1/v1-stability.md`, public feature
-specs, eval scenarios, `mneme-eval v1-readiness`, and the release quality gate.
+Stable behavior remains defined by `docs/v1/v1-stability.md`, `docs/v2/`,
+public feature specs, eval scenarios, `mneme-eval v1-readiness`,
+`mneme-eval v2-readiness`, and the release quality gate.
 
 ## Example
 

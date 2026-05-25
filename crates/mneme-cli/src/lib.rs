@@ -14,11 +14,15 @@ use std::path::{Path, PathBuf};
 use mneme_core::{
     validate_state, BuildStage, ClaimRecord, ClaimStatus, CommandExtractor, CompactionReport,
     ContextPack, ContextQuery, EngineSnapshot, EventInput, ExtractorError, JsonFileStore,
-    MnemeConfig, MnemeEngine, MnemeExtractor, MnemeState, MnemeStore, RuleBasedExtractor,
-    SessionBeginInput, SessionBeginReport, SessionEndInput, SessionEndReport, SessionError,
-    SessionMemoryInputMode, SessionRecord, StateValidationReport, StoreError, StoreErrorKind,
-    StoreFileInspection, StoreFileStatus, StoreInspection, StoreRepairReport, StoreRestoreReport,
-    ValidationSeverity, DEFAULT_CONTEXT_MAX_ITEMS, PRODUCT_NAME,
+    JsonTeamFileStore, MnemeConfig, MnemeEngine, MnemeExtractor, MnemeState, MnemeStore,
+    RuleBasedExtractor, SessionBeginInput, SessionBeginReport, SessionEndInput, SessionEndReport,
+    SessionError, SessionMemoryInputMode, SessionRecord, StateValidationReport, StoreError,
+    StoreErrorKind, StoreFileInspection, StoreFileStatus, StoreInspection, StoreRepairReport,
+    StoreRestoreReport, TeamActor, TeamAgentInput, TeamContextPack, TeamContextQuery,
+    TeamMemoryConfig, TeamMemoryEngine, TeamMemoryRecord, TeamMemoryState, TeamProjectInput,
+    TeamPromotionCreateInput, TeamPromotionRecord, TeamPromotionReviewInput, TeamRole,
+    TeamStateValidationReport, TeamUserInput, ValidationSeverity, DEFAULT_CONTEXT_MAX_ITEMS,
+    DEFAULT_TEAM_CONTEXT_MAX_ITEMS, PRODUCT_NAME,
 };
 use serde::Serialize;
 
@@ -231,6 +235,7 @@ fn run_cli_with_writer(
         "begin" => run_command_or_help("begin", raw_args, writer, run_begin),
         "end" => run_command_or_help("end", raw_args, writer, run_end),
         "hook" => run_command_or_help("hook", raw_args, writer, run_agent_hook),
+        "team" => run_command_or_help("team", raw_args, writer, run_team),
         "validate" => run_command_or_help("validate", raw_args, writer, run_validate_store),
         "export" => run_command_or_help("export", raw_args, writer, run_export),
         "review" => run_command_or_help("review", raw_args, writer, run_review),
@@ -239,7 +244,7 @@ fn run_cli_with_writer(
         "repair" => run_command_or_help("repair", raw_args, writer, run_repair),
         "restore" => run_command_or_help("restore", raw_args, writer, run_restore),
         _ => Err(CliError::invalid_cli(format!(
-            "unknown mneme command: {command}\navailable commands: init, doctor, version, ingest, remember, correct, forget, claims, quality, curate, context, snapshot, begin, end, hook, validate, export, review, import, compact, repair, restore"
+            "unknown mneme command: {command}\navailable commands: init, doctor, version, ingest, remember, correct, forget, claims, quality, curate, context, snapshot, begin, end, hook, team, validate, export, review, import, compact, repair, restore"
         ))),
     }
 }
@@ -288,7 +293,7 @@ fn print_help(command: Option<&str>, writer: &mut impl Write) -> Result<(), CliE
         None => MNEME_HELP,
         Some(command) => command_help(command).ok_or_else(|| {
             CliError::invalid_cli(format!(
-                "unknown mneme help topic: {command}\navailable help topics: init, doctor, version, ingest, remember, correct, forget, claims, quality, curate, context, snapshot, begin, end, hook, validate, export, review, import, compact, repair, restore"
+                "unknown mneme help topic: {command}\navailable help topics: init, doctor, version, ingest, remember, correct, forget, claims, quality, curate, context, snapshot, begin, end, hook, team, validate, export, review, import, compact, repair, restore"
             ))
         })?,
     };
@@ -313,6 +318,7 @@ fn command_help(command: &str) -> Option<&'static str> {
         "begin" => Some(MNEME_BEGIN_HELP),
         "end" => Some(MNEME_END_HELP),
         "hook" => Some(MNEME_HOOK_HELP),
+        "team" => Some(MNEME_TEAM_HELP),
         "validate" => Some(MNEME_VALIDATE_HELP),
         "export" => Some(MNEME_EXPORT_HELP),
         "review" => Some(MNEME_REVIEW_HELP),
@@ -346,6 +352,7 @@ Commands:
   begin       Start an agent task session and retrieve context.
   end         Close an agent task session and optionally remember claims.
   hook        Agent hook JSON contract for begin/end automation.
+  team        Manage v2 team memory, policy, promotion, and audit.
   validate    Inspect the current store and backup.
   export      Export the current store state to JSON.
   review      Export a human-readable memory review artifact.
@@ -365,6 +372,8 @@ Examples:
   mneme quality --store /tmp/mneme.json --json
   mneme curate --store /tmp/mneme.json --json
   mneme context "local-first" --store /tmp/mneme.json --json
+  mneme team init --store /tmp/mneme-team.json --json
+  mneme team remember "Atlas deploys require rollback notes" --actor alice --scope team --store /tmp/mneme-team.json
   mneme hook begin "Draft setup plan" --query "local-first" --store /tmp/mneme.json
   mneme restore --check --store /tmp/mneme.json --json
   mneme help begin"#;
@@ -506,6 +515,35 @@ Examples:
   mneme hook begin "Draft setup plan" --query "local-first" --agent codex --store /tmp/mneme.json
   mneme hook end session-001 --summary "Prepared a concise setup plan" --remember "user prefers concise setup plans" --store /tmp/mneme.json"#;
 
+const MNEME_TEAM_HELP: &str = r#"Usage:
+  mneme team init [--workspace <id>] [--admin <user>] [--store <path>] [--json]
+  mneme team user add <user> [--role admin|maintainer|member] [--store <path>] [--json]
+  mneme team agent add <agent> --owner <user> [--store <path>] [--json]
+  mneme team project add <project> [--member <user>]... [--store <path>] [--json]
+  mneme team project grant <project> <user> [--store <path>] [--json]
+  mneme team remember <text> --actor <user> [--agent <agent>] --scope <scope> [--store <path>] [--json]
+  mneme team context <query> --actor <user> [--agent <agent>] [--max-items <n>] [--store <path>] [--json]
+  mneme team promote <memory-id> --actor <user> [--agent <agent>] [--note <text>] [--store <path>] [--json]
+  mneme team review <promotion-id> --actor <user> [--agent <agent>] --approve|--reject [--store <path>] [--json]
+  mneme team revoke-user <user> --actor <admin> [--store <path>] [--json]
+  mneme team revoke-agent <agent> --actor <admin> [--store <path>] [--json]
+  mneme team validate [--store <path>] [--json]
+  mneme team snapshot [--store <path>] [--json]
+
+Manage Mneme v2 team memory in a local JSON store. Scopes are team,
+private:<user>, project:<project>, or agent-private:<agent>. Team promotion is
+reviewed: members can propose a private/project memory, and an admin or
+maintainer must approve before it becomes team-readable memory.
+
+Examples:
+  mneme team init --admin alice
+  mneme team user add bob --role member
+  mneme team project add atlas --member bob
+  mneme team remember "Atlas deploys require rollback notes" --actor bob --scope project:atlas
+  mneme team promote team-memory-001 --actor bob
+  mneme team review team-promotion-001 --actor alice --approve
+  mneme team context "rollback notes" --actor alice --json"#;
+
 const MNEME_VALIDATE_HELP: &str = r#"Usage: mneme validate [--store <path>] [--json]
 
 Inspect the current store and backup.
@@ -598,6 +636,99 @@ struct CurateOptions {
     common: CommonOptions,
     apply: bool,
     compact: bool,
+}
+
+#[derive(Debug, Clone)]
+struct TeamInitOptions {
+    common: CommonOptions,
+    workspace_id: String,
+    admin_user_id: Option<String>,
+}
+
+impl Default for TeamInitOptions {
+    fn default() -> Self {
+        Self {
+            common: CommonOptions::default(),
+            workspace_id: "team".to_owned(),
+            admin_user_id: None,
+        }
+    }
+}
+
+#[derive(Debug, Clone)]
+struct TeamUserAddOptions {
+    common: CommonOptions,
+    role: TeamRole,
+}
+
+impl Default for TeamUserAddOptions {
+    fn default() -> Self {
+        Self {
+            common: CommonOptions::default(),
+            role: TeamRole::Member,
+        }
+    }
+}
+
+#[derive(Debug, Clone, Default)]
+struct TeamAgentAddOptions {
+    common: CommonOptions,
+    owner_user_id: Option<String>,
+}
+
+#[derive(Debug, Clone, Default)]
+struct TeamProjectAddOptions {
+    common: CommonOptions,
+    member_user_ids: Vec<String>,
+}
+
+#[derive(Debug, Clone, Default)]
+struct TeamActorOptions {
+    common: CommonOptions,
+    actor_user_id: Option<String>,
+    actor_agent_id: Option<String>,
+}
+
+#[derive(Debug, Clone)]
+struct TeamRememberOptions {
+    actor: TeamActorOptions,
+    scope: String,
+}
+
+impl Default for TeamRememberOptions {
+    fn default() -> Self {
+        Self {
+            actor: TeamActorOptions::default(),
+            scope: "team".to_owned(),
+        }
+    }
+}
+
+#[derive(Debug, Clone)]
+struct TeamContextOptions {
+    actor: TeamActorOptions,
+    max_items: usize,
+}
+
+impl Default for TeamContextOptions {
+    fn default() -> Self {
+        Self {
+            actor: TeamActorOptions::default(),
+            max_items: DEFAULT_TEAM_CONTEXT_MAX_ITEMS,
+        }
+    }
+}
+
+#[derive(Debug, Clone, Default)]
+struct TeamPromotionCreateOptions {
+    actor: TeamActorOptions,
+    note: Option<String>,
+}
+
+#[derive(Debug, Clone, Default)]
+struct TeamPromotionReviewOptions {
+    actor: TeamActorOptions,
+    approve: Option<bool>,
 }
 
 #[derive(Debug, Clone)]
@@ -1131,6 +1262,70 @@ struct CompactReport {
     command: String,
     store: String,
     compaction: CompactionReport,
+}
+
+#[derive(Debug, Serialize)]
+struct TeamInitReport {
+    command: &'static str,
+    store: String,
+    workspace_id: String,
+    user_count: usize,
+    agent_count: usize,
+    project_count: usize,
+    memory_count: usize,
+    audit_count: usize,
+    admin_user_id: Option<String>,
+    next_commands: Vec<String>,
+}
+
+#[derive(Debug, Serialize)]
+struct TeamEntityReport<T: Serialize> {
+    command: &'static str,
+    store: String,
+    entity: T,
+    validation: TeamStateValidationReport,
+}
+
+#[derive(Debug, Serialize)]
+struct TeamRememberReport {
+    command: &'static str,
+    store: String,
+    memory: TeamMemoryRecord,
+    validation: TeamStateValidationReport,
+}
+
+#[derive(Debug, Serialize)]
+struct TeamContextReport {
+    command: &'static str,
+    store: String,
+    actor_user_id: String,
+    actor_agent_id: Option<String>,
+    query: String,
+    item_count: usize,
+    omitted_count: usize,
+    context_pack: TeamContextPack,
+}
+
+#[derive(Debug, Serialize)]
+struct TeamPromotionReport {
+    command: &'static str,
+    store: String,
+    promotion: TeamPromotionRecord,
+    validation: TeamStateValidationReport,
+}
+
+#[derive(Debug, Serialize)]
+struct TeamValidationCliReport {
+    command: &'static str,
+    store: String,
+    validation: TeamStateValidationReport,
+}
+
+#[derive(Debug, Serialize)]
+struct TeamSnapshotReport {
+    command: &'static str,
+    store: String,
+    snapshot: TeamMemoryState,
 }
 
 #[derive(Debug, Serialize)]
@@ -1742,6 +1937,359 @@ fn run_agent_hook_end(raw_args: Vec<String>, writer: &mut impl Write) -> Result<
     write_json(writer, &hook_report)
 }
 
+fn run_team(raw_args: Vec<String>, writer: &mut impl Write) -> Result<(), CliError> {
+    if raw_args.is_empty() {
+        return Err(CliError::invalid_cli(
+            "usage: mneme team <init|user|agent|project|remember|context|promote|review|revoke-user|revoke-agent|validate|snapshot> [options]",
+        ));
+    }
+    let mut raw_args = raw_args;
+    let operation = raw_args.remove(0);
+    match operation.as_str() {
+        "init" => run_team_init(raw_args, writer),
+        "user" => run_team_user(raw_args, writer),
+        "agent" => run_team_agent(raw_args, writer),
+        "project" => run_team_project(raw_args, writer),
+        "remember" => run_team_remember(raw_args, writer),
+        "context" => run_team_context(raw_args, writer),
+        "promote" => run_team_promote(raw_args, writer),
+        "review" => run_team_review(raw_args, writer),
+        "revoke-user" => run_team_revoke_user(raw_args, writer),
+        "revoke-agent" => run_team_revoke_agent(raw_args, writer),
+        "validate" => run_team_validate(raw_args, writer),
+        "snapshot" => run_team_snapshot(raw_args, writer),
+        value => Err(CliError::invalid_cli(format!(
+            "unknown team operation: {value}\navailable team operations: init, user, agent, project, remember, context, promote, review, revoke-user, revoke-agent, validate, snapshot"
+        ))),
+    }
+}
+
+fn run_team_init(raw_args: Vec<String>, writer: &mut impl Write) -> Result<(), CliError> {
+    let options = parse_team_init_args(raw_args)?;
+    let store_path = resolve_team_store_path(&options.common)?;
+    let mut engine = TeamMemoryEngine::new(TeamMemoryConfig {
+        workspace_id: options.workspace_id,
+    });
+    if let Some(admin_user_id) = &options.admin_user_id {
+        engine.upsert_user(TeamUserInput {
+            user_id: admin_user_id.clone(),
+            role: TeamRole::Admin,
+        });
+    }
+    persist_team_engine(&store_path, &engine)?;
+    let state = engine.state();
+    let report = TeamInitReport {
+        command: "team.init",
+        store: store_path.display().to_string(),
+        workspace_id: state.workspace_id,
+        user_count: state.users.len(),
+        agent_count: state.agents.len(),
+        project_count: state.projects.len(),
+        memory_count: state.memories.len(),
+        audit_count: state.audit.len(),
+        admin_user_id: options.admin_user_id,
+        next_commands: vec![
+            format!(
+                "mneme team user add bob --role member --store \"{}\"",
+                store_path.display()
+            ),
+            format!(
+                "mneme team remember \"Team memory\" --actor <user> --scope team --store \"{}\"",
+                store_path.display()
+            ),
+            format!(
+                "mneme team validate --store \"{}\" --json",
+                store_path.display()
+            ),
+        ],
+    };
+    emit_team_init_report(&report, options.common.json, writer)
+}
+
+fn run_team_user(mut raw_args: Vec<String>, writer: &mut impl Write) -> Result<(), CliError> {
+    let Some(subcommand) = raw_args.first().cloned() else {
+        return Err(CliError::invalid_cli(
+            "usage: mneme team user add <user> [--role admin|maintainer|member] [--store <path>] [--json]",
+        ));
+    };
+    raw_args.remove(0);
+    match subcommand.as_str() {
+        "add" => {
+            let (user_id, options) = parse_team_user_add_args(raw_args)?;
+            let store_path = resolve_team_store_path(&options.common)?;
+            let mut engine = load_team_engine(&store_path)?;
+            let user = engine.upsert_user(TeamUserInput {
+                user_id,
+                role: options.role,
+            });
+            persist_team_engine(&store_path, &engine)?;
+            let report = TeamEntityReport {
+                command: "team.user.add",
+                store: store_path.display().to_string(),
+                entity: user,
+                validation: mneme_core::validate_team_state(&engine.state()),
+            };
+            emit_team_entity_report(&report, options.common.json, writer)
+        }
+        value => Err(CliError::invalid_cli(format!(
+            "unknown team user operation: {value}\navailable team user operations: add"
+        ))),
+    }
+}
+
+fn run_team_agent(mut raw_args: Vec<String>, writer: &mut impl Write) -> Result<(), CliError> {
+    let Some(subcommand) = raw_args.first().cloned() else {
+        return Err(CliError::invalid_cli(
+            "usage: mneme team agent add <agent> --owner <user> [--store <path>] [--json]",
+        ));
+    };
+    raw_args.remove(0);
+    match subcommand.as_str() {
+        "add" => {
+            let (agent_id, options) = parse_team_agent_add_args(raw_args)?;
+            let owner_user_id = options.owner_user_id.ok_or_else(|| {
+                CliError::invalid_cli("mneme team agent add requires --owner <user>")
+            })?;
+            let store_path = resolve_team_store_path(&options.common)?;
+            let mut engine = load_team_engine(&store_path)?;
+            let agent = engine
+                .upsert_agent(TeamAgentInput {
+                    agent_id,
+                    owner_user_id,
+                })
+                .map_err(team_policy_error)?;
+            persist_team_engine(&store_path, &engine)?;
+            let report = TeamEntityReport {
+                command: "team.agent.add",
+                store: store_path.display().to_string(),
+                entity: agent,
+                validation: mneme_core::validate_team_state(&engine.state()),
+            };
+            emit_team_entity_report(&report, options.common.json, writer)
+        }
+        value => Err(CliError::invalid_cli(format!(
+            "unknown team agent operation: {value}\navailable team agent operations: add"
+        ))),
+    }
+}
+
+fn run_team_project(mut raw_args: Vec<String>, writer: &mut impl Write) -> Result<(), CliError> {
+    let Some(subcommand) = raw_args.first().cloned() else {
+        return Err(CliError::invalid_cli(
+            "usage: mneme team project <add|grant> [options]",
+        ));
+    };
+    raw_args.remove(0);
+    match subcommand.as_str() {
+        "add" => {
+            let (project_id, options) = parse_team_project_add_args(raw_args)?;
+            let store_path = resolve_team_store_path(&options.common)?;
+            let mut engine = load_team_engine(&store_path)?;
+            let project = engine
+                .upsert_project(TeamProjectInput {
+                    project_id,
+                    member_user_ids: options.member_user_ids,
+                })
+                .map_err(team_policy_error)?;
+            persist_team_engine(&store_path, &engine)?;
+            let report = TeamEntityReport {
+                command: "team.project.add",
+                store: store_path.display().to_string(),
+                entity: project,
+                validation: mneme_core::validate_team_state(&engine.state()),
+            };
+            emit_team_entity_report(&report, options.common.json, writer)
+        }
+        "grant" => {
+            let (project_id, user_id, options) = parse_team_project_grant_args(raw_args)?;
+            let store_path = resolve_team_store_path(&options)?;
+            let mut engine = load_team_engine(&store_path)?;
+            let project = engine
+                .grant_project_member(&project_id, &user_id)
+                .map_err(team_policy_error)?;
+            persist_team_engine(&store_path, &engine)?;
+            let report = TeamEntityReport {
+                command: "team.project.grant",
+                store: store_path.display().to_string(),
+                entity: project,
+                validation: mneme_core::validate_team_state(&engine.state()),
+            };
+            emit_team_entity_report(&report, options.json, writer)
+        }
+        value => Err(CliError::invalid_cli(format!(
+            "unknown team project operation: {value}\navailable team project operations: add, grant"
+        ))),
+    }
+}
+
+fn run_team_remember(raw_args: Vec<String>, writer: &mut impl Write) -> Result<(), CliError> {
+    let (text, options) = parse_team_remember_args(raw_args)?;
+    let actor = required_team_actor(&options.actor)?;
+    let store_path = resolve_team_store_path(&options.actor.common)?;
+    let mut engine = load_team_engine(&store_path)?;
+    let memory = engine
+        .remember(mneme_core::TeamRememberInput {
+            actor,
+            text,
+            scope: options.scope,
+        })
+        .map_err(team_policy_error)?;
+    persist_team_engine(&store_path, &engine)?;
+    let report = TeamRememberReport {
+        command: "team.remember",
+        store: store_path.display().to_string(),
+        memory,
+        validation: mneme_core::validate_team_state(&engine.state()),
+    };
+    emit_team_remember_report(&report, options.actor.common.json, writer)
+}
+
+fn run_team_context(raw_args: Vec<String>, writer: &mut impl Write) -> Result<(), CliError> {
+    let (query, options) = parse_team_context_args(raw_args)?;
+    let actor = required_team_actor(&options.actor)?;
+    let store_path = resolve_team_store_path(&options.actor.common)?;
+    let mut engine = load_team_engine(&store_path)?;
+    let context_pack = engine.build_context_pack(TeamContextQuery {
+        actor: actor.clone(),
+        query: query.clone(),
+        max_items: options.max_items,
+    });
+    persist_team_engine(&store_path, &engine)?;
+    let report = TeamContextReport {
+        command: "team.context",
+        store: store_path.display().to_string(),
+        actor_user_id: actor.user_id,
+        actor_agent_id: actor.agent_id,
+        query,
+        item_count: context_pack.items.len(),
+        omitted_count: context_pack.omitted.len(),
+        context_pack,
+    };
+    emit_team_context_report(&report, options.actor.common.json, writer)
+}
+
+fn run_team_promote(raw_args: Vec<String>, writer: &mut impl Write) -> Result<(), CliError> {
+    let (memory_id, options) = parse_team_promote_args(raw_args)?;
+    let actor = required_team_actor(&options.actor)?;
+    let store_path = resolve_team_store_path(&options.actor.common)?;
+    let mut engine = load_team_engine(&store_path)?;
+    let promotion = engine
+        .create_promotion(TeamPromotionCreateInput {
+            actor,
+            source_memory_id: memory_id,
+            note: options.note,
+        })
+        .map_err(team_policy_error)?;
+    persist_team_engine(&store_path, &engine)?;
+    let report = TeamPromotionReport {
+        command: "team.promote",
+        store: store_path.display().to_string(),
+        promotion,
+        validation: mneme_core::validate_team_state(&engine.state()),
+    };
+    emit_team_promotion_report(&report, options.actor.common.json, writer)
+}
+
+fn run_team_review(raw_args: Vec<String>, writer: &mut impl Write) -> Result<(), CliError> {
+    let (promotion_id, options) = parse_team_review_args(raw_args)?;
+    let approve = options.approve.ok_or_else(|| {
+        CliError::invalid_cli("mneme team review requires exactly one of --approve or --reject")
+    })?;
+    let actor = required_team_actor(&options.actor)?;
+    let store_path = resolve_team_store_path(&options.actor.common)?;
+    let mut engine = load_team_engine(&store_path)?;
+    let promotion = engine
+        .review_promotion(TeamPromotionReviewInput {
+            actor,
+            promotion_id,
+            approve,
+        })
+        .map_err(team_policy_error)?;
+    persist_team_engine(&store_path, &engine)?;
+    let report = TeamPromotionReport {
+        command: "team.review",
+        store: store_path.display().to_string(),
+        promotion,
+        validation: mneme_core::validate_team_state(&engine.state()),
+    };
+    emit_team_promotion_report(&report, options.actor.common.json, writer)
+}
+
+fn run_team_revoke_user(raw_args: Vec<String>, writer: &mut impl Write) -> Result<(), CliError> {
+    let (user_id, options) = parse_team_actor_target_args(
+        raw_args,
+        "usage: mneme team revoke-user <user> --actor <admin> [--store <path>] [--json]",
+    )?;
+    let actor = required_team_actor(&options)?;
+    let store_path = resolve_team_store_path(&options.common)?;
+    let mut engine = load_team_engine(&store_path)?;
+    let user = engine
+        .revoke_user(actor, &user_id)
+        .map_err(team_policy_error)?;
+    persist_team_engine(&store_path, &engine)?;
+    let report = TeamEntityReport {
+        command: "team.revoke-user",
+        store: store_path.display().to_string(),
+        entity: user,
+        validation: mneme_core::validate_team_state(&engine.state()),
+    };
+    emit_team_entity_report(&report, options.common.json, writer)
+}
+
+fn run_team_revoke_agent(raw_args: Vec<String>, writer: &mut impl Write) -> Result<(), CliError> {
+    let (agent_id, options) = parse_team_actor_target_args(
+        raw_args,
+        "usage: mneme team revoke-agent <agent> --actor <admin> [--store <path>] [--json]",
+    )?;
+    let actor = required_team_actor(&options)?;
+    let store_path = resolve_team_store_path(&options.common)?;
+    let mut engine = load_team_engine(&store_path)?;
+    let agent = engine
+        .revoke_agent(actor, &agent_id)
+        .map_err(team_policy_error)?;
+    persist_team_engine(&store_path, &engine)?;
+    let report = TeamEntityReport {
+        command: "team.revoke-agent",
+        store: store_path.display().to_string(),
+        entity: agent,
+        validation: mneme_core::validate_team_state(&engine.state()),
+    };
+    emit_team_entity_report(&report, options.common.json, writer)
+}
+
+fn run_team_validate(raw_args: Vec<String>, writer: &mut impl Write) -> Result<(), CliError> {
+    let options = parse_no_position_args(raw_args, "team validate")?;
+    let store_path = resolve_team_store_path(&options)?;
+    let engine = load_team_engine(&store_path)?;
+    let report = TeamValidationCliReport {
+        command: "team.validate",
+        store: store_path.display().to_string(),
+        validation: mneme_core::validate_team_state(&engine.state()),
+    };
+    emit_team_validation_report(&report, options.json, writer)?;
+    if report.validation.ok {
+        Ok(())
+    } else {
+        Err(CliError::store(
+            "validate team store",
+            &store_path,
+            "team store is not valid",
+        ))
+    }
+}
+
+fn run_team_snapshot(raw_args: Vec<String>, writer: &mut impl Write) -> Result<(), CliError> {
+    let options = parse_no_position_args(raw_args, "team snapshot")?;
+    let store_path = resolve_team_store_path(&options)?;
+    let engine = load_team_engine(&store_path)?;
+    let report = TeamSnapshotReport {
+        command: "team.snapshot",
+        store: store_path.display().to_string(),
+        snapshot: engine.state(),
+    };
+    emit_team_snapshot_report(&report, options.json, writer)
+}
+
 fn run_validate_store(raw_args: Vec<String>, writer: &mut impl Write) -> Result<(), CliError> {
     let options = parse_no_position_args(raw_args, "validate")?;
     let store_path = resolve_store_path(&options)?;
@@ -2048,6 +2596,409 @@ fn parse_curate_args(raw_args: Vec<String>) -> Result<CurateOptions, CliError> {
         idx += 1;
     }
     Ok(options)
+}
+
+fn parse_team_init_args(raw_args: Vec<String>) -> Result<TeamInitOptions, CliError> {
+    let mut options = TeamInitOptions::default();
+    let mut idx = 0;
+    while idx < raw_args.len() {
+        if parse_common_option(&raw_args, &mut idx, &mut options.common)? {
+            idx += 1;
+            continue;
+        }
+        match raw_args[idx].as_str() {
+            "--workspace" => {
+                idx += 1;
+                options.workspace_id =
+                    require_nonempty(required_arg(&raw_args, idx, "--workspace")?, "workspace")?;
+            }
+            "--admin" => {
+                idx += 1;
+                options.admin_user_id = Some(require_nonempty(
+                    required_arg(&raw_args, idx, "--admin")?,
+                    "admin user id",
+                )?);
+            }
+            value if value.starts_with('-') => {
+                return Err(CliError::invalid_cli(format!(
+                    "unknown team init option: {value}"
+                )));
+            }
+            value => {
+                return Err(CliError::invalid_cli(format!(
+                    "unexpected team init argument: {value}"
+                )));
+            }
+        }
+        idx += 1;
+    }
+    Ok(options)
+}
+
+fn parse_team_user_add_args(
+    raw_args: Vec<String>,
+) -> Result<(String, TeamUserAddOptions), CliError> {
+    let mut options = TeamUserAddOptions::default();
+    let mut positionals = Vec::new();
+    let mut idx = 0;
+    while idx < raw_args.len() {
+        if parse_common_option(&raw_args, &mut idx, &mut options.common)? {
+            idx += 1;
+            continue;
+        }
+        match raw_args[idx].as_str() {
+            "--role" => {
+                idx += 1;
+                options.role = parse_team_role(required_arg(&raw_args, idx, "--role")?)?;
+            }
+            value if value.starts_with('-') => {
+                return Err(CliError::invalid_cli(format!(
+                    "unknown team user add option: {value}"
+                )));
+            }
+            value => positionals.push(value.to_owned()),
+        }
+        idx += 1;
+    }
+    if positionals.len() != 1 {
+        return Err(CliError::invalid_cli(
+            "usage: mneme team user add <user> [--role admin|maintainer|member] [--store <path>] [--json]",
+        ));
+    }
+    Ok((require_nonempty(positionals.remove(0), "user id")?, options))
+}
+
+fn parse_team_agent_add_args(
+    raw_args: Vec<String>,
+) -> Result<(String, TeamAgentAddOptions), CliError> {
+    let mut options = TeamAgentAddOptions::default();
+    let mut positionals = Vec::new();
+    let mut idx = 0;
+    while idx < raw_args.len() {
+        if parse_common_option(&raw_args, &mut idx, &mut options.common)? {
+            idx += 1;
+            continue;
+        }
+        match raw_args[idx].as_str() {
+            "--owner" => {
+                idx += 1;
+                options.owner_user_id = Some(require_nonempty(
+                    required_arg(&raw_args, idx, "--owner")?,
+                    "owner user id",
+                )?);
+            }
+            value if value.starts_with('-') => {
+                return Err(CliError::invalid_cli(format!(
+                    "unknown team agent add option: {value}"
+                )));
+            }
+            value => positionals.push(value.to_owned()),
+        }
+        idx += 1;
+    }
+    if positionals.len() != 1 {
+        return Err(CliError::invalid_cli(
+            "usage: mneme team agent add <agent> --owner <user> [--store <path>] [--json]",
+        ));
+    }
+    Ok((
+        require_nonempty(positionals.remove(0), "agent id")?,
+        options,
+    ))
+}
+
+fn parse_team_project_add_args(
+    raw_args: Vec<String>,
+) -> Result<(String, TeamProjectAddOptions), CliError> {
+    let mut options = TeamProjectAddOptions::default();
+    let mut positionals = Vec::new();
+    let mut idx = 0;
+    while idx < raw_args.len() {
+        if parse_common_option(&raw_args, &mut idx, &mut options.common)? {
+            idx += 1;
+            continue;
+        }
+        match raw_args[idx].as_str() {
+            "--member" => {
+                idx += 1;
+                options.member_user_ids.push(require_nonempty(
+                    required_arg(&raw_args, idx, "--member")?,
+                    "member user id",
+                )?);
+            }
+            value if value.starts_with('-') => {
+                return Err(CliError::invalid_cli(format!(
+                    "unknown team project add option: {value}"
+                )));
+            }
+            value => positionals.push(value.to_owned()),
+        }
+        idx += 1;
+    }
+    if positionals.len() != 1 {
+        return Err(CliError::invalid_cli(
+            "usage: mneme team project add <project> [--member <user>]... [--store <path>] [--json]",
+        ));
+    }
+    Ok((
+        require_nonempty(positionals.remove(0), "project id")?,
+        options,
+    ))
+}
+
+fn parse_team_project_grant_args(
+    raw_args: Vec<String>,
+) -> Result<(String, String, CommonOptions), CliError> {
+    let mut options = CommonOptions::default();
+    let mut positionals = Vec::new();
+    let mut idx = 0;
+    while idx < raw_args.len() {
+        if parse_common_option(&raw_args, &mut idx, &mut options)? {
+            idx += 1;
+            continue;
+        }
+        match raw_args[idx].as_str() {
+            value if value.starts_with('-') => {
+                return Err(CliError::invalid_cli(format!(
+                    "unknown team project grant option: {value}"
+                )));
+            }
+            value => positionals.push(value.to_owned()),
+        }
+        idx += 1;
+    }
+    if positionals.len() != 2 {
+        return Err(CliError::invalid_cli(
+            "usage: mneme team project grant <project> <user> [--store <path>] [--json]",
+        ));
+    }
+    Ok((
+        require_nonempty(positionals.remove(0), "project id")?,
+        require_nonempty(positionals.remove(0), "user id")?,
+        options,
+    ))
+}
+
+fn parse_team_remember_args(
+    raw_args: Vec<String>,
+) -> Result<(String, TeamRememberOptions), CliError> {
+    let mut options = TeamRememberOptions::default();
+    let mut positionals = Vec::new();
+    let mut idx = 0;
+    while idx < raw_args.len() {
+        if parse_team_actor_option(&raw_args, &mut idx, &mut options.actor)? {
+            idx += 1;
+            continue;
+        }
+        match raw_args[idx].as_str() {
+            "--scope" => {
+                idx += 1;
+                options.scope =
+                    require_nonempty(required_arg(&raw_args, idx, "--scope")?, "scope")?;
+            }
+            value if value.starts_with('-') => {
+                return Err(CliError::invalid_cli(format!(
+                    "unknown team remember option: {value}"
+                )));
+            }
+            value => positionals.push(value.to_owned()),
+        }
+        idx += 1;
+    }
+    if positionals.len() != 1 {
+        return Err(CliError::invalid_cli(
+            "usage: mneme team remember <text> --actor <user> [--agent <agent>] --scope <scope> [--store <path>] [--json]",
+        ));
+    }
+    Ok((
+        require_nonempty(positionals.remove(0), "memory text")?,
+        options,
+    ))
+}
+
+fn parse_team_context_args(
+    raw_args: Vec<String>,
+) -> Result<(String, TeamContextOptions), CliError> {
+    let mut options = TeamContextOptions::default();
+    let mut positionals = Vec::new();
+    let mut idx = 0;
+    while idx < raw_args.len() {
+        if parse_team_actor_option(&raw_args, &mut idx, &mut options.actor)? {
+            idx += 1;
+            continue;
+        }
+        match raw_args[idx].as_str() {
+            "--max-items" => {
+                idx += 1;
+                options.max_items = parse_max_items(required_arg(&raw_args, idx, "--max-items")?)?;
+            }
+            value if value.starts_with('-') => {
+                return Err(CliError::invalid_cli(format!(
+                    "unknown team context option: {value}"
+                )));
+            }
+            value => positionals.push(value.to_owned()),
+        }
+        idx += 1;
+    }
+    if positionals.len() != 1 {
+        return Err(CliError::invalid_cli(
+            "usage: mneme team context <query> --actor <user> [--agent <agent>] [--max-items <n>] [--store <path>] [--json]",
+        ));
+    }
+    Ok((require_nonempty(positionals.remove(0), "query")?, options))
+}
+
+fn parse_team_promote_args(
+    raw_args: Vec<String>,
+) -> Result<(String, TeamPromotionCreateOptions), CliError> {
+    let mut options = TeamPromotionCreateOptions::default();
+    let mut positionals = Vec::new();
+    let mut idx = 0;
+    while idx < raw_args.len() {
+        if parse_team_actor_option(&raw_args, &mut idx, &mut options.actor)? {
+            idx += 1;
+            continue;
+        }
+        match raw_args[idx].as_str() {
+            "--note" => {
+                idx += 1;
+                options.note = Some(require_nonempty(
+                    required_arg(&raw_args, idx, "--note")?,
+                    "promotion note",
+                )?);
+            }
+            value if value.starts_with('-') => {
+                return Err(CliError::invalid_cli(format!(
+                    "unknown team promote option: {value}"
+                )));
+            }
+            value => positionals.push(value.to_owned()),
+        }
+        idx += 1;
+    }
+    if positionals.len() != 1 {
+        return Err(CliError::invalid_cli(
+            "usage: mneme team promote <memory-id> --actor <user> [--agent <agent>] [--note <text>] [--store <path>] [--json]",
+        ));
+    }
+    Ok((
+        require_nonempty(positionals.remove(0), "memory id")?,
+        options,
+    ))
+}
+
+fn parse_team_review_args(
+    raw_args: Vec<String>,
+) -> Result<(String, TeamPromotionReviewOptions), CliError> {
+    let mut options = TeamPromotionReviewOptions::default();
+    let mut positionals = Vec::new();
+    let mut idx = 0;
+    while idx < raw_args.len() {
+        if parse_team_actor_option(&raw_args, &mut idx, &mut options.actor)? {
+            idx += 1;
+            continue;
+        }
+        match raw_args[idx].as_str() {
+            "--approve" => set_team_review_decision(&mut options, true)?,
+            "--reject" => set_team_review_decision(&mut options, false)?,
+            value if value.starts_with('-') => {
+                return Err(CliError::invalid_cli(format!(
+                    "unknown team review option: {value}"
+                )));
+            }
+            value => positionals.push(value.to_owned()),
+        }
+        idx += 1;
+    }
+    if positionals.len() != 1 {
+        return Err(CliError::invalid_cli(
+            "usage: mneme team review <promotion-id> --actor <user> [--agent <agent>] --approve|--reject [--store <path>] [--json]",
+        ));
+    }
+    Ok((
+        require_nonempty(positionals.remove(0), "promotion id")?,
+        options,
+    ))
+}
+
+fn parse_team_actor_target_args(
+    raw_args: Vec<String>,
+    usage: &'static str,
+) -> Result<(String, TeamActorOptions), CliError> {
+    let mut options = TeamActorOptions::default();
+    let mut positionals = Vec::new();
+    let mut idx = 0;
+    while idx < raw_args.len() {
+        if parse_team_actor_option(&raw_args, &mut idx, &mut options)? {
+            idx += 1;
+            continue;
+        }
+        match raw_args[idx].as_str() {
+            value if value.starts_with('-') => {
+                return Err(CliError::invalid_cli(format!(
+                    "unknown team actor option: {value}"
+                )));
+            }
+            value => positionals.push(value.to_owned()),
+        }
+        idx += 1;
+    }
+    if positionals.len() != 1 {
+        return Err(CliError::invalid_cli(usage));
+    }
+    Ok((
+        require_nonempty(positionals.remove(0), "target id")?,
+        options,
+    ))
+}
+
+fn parse_team_actor_option(
+    raw_args: &[String],
+    idx: &mut usize,
+    options: &mut TeamActorOptions,
+) -> Result<bool, CliError> {
+    if parse_common_option(raw_args, idx, &mut options.common)? {
+        return Ok(true);
+    }
+    match raw_args[*idx].as_str() {
+        "--actor" => {
+            *idx += 1;
+            options.actor_user_id = Some(require_nonempty(
+                required_arg(raw_args, *idx, "--actor")?,
+                "actor user id",
+            )?);
+            Ok(true)
+        }
+        "--agent" => {
+            *idx += 1;
+            options.actor_agent_id = Some(require_nonempty(
+                required_arg(raw_args, *idx, "--agent")?,
+                "actor agent id",
+            )?);
+            Ok(true)
+        }
+        _ => Ok(false),
+    }
+}
+
+fn set_team_review_decision(
+    options: &mut TeamPromotionReviewOptions,
+    approve: bool,
+) -> Result<(), CliError> {
+    if options.approve.is_some() {
+        return Err(CliError::invalid_cli(
+            "mneme team review accepts only one of --approve or --reject",
+        ));
+    }
+    options.approve = Some(approve);
+    Ok(())
+}
+
+fn parse_team_role(value: String) -> Result<TeamRole, CliError> {
+    value
+        .parse::<TeamRole>()
+        .map_err(|source| CliError::invalid_cli(source.to_string()))
 }
 
 fn parse_doctor_args(raw_args: Vec<String>) -> Result<DoctorOptions, CliError> {
@@ -2798,6 +3749,13 @@ fn resolve_store_path(options: &CommonOptions) -> Result<PathBuf, CliError> {
     }
 }
 
+fn resolve_team_store_path(options: &CommonOptions) -> Result<PathBuf, CliError> {
+    match &options.store_path {
+        Some(path) => Ok(path.clone()),
+        None => default_team_store_path(),
+    }
+}
+
 fn build_extractor(options: &ExtractorOptions) -> Result<Box<dyn MnemeExtractor>, CliError> {
     match options {
         ExtractorOptions::Rule => Ok(Box::new(RuleBasedExtractor::new())),
@@ -2821,6 +3779,12 @@ fn build_extractor(options: &ExtractorOptions) -> Result<Box<dyn MnemeExtractor>
 fn default_store_path() -> Result<PathBuf, CliError> {
     env::current_dir()
         .map(|dir| dir.join(".mneme").join("mneme-v1.json"))
+        .map_err(|source| CliError::io("read current dir", Path::new("."), source))
+}
+
+fn default_team_store_path() -> Result<PathBuf, CliError> {
+    env::current_dir()
+        .map(|dir| dir.join(".mneme").join("mneme-team-v2.json"))
         .map_err(|source| CliError::io("read current dir", Path::new("."), source))
 }
 
@@ -3339,6 +4303,34 @@ fn persist_engine(path: &Path, engine: &MnemeEngine) -> Result<(), CliError> {
     engine
         .persist(&mut store)
         .map_err(|source| CliError::store_error("save store", path, source))
+}
+
+fn load_team_engine(path: &Path) -> Result<TeamMemoryEngine, CliError> {
+    let store = JsonTeamFileStore::new(path.to_path_buf());
+    TeamMemoryEngine::from_store(TeamMemoryConfig::default(), &store)
+        .map_err(|source| CliError::store("load team store", path, source))
+}
+
+fn persist_team_engine(path: &Path, engine: &TeamMemoryEngine) -> Result<(), CliError> {
+    let mut store = JsonTeamFileStore::new(path.to_path_buf());
+    engine
+        .persist(&mut store)
+        .map_err(|source| CliError::store("save team store", path, source))
+}
+
+fn team_policy_error(source: impl Display) -> CliError {
+    CliError::lifecycle(format!("team policy: {source}"))
+}
+
+fn required_team_actor(options: &TeamActorOptions) -> Result<TeamActor, CliError> {
+    let user_id = options
+        .actor_user_id
+        .clone()
+        .ok_or_else(|| CliError::invalid_cli("team operation requires --actor <user>"))?;
+    Ok(TeamActor {
+        user_id,
+        agent_id: options.actor_agent_id.clone(),
+    })
 }
 
 fn require_active_claim_id(engine: &MnemeEngine, claim_id: &str) -> Result<(), CliError> {
@@ -4663,6 +5655,165 @@ fn emit_restore_report(
             .map_err(|source| CliError::io("write", Path::new("<stdout>"), source))?;
     }
     Ok(())
+}
+
+fn emit_team_init_report(
+    report: &TeamInitReport,
+    json: bool,
+    writer: &mut impl Write,
+) -> Result<(), CliError> {
+    if json {
+        return write_json(writer, report);
+    }
+    writeln!(
+        writer,
+        "mneme: team initialized {} (workspace={}, users={}, memories={}, audit={})",
+        report.store,
+        report.workspace_id,
+        report.user_count,
+        report.memory_count,
+        report.audit_count
+    )
+    .map_err(|source| CliError::io("write", Path::new("<stdout>"), source))?;
+    for command in &report.next_commands {
+        writeln!(writer, "next: {command}")
+            .map_err(|source| CliError::io("write", Path::new("<stdout>"), source))?;
+    }
+    Ok(())
+}
+
+fn emit_team_entity_report<T: Serialize>(
+    report: &TeamEntityReport<T>,
+    json: bool,
+    writer: &mut impl Write,
+) -> Result<(), CliError> {
+    if json {
+        return write_json(writer, report);
+    }
+    writeln!(
+        writer,
+        "mneme: {} {} (validation_ok={}, users={}, agents={}, projects={}, memories={}, audit={})",
+        report.command,
+        report.store,
+        report.validation.ok,
+        report.validation.user_count,
+        report.validation.agent_count,
+        report.validation.project_count,
+        report.validation.memory_count,
+        report.validation.audit_count
+    )
+    .map_err(|source| CliError::io("write", Path::new("<stdout>"), source))
+}
+
+fn emit_team_remember_report(
+    report: &TeamRememberReport,
+    json: bool,
+    writer: &mut impl Write,
+) -> Result<(), CliError> {
+    if json {
+        return write_json(writer, report);
+    }
+    writeln!(
+        writer,
+        "mneme: team remembered {} in {} [{}] (validation_ok={})",
+        report.memory.id, report.store, report.memory.scope, report.validation.ok
+    )
+    .map_err(|source| CliError::io("write", Path::new("<stdout>"), source))
+}
+
+fn emit_team_context_report(
+    report: &TeamContextReport,
+    json: bool,
+    writer: &mut impl Write,
+) -> Result<(), CliError> {
+    if json {
+        return write_json(writer, report);
+    }
+    writeln!(
+        writer,
+        "mneme: team context {} (actor={}, items={}, omitted={})",
+        report.store, report.actor_user_id, report.item_count, report.omitted_count
+    )
+    .map_err(|source| CliError::io("write", Path::new("<stdout>"), source))?;
+    for item in &report.context_pack.items {
+        writeln!(
+            writer,
+            "- {} [{}; {}]",
+            item.memory_text,
+            item.scope,
+            item.source_event_ids.join(",")
+        )
+        .map_err(|source| CliError::io("write", Path::new("<stdout>"), source))?;
+    }
+    Ok(())
+}
+
+fn emit_team_promotion_report(
+    report: &TeamPromotionReport,
+    json: bool,
+    writer: &mut impl Write,
+) -> Result<(), CliError> {
+    if json {
+        return write_json(writer, report);
+    }
+    writeln!(
+        writer,
+        "mneme: {} {} (promotion={}, status={}, produced={:?}, validation_ok={})",
+        report.command,
+        report.store,
+        report.promotion.id,
+        report.promotion.status.as_str(),
+        report.promotion.produced_memory_id,
+        report.validation.ok
+    )
+    .map_err(|source| CliError::io("write", Path::new("<stdout>"), source))
+}
+
+fn emit_team_validation_report(
+    report: &TeamValidationCliReport,
+    json: bool,
+    writer: &mut impl Write,
+) -> Result<(), CliError> {
+    if json {
+        return write_json(writer, report);
+    }
+    writeln!(
+        writer,
+        "mneme: team validate {} (ok={}, errors={}, users={}, agents={}, projects={}, memories={}, promotions={}, audit={})",
+        report.store,
+        report.validation.ok,
+        report.validation.error_count,
+        report.validation.user_count,
+        report.validation.agent_count,
+        report.validation.project_count,
+        report.validation.memory_count,
+        report.validation.promotion_count,
+        report.validation.audit_count
+    )
+    .map_err(|source| CliError::io("write", Path::new("<stdout>"), source))
+}
+
+fn emit_team_snapshot_report(
+    report: &TeamSnapshotReport,
+    json: bool,
+    writer: &mut impl Write,
+) -> Result<(), CliError> {
+    if json {
+        return write_json(writer, report);
+    }
+    writeln!(
+        writer,
+        "mneme: team snapshot {} (workspace={}, users={}, agents={}, projects={}, memories={}, promotions={}, audit={})",
+        report.store,
+        report.snapshot.workspace_id,
+        report.snapshot.users.len(),
+        report.snapshot.agents.len(),
+        report.snapshot.projects.len(),
+        report.snapshot.memories.len(),
+        report.snapshot.promotions.len(),
+        report.snapshot.audit.len()
+    )
+    .map_err(|source| CliError::io("write", Path::new("<stdout>"), source))
 }
 
 fn write_json<T: Serialize>(writer: &mut impl Write, value: &T) -> Result<(), CliError> {
