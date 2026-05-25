@@ -184,3 +184,8 @@ Phase 31 shipped the **Dogfood Scenario Candidate MVP** in `v0.37.0`, adding
 `mneme-eval candidate` and `mneme-eval candidate-check` so failed eval or
 baseline reports can become ignored, sanitized, review-only scenario candidate
 artifacts before any public suite promotion.
+
+Phase 32 shipped the **Candidate Promotion & Regression Intelligence MVP** in
+`v0.38.0`, adding `mneme-eval candidate-promote` and
+`mneme-eval baseline-compare` so reviewed dogfood failures can become public
+regression scenarios and baseline reports can be compared before release.

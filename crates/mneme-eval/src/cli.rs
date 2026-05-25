@@ -6,8 +6,8 @@ use mneme_core::{BuildStage, PRODUCT_NAME};
 use serde::Serialize;
 
 use crate::candidate::{
-    check_candidates, generate_candidates, CandidateCheckReport, CandidateGenerateConfig,
-    CandidateReport,
+    check_candidates, generate_candidates, promote_candidate, CandidateCheckReport,
+    CandidateGenerateConfig, CandidatePromoteConfig, CandidatePromoteReport, CandidateReport,
 };
 use crate::error::EvalError;
 use crate::redaction;
@@ -22,6 +22,7 @@ use crate::scenario::load_scenario;
 use crate::target::{
     build_target, CommandExtractorOptions, FaultMode, TargetKind, TargetRunOptions,
 };
+use crate::trend::{compare_baselines, BaselineCompareConfig, BaselineCompareReport};
 
 const DEFAULT_BASELINE_ITERATIONS: usize = 3;
 const MAX_BASELINE_ITERATIONS: usize = 100;
@@ -66,12 +67,18 @@ pub fn run_cli(args: impl IntoIterator<Item = String>) -> Result<(), EvalError> 
         "baseline-summary" => {
             run_command_or_help("baseline-summary", raw_args, run_baseline_summary)
         }
+        "baseline-compare" => {
+            run_command_or_help("baseline-compare", raw_args, run_baseline_compare)
+        }
         "candidate" => run_command_or_help("candidate", raw_args, run_candidate),
         "candidate-check" => run_command_or_help("candidate-check", raw_args, run_candidate_check),
+        "candidate-promote" => {
+            run_command_or_help("candidate-promote", raw_args, run_candidate_promote)
+        }
         "replay" => run_command_or_help("replay", raw_args, run_replay),
         "run" => run_command_or_help("run", raw_args, run_suite),
         _ => Err(EvalError::invalid_cli(format!(
-            "unknown mneme-eval command: {command}\navailable commands: doctor, version, validate, acceptance, baseline, baseline-gate, baseline-summary, candidate, candidate-check, replay, run"
+            "unknown mneme-eval command: {command}\navailable commands: doctor, version, validate, acceptance, baseline, baseline-gate, baseline-summary, baseline-compare, candidate, candidate-check, candidate-promote, replay, run"
         ))),
     }
 }
@@ -111,7 +118,7 @@ fn print_help(command: Option<&str>) -> Result<(), EvalError> {
         None => MNEME_EVAL_HELP,
         Some(command) => command_help(command).ok_or_else(|| {
             EvalError::invalid_cli(format!(
-                "unknown mneme-eval help topic: {command}\navailable help topics: doctor, version, validate, acceptance, baseline, baseline-gate, baseline-summary, candidate, candidate-check, replay, run"
+                "unknown mneme-eval help topic: {command}\navailable help topics: doctor, version, validate, acceptance, baseline, baseline-gate, baseline-summary, baseline-compare, candidate, candidate-check, candidate-promote, replay, run"
             ))
         })?,
     };
@@ -128,8 +135,10 @@ fn command_help(command: &str) -> Option<&'static str> {
         "baseline" => Some(MNEME_EVAL_BASELINE_HELP),
         "baseline-gate" => Some(MNEME_EVAL_BASELINE_GATE_HELP),
         "baseline-summary" => Some(MNEME_EVAL_BASELINE_SUMMARY_HELP),
+        "baseline-compare" => Some(MNEME_EVAL_BASELINE_COMPARE_HELP),
         "candidate" => Some(MNEME_EVAL_CANDIDATE_HELP),
         "candidate-check" => Some(MNEME_EVAL_CANDIDATE_CHECK_HELP),
+        "candidate-promote" => Some(MNEME_EVAL_CANDIDATE_PROMOTE_HELP),
         "replay" => Some(MNEME_EVAL_REPLAY_HELP),
         "run" => Some(MNEME_EVAL_RUN_HELP),
         _ => None,
@@ -153,9 +162,13 @@ Commands:
   baseline-gate  Gate a saved baseline JSON report.
   baseline-summary
                  Summarize baseline failures for triage.
+  baseline-compare
+                 Compare two baseline reports for regressions.
   candidate      Create local scenario candidate artifacts from failed reports.
   candidate-check
                  Validate local scenario candidate artifacts.
+  candidate-promote
+                 Promote a reviewed candidate into a scenario suite.
 
 Targets:
   fake, mneme-v1, mneme-v1-command
@@ -165,6 +178,7 @@ Examples:
   mneme-eval run --suite core --target mneme-v1
   mneme-eval help baseline
   mneme-eval help baseline-summary
+  mneme-eval help baseline-compare
   mneme-eval help candidate"#;
 
 const MNEME_EVAL_DOCTOR_HELP: &str = r#"Usage: mneme-eval doctor
@@ -229,6 +243,16 @@ without bypassing baseline-gate.
 Example:
   mneme-eval baseline-summary evals/reports/openai-live-baseline.json --report evals/reports/openai-live-baseline.summary.json"#;
 
+const MNEME_EVAL_BASELINE_COMPARE_HELP: &str = r#"Usage: mneme-eval baseline-compare <before-baseline.json> <after-baseline.json> [--max-pass-rate-drop <0..1>] [--max-category-drop <0..1>] [--fail-on-regression] [--json] [--report <path>]
+
+Compare two saved baseline reports and summarize aggregate, category,
+scenario, and failed-check changes. By default this command emits a report even
+when regressions are found; use --fail-on-regression to make regressions exit
+non-zero.
+
+Example:
+  mneme-eval baseline-compare evals/reports/before.json evals/reports/after.json --fail-on-regression"#;
+
 const MNEME_EVAL_CANDIDATE_HELP: &str = r#"Usage: mneme-eval candidate <eval-or-baseline-report.json> [--out-dir <dir>] [--prefix <label>] [--limit <n>] [--suite <name>] [--json] [--report <path>]
 
 Create local, review-only scenario candidate artifacts from failed eval or
@@ -244,6 +268,15 @@ Validate local scenario candidate artifacts before sharing or promoting them.
 
 Example:
   mneme-eval candidate-check evals/candidates/openai --json"#;
+
+const MNEME_EVAL_CANDIDATE_PROMOTE_HELP: &str = r#"Usage: mneme-eval candidate-promote <candidate.yaml> [--suite <name>] [--filename <name.yaml>] [--scenario-root <dir>] [--apply] [--json] [--report <path>]
+
+Validate a reviewed candidate and promote only its nested scenario block into a
+public scenario suite. The command is a dry run by default; pass --apply to
+write evals/scenarios/<suite>/<filename>.
+
+Example:
+  mneme-eval candidate-promote evals/candidates/openai/example.candidate.yaml --suite model --filename dogfood-example.yaml --apply"#;
 
 fn print_doctor() {
     println!(
@@ -289,6 +322,15 @@ struct BaselineSummaryOptions {
 }
 
 #[derive(Debug, Clone)]
+struct BaselineCompareOptions {
+    json: bool,
+    report_path: Option<PathBuf>,
+    max_pass_rate_drop: f64,
+    max_category_drop: f64,
+    fail_on_regression: bool,
+}
+
+#[derive(Debug, Clone)]
 struct CandidateOptions {
     json: bool,
     report_path: Option<PathBuf>,
@@ -302,6 +344,16 @@ struct CandidateOptions {
 struct CandidateCheckOptions {
     json: bool,
     report_path: Option<PathBuf>,
+}
+
+#[derive(Debug, Clone)]
+struct CandidatePromoteOptions {
+    json: bool,
+    report_path: Option<PathBuf>,
+    scenario_root: PathBuf,
+    suite: Option<String>,
+    filename: Option<String>,
+    apply: bool,
 }
 
 #[derive(Debug, Clone, Serialize)]
@@ -374,6 +426,31 @@ impl Default for CandidateOptions {
             prefix: "dogfood".to_owned(),
             limit: None,
             suite: None,
+        }
+    }
+}
+
+impl Default for BaselineCompareOptions {
+    fn default() -> Self {
+        Self {
+            json: false,
+            report_path: None,
+            max_pass_rate_drop: 0.0,
+            max_category_drop: 0.0,
+            fail_on_regression: false,
+        }
+    }
+}
+
+impl Default for CandidatePromoteOptions {
+    fn default() -> Self {
+        Self {
+            json: false,
+            report_path: None,
+            scenario_root: PathBuf::from("evals/scenarios"),
+            suite: None,
+            filename: None,
+            apply: false,
         }
     }
 }
@@ -648,6 +725,23 @@ fn run_baseline_summary(raw_args: Vec<String>) -> Result<(), EvalError> {
     emit_baseline_summary_report(&report, &options)
 }
 
+fn run_baseline_compare(raw_args: Vec<String>) -> Result<(), EvalError> {
+    let (before_path, after_path, options) = parse_baseline_compare_args(raw_args)?;
+    let config = BaselineCompareConfig {
+        before_path,
+        after_path,
+        max_pass_rate_drop: options.max_pass_rate_drop,
+        max_category_drop: options.max_category_drop,
+    };
+    let report = compare_baselines(&config)?;
+    emit_baseline_compare_report(&report, &options)?;
+    if options.fail_on_regression && !report.ok {
+        Err(EvalError::scenario("baseline regression detected"))
+    } else {
+        Ok(())
+    }
+}
+
 fn run_candidate(raw_args: Vec<String>) -> Result<(), EvalError> {
     let (source_path, options) = parse_candidate_args(raw_args)?;
     let config = CandidateGenerateConfig {
@@ -674,6 +768,24 @@ fn run_candidate_check(raw_args: Vec<String>) -> Result<(), EvalError> {
         Ok(())
     } else {
         Err(EvalError::scenario("candidate validation failed"))
+    }
+}
+
+fn run_candidate_promote(raw_args: Vec<String>) -> Result<(), EvalError> {
+    let (path, options) = parse_candidate_promote_args(raw_args)?;
+    let config = CandidatePromoteConfig {
+        source_path: path,
+        scenario_root: options.scenario_root.clone(),
+        suite_override: options.suite.clone(),
+        filename: options.filename.clone(),
+        apply: options.apply,
+    };
+    let report = promote_candidate(&config)?;
+    emit_candidate_promote_report(&report, &options)?;
+    if report.ok {
+        Ok(())
+    } else {
+        Err(EvalError::scenario("candidate promotion failed"))
     }
 }
 
@@ -1615,6 +1727,58 @@ fn parse_baseline_summary_args(
     Ok((path, options))
 }
 
+fn parse_baseline_compare_args(
+    raw_args: Vec<String>,
+) -> Result<(PathBuf, PathBuf, BaselineCompareOptions), EvalError> {
+    let mut paths = Vec::new();
+    let mut options = BaselineCompareOptions::default();
+    let mut idx = 0;
+    while idx < raw_args.len() {
+        match raw_args[idx].as_str() {
+            "--json" => options.json = true,
+            "--report" => {
+                idx += 1;
+                let Some(value) = raw_args.get(idx) else {
+                    return Err(EvalError::invalid_cli("--report requires a path"));
+                };
+                options.report_path = Some(PathBuf::from(value));
+            }
+            "--max-pass-rate-drop" => {
+                idx += 1;
+                let Some(value) = raw_args.get(idx) else {
+                    return Err(EvalError::invalid_cli(
+                        "--max-pass-rate-drop requires a value",
+                    ));
+                };
+                options.max_pass_rate_drop = parse_rate("--max-pass-rate-drop", value)?;
+            }
+            "--max-category-drop" => {
+                idx += 1;
+                let Some(value) = raw_args.get(idx) else {
+                    return Err(EvalError::invalid_cli(
+                        "--max-category-drop requires a value",
+                    ));
+                };
+                options.max_category_drop = parse_rate("--max-category-drop", value)?;
+            }
+            "--fail-on-regression" => options.fail_on_regression = true,
+            value if value.starts_with('-') => {
+                return Err(EvalError::invalid_cli(format!(
+                    "unknown baseline-compare option: {value}"
+                )));
+            }
+            value => paths.push(PathBuf::from(value)),
+        }
+        idx += 1;
+    }
+    match paths.as_slice() {
+        [before, after] => Ok((before.clone(), after.clone(), options)),
+        _ => Err(EvalError::invalid_cli(
+            "usage: mneme-eval baseline-compare <before-baseline.json> <after-baseline.json> [--max-pass-rate-drop <0..1>] [--max-category-drop <0..1>] [--fail-on-regression] [--json] [--report <path>]",
+        )),
+    }
+}
+
 fn parse_candidate_args(raw_args: Vec<String>) -> Result<(PathBuf, CandidateOptions), EvalError> {
     let mut path = None;
     let mut options = CandidateOptions::default();
@@ -1720,6 +1884,68 @@ fn parse_candidate_check_args(
     let Some(path) = path else {
         return Err(EvalError::invalid_cli(
             "usage: mneme-eval candidate-check <candidate.yaml|dir> [--json] [--report <path>]",
+        ));
+    };
+    Ok((path, options))
+}
+
+fn parse_candidate_promote_args(
+    raw_args: Vec<String>,
+) -> Result<(PathBuf, CandidatePromoteOptions), EvalError> {
+    let mut path = None;
+    let mut options = CandidatePromoteOptions::default();
+    let mut idx = 0;
+    while idx < raw_args.len() {
+        match raw_args[idx].as_str() {
+            "--json" => options.json = true,
+            "--report" => {
+                idx += 1;
+                let Some(value) = raw_args.get(idx) else {
+                    return Err(EvalError::invalid_cli("--report requires a path"));
+                };
+                options.report_path = Some(PathBuf::from(value));
+            }
+            "--scenario-root" => {
+                idx += 1;
+                let Some(value) = raw_args.get(idx) else {
+                    return Err(EvalError::invalid_cli("--scenario-root requires a path"));
+                };
+                options.scenario_root = PathBuf::from(value);
+            }
+            "--suite" => {
+                idx += 1;
+                let Some(value) = raw_args.get(idx) else {
+                    return Err(EvalError::invalid_cli("--suite requires a name"));
+                };
+                options.suite = Some(parse_label("--suite", value)?);
+            }
+            "--filename" => {
+                idx += 1;
+                let Some(value) = raw_args.get(idx) else {
+                    return Err(EvalError::invalid_cli("--filename requires a name"));
+                };
+                options.filename = Some(value.clone());
+            }
+            "--apply" => options.apply = true,
+            value if value.starts_with('-') => {
+                return Err(EvalError::invalid_cli(format!(
+                    "unknown candidate-promote option: {value}"
+                )));
+            }
+            value => {
+                if path.is_some() {
+                    return Err(EvalError::invalid_cli(
+                        "candidate-promote accepts one candidate file path",
+                    ));
+                }
+                path = Some(PathBuf::from(value));
+            }
+        }
+        idx += 1;
+    }
+    let Some(path) = path else {
+        return Err(EvalError::invalid_cli(
+            "usage: mneme-eval candidate-promote <candidate.yaml> [--suite <name>] [--filename <name.yaml>] [--scenario-root <dir>] [--apply] [--json] [--report <path>]",
         ));
     };
     Ok((path, options))
@@ -1932,6 +2158,23 @@ fn emit_baseline_summary_report(
     Ok(())
 }
 
+fn emit_baseline_compare_report(
+    report: &BaselineCompareReport,
+    options: &BaselineCompareOptions,
+) -> Result<(), EvalError> {
+    if let Some(path) = &options.report_path {
+        write_report(path, report)?;
+    }
+    if options.json {
+        let json = serde_json::to_string_pretty(report)
+            .map_err(|source| EvalError::json(Path::new("<stdout>"), source))?;
+        println!("{json}");
+    } else {
+        print_baseline_compare_report(report);
+    }
+    Ok(())
+}
+
 fn emit_candidate_report(
     report: &CandidateReport,
     options: &CandidateOptions,
@@ -1962,6 +2205,23 @@ fn emit_candidate_check_report(
         println!("{json}");
     } else {
         print_candidate_check_report(report);
+    }
+    Ok(())
+}
+
+fn emit_candidate_promote_report(
+    report: &CandidatePromoteReport,
+    options: &CandidatePromoteOptions,
+) -> Result<(), EvalError> {
+    if let Some(path) = &options.report_path {
+        write_report(path, report)?;
+    }
+    if options.json {
+        let json = serde_json::to_string_pretty(report)
+            .map_err(|source| EvalError::json(Path::new("<stdout>"), source))?;
+        println!("{json}");
+    } else {
+        print_candidate_promote_report(report);
     }
     Ok(())
 }
@@ -2091,6 +2351,97 @@ fn print_baseline_summary_report(report: &BaselineSummaryReport) {
     }
 }
 
+fn print_baseline_compare_report(report: &BaselineCompareReport) {
+    println!(
+        "baseline-compare: suite={}, target={}, regression={}, pass_rate={:.2}% -> {:.2}% ({:+.2} pp)",
+        report.suite,
+        report.target,
+        report.regression_detected,
+        report.aggregate.before_pass_rate * 100.0,
+        report.aggregate.after_pass_rate * 100.0,
+        report.aggregate.pass_rate_delta * 100.0
+    );
+    if !report.comparable {
+        println!("comparable: false");
+    }
+    if !report.redaction_findings.is_empty() {
+        println!(
+            "redaction: findings={}",
+            report.redaction_findings.join(", ")
+        );
+    }
+    println!(
+        "failed_scenario_runs: {} -> {} ({:+})",
+        report.aggregate.before_failed_scenario_runs,
+        report.aggregate.after_failed_scenario_runs,
+        report.aggregate.failed_scenario_runs_delta
+    );
+    print_rate_changes(
+        "regressed categories",
+        &report.category_changes,
+        "regressed",
+    );
+    print_rate_changes("regressed scenarios", &report.scenario_changes, "regressed");
+    if report.new_failed_scenarios.is_empty() {
+        println!("new failed scenarios: none");
+    } else {
+        println!(
+            "new failed scenarios: {}",
+            report.new_failed_scenarios.join(", ")
+        );
+    }
+    if report.resolved_scenarios.is_empty() {
+        println!("resolved scenarios: none");
+    } else {
+        println!(
+            "resolved scenarios: {}",
+            report.resolved_scenarios.join(", ")
+        );
+    }
+    if report.new_failed_checks.is_empty() {
+        println!("new failed checks: none");
+    } else {
+        println!("new failed checks:");
+        for check in &report.new_failed_checks {
+            println!(
+                "- {}: {} -> {} ({:+})",
+                check.check, check.before_count, check.after_count, check.delta
+            );
+        }
+    }
+    if !report.notes.is_empty() {
+        println!("notes:");
+        for note in &report.notes {
+            println!("- {note}");
+        }
+    }
+    println!("next:");
+    for action in &report.recommended_next_actions {
+        println!("- {action}");
+    }
+}
+
+fn print_rate_changes(label: &str, changes: &[crate::trend::RateDelta], status: &str) {
+    let matching = changes
+        .iter()
+        .filter(|change| change.status == status)
+        .collect::<Vec<_>>();
+    if matching.is_empty() {
+        println!("{label}: none");
+        return;
+    }
+    println!("{label}:");
+    for change in matching {
+        let before = change.before_pass_rate.unwrap_or(0.0) * 100.0;
+        let after = change.after_pass_rate.unwrap_or(0.0) * 100.0;
+        let delta = change.pass_rate_delta.unwrap_or(0.0) * 100.0;
+        println!(
+            "- {}: {:.2}% -> {:.2}% ({:+.2} pp), failed {} -> {}",
+            change.name, before, after, delta, change.before_failed, change.after_failed
+        );
+    }
+}
+
 fn option_label(value: Option<&str>) -> &str {
     value
         .filter(|value| !value.trim().is_empty())
@@ -2190,6 +2541,25 @@ fn print_candidate_check_report(report: &CandidateCheckReport) {
     }
 }
 
+fn print_candidate_promote_report(report: &CandidatePromoteReport) {
+    println!(
+        "candidate-promote: candidate={}, suite={}, destination={}, applied={}, ok={}",
+        report.candidate_id, report.target_suite, report.destination, report.applied, report.ok
+    );
+    for gate in &report.gates {
+        let status = if gate.status == crate::report::CheckStatus::Pass {
+            "PASS"
+        } else {
+            "FAIL"
+        };
+        println!("- {status} {}: {}", gate.name, gate.detail);
+    }
+    println!("next:");
+    for action in &report.recommended_next_actions {
+        println!("- {action}");
+    }
+}
+
 fn print_scenario_report(scenario: &ScenarioReport) {
     let status = if scenario.ok { "PASS" } else { "FAIL" };
     println!("- {status} {}", scenario.scenario_id);
@@ -2221,6 +2591,10 @@ mod tests {
         assert!(summary_help.contains("Usage: mneme-eval baseline-summary"));
         assert!(summary_help.contains("--report <path>"));
 
+        let compare_help = command_help("baseline-compare").expect("baseline-compare help");
+        assert!(compare_help.contains("Usage: mneme-eval baseline-compare"));
+        assert!(compare_help.contains("--fail-on-regression"));
+
         let candidate_help = command_help("candidate").expect("candidate help");
         assert!(candidate_help.contains("Usage: mneme-eval candidate"));
         assert!(candidate_help.contains("--out-dir <dir>"));
@@ -2228,6 +2602,11 @@ mod tests {
         let candidate_check_help = command_help("candidate-check").expect("candidate-check help");
         assert!(candidate_check_help.contains("Usage: mneme-eval candidate-check"));
         assert!(candidate_check_help.contains("candidate artifacts"));
+
+        let candidate_promote_help =
+            command_help("candidate-promote").expect("candidate-promote help");
+        assert!(candidate_promote_help.contains("Usage: mneme-eval candidate-promote"));
+        assert!(candidate_promote_help.contains("--apply"));
 
         let general = command_help("run").expect("run help");
         assert!(general.contains("mneme-eval run"));
@@ -2448,6 +2827,33 @@ mod tests {
     }
 
     #[test]
+    fn parse_baseline_compare_accepts_regression_options() -> Result<(), EvalError> {
+        let (before, after, options) = parse_baseline_compare_args(vec![
+            "evals/reports/before.json".to_owned(),
+            "evals/reports/after.json".to_owned(),
+            "--max-pass-rate-drop".to_owned(),
+            "0.02".to_owned(),
+            "--max-category-drop".to_owned(),
+            "0.05".to_owned(),
+            "--fail-on-regression".to_owned(),
+            "--report".to_owned(),
+            "evals/reports/compare.json".to_owned(),
+            "--json".to_owned(),
+        ])?;
+        assert_eq!(before, PathBuf::from("evals/reports/before.json"));
+        assert_eq!(after, PathBuf::from("evals/reports/after.json"));
+        assert_eq!(options.max_pass_rate_drop, 0.02);
+        assert_eq!(options.max_category_drop, 0.05);
+        assert!(options.fail_on_regression);
+        assert!(options.json);
+        assert_eq!(
+            options.report_path.as_deref(),
+            Some(Path::new("evals/reports/compare.json"))
+        );
+        Ok(())
+    }
+
+    #[test]
     fn parse_candidate_accepts_generation_options() -> Result<(), EvalError> {
         let (path, options) = parse_candidate_args(vec![
             "evals/reports/baseline.json".to_owned(),
@@ -2490,6 +2896,37 @@ mod tests {
             Some(Path::new("evals/reports/candidate-check.json"))
         );
         assert!(options.json);
+        Ok(())
+    }
+
+    #[test]
+    fn parse_candidate_promote_accepts_apply_options() -> Result<(), EvalError> {
+        let (path, options) = parse_candidate_promote_args(vec![
+            "evals/candidates/local/example.candidate.yaml".to_owned(),
+            "--suite".to_owned(),
+            "model".to_owned(),
+            "--filename".to_owned(),
+            "dogfood-example.yaml".to_owned(),
+            "--scenario-root".to_owned(),
+            "/tmp/mneme-scenarios".to_owned(),
+            "--apply".to_owned(),
+            "--report".to_owned(),
+            "evals/reports/promote.json".to_owned(),
+            "--json".to_owned(),
+        ])?;
+        assert_eq!(
+            path,
+            PathBuf::from("evals/candidates/local/example.candidate.yaml")
+        );
+        assert_eq!(options.suite.as_deref(), Some("model"));
+        assert_eq!(options.filename.as_deref(), Some("dogfood-example.yaml"));
+        assert_eq!(options.scenario_root, PathBuf::from("/tmp/mneme-scenarios"));
+        assert!(options.apply);
+        assert!(options.json);
+        assert_eq!(
+            options.report_path.as_deref(),
+            Some(Path::new("evals/reports/promote.json"))
+        );
         Ok(())
     }
 

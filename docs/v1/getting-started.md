@@ -140,8 +140,10 @@ MNEME_OPENAI_DRY_RUN=1 cargo run -p mneme-eval -- baseline --suite model \
 
 cargo run -p mneme-eval -- baseline-gate evals/reports/openai-dry-run-baseline.json
 cargo run -p mneme-eval -- baseline-summary evals/reports/openai-dry-run-baseline.json
+cargo run -p mneme-eval -- baseline-compare evals/reports/before.json evals/reports/openai-dry-run-baseline.json --fail-on-regression
 cargo run -p mneme-eval -- candidate evals/reports/openai-dry-run-baseline.json --out-dir evals/candidates/openai --limit 3
 cargo run -p mneme-eval -- candidate-check evals/candidates/openai
+cargo run -p mneme-eval -- candidate-promote evals/candidates/openai/dogfood-example.candidate.yaml --suite model --filename dogfood-example.yaml
 ```
 
 `evals/reports/` and `evals/candidates/` are ignored by git.

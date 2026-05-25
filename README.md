@@ -209,6 +209,15 @@ Summarize a saved baseline report for local triage:
 cargo run -p mneme-eval -- baseline-summary evals/reports/openai-dry-run-baseline.json
 ```
 
+Compare two saved baseline reports before accepting a change:
+
+```sh
+cargo run -p mneme-eval -- baseline-compare \
+  evals/reports/before.json \
+  evals/reports/after.json \
+  --fail-on-regression
+```
+
 Create local candidate artifacts from a failed report before promoting any new
 public scenario:
 
@@ -217,6 +226,11 @@ cargo run -p mneme-eval -- candidate evals/reports/openai-dry-run-baseline.json 
   --out-dir evals/candidates/openai \
   --limit 3
 cargo run -p mneme-eval -- candidate-check evals/candidates/openai
+cargo run -p mneme-eval -- candidate-promote \
+  evals/candidates/openai/dogfood-example.candidate.yaml \
+  --suite model \
+  --filename dogfood-example.yaml \
+  --apply
 ```
 
 Run the acceptance gate:
@@ -235,6 +249,8 @@ Use `help` or `<command> --help` to inspect command-specific usage:
 cargo run -p mneme-cli -- help begin
 cargo run -p mneme-eval -- baseline-gate --help
 cargo run -p mneme-eval -- baseline-summary --help
+cargo run -p mneme-eval -- baseline-compare --help
+cargo run -p mneme-eval -- candidate-promote --help
 ```
 
 ## Development Checks

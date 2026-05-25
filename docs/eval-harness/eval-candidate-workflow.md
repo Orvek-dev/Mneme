@@ -43,12 +43,38 @@ local-path patterns after sanitization.
 
 ## Promote
 
-Promotion is manual:
+Promote a reviewed candidate with an explicit dry run first:
+
+```sh
+cargo run -p mneme-eval -- candidate-promote \
+  evals/candidates/openai/dogfood-example.candidate.yaml \
+  --suite model \
+  --filename dogfood-example.yaml
+```
+
+The command validates the candidate schema, nested scenario, destination path,
+duplicate scenario IDs, and redaction scan. It does not write by default.
+
+Apply the promotion only after review:
+
+```sh
+cargo run -p mneme-eval -- candidate-promote \
+  evals/candidates/openai/dogfood-example.candidate.yaml \
+  --suite model \
+  --filename dogfood-example.yaml \
+  --apply
+```
+
+`candidate-promote` writes only the nested `scenario` block to
+`evals/scenarios/<suite>/<filename>`. It removes review-only tags such as
+`candidate` and `needs-review`, then adds `promoted-candidate` for traceability.
+
+Promotion checklist:
 
 1. Confirm the candidate contains no private user data, project paths, or
    provider secrets.
 2. Minimize the nested `scenario` block to the smallest public behavior that
    reproduces the failure.
-3. Move only the reviewed `scenario` block to `evals/scenarios/<suite>/`.
+3. Run `candidate-promote` without `--apply` and inspect the destination.
 4. Run `mneme-eval validate` on the new scenario.
 5. Run the relevant suite, baseline gate, and full quality gate before release.
