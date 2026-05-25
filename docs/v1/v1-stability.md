@@ -70,6 +70,9 @@ eval update land in the same PR.
 - `dogfood-summary` gates an evidence bundle produced by `scripts/v1-dogfood.sh`
   and reports `ready_for_manual_dogfood` only when required dogfood, readiness,
   and CLI smoke artifacts are present and passing.
+- `scripts/v1-manual-dogfood.py` runs a local-only manual dogfood protocol with
+  100 public-safe synthetic records and 25 workflow checks, writing ignored
+  evidence under `evals/runs/v1-manual-dogfood/`.
 - The opt-in `model` suite covers command-backed extraction quality for durable
   preferences, no-claim cases, secret blocking, and lifecycle correction.
 - The `core`, `runtime`, `agent`, and `dogfood` suites must pass for `fake`
@@ -113,6 +116,8 @@ eval update land in the same PR.
   `cargo install --path crates/mneme-cli --locked` and smokes doctor/help/review
   commands plus installed first-workspace bootstrap.
 - `scripts/quality-gate.sh` is the local and release verification entry point.
+- Full manual dogfood evidence is local-only; CI checks the dataset shape and
+  script syntax to avoid unnecessary GitHub Actions cost.
 - `RUSTDOCFLAGS="-D warnings" cargo doc --workspace --no-deps` must pass before
   release.
 - `scripts/public-safety-check.sh` guards against known private/public-safety

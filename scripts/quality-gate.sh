@@ -14,6 +14,11 @@ cargo clippy --workspace --all-targets -- -D warnings
 cargo test --workspace --all-targets
 RUSTDOCFLAGS="-D warnings" cargo doc --workspace --no-deps
 python3 -m py_compile wrappers/openai_extractor.py
+python3 -m py_compile scripts/v1-manual-dogfood.py
+MANUAL_DOGFOOD_DATASET="${TMP_ROOT}/mneme-quality-gate-manual-dogfood-dataset.json"
+scripts/v1-manual-dogfood.py --check-dataset > "$MANUAL_DOGFOOD_DATASET"
+grep -q '"mock_record_count": 100' "$MANUAL_DOGFOOD_DATASET"
+grep -q '"workflow_count": 25' "$MANUAL_DOGFOOD_DATASET"
 
 cargo run -p mneme-cli -- doctor
 cargo run -p mneme-eval -- doctor

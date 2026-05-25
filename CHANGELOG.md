@@ -4,6 +4,21 @@ This project follows the spirit of Keep a Changelog.
 
 ## Unreleased
 
+## [0.42.0] - 2026-05-25
+
+### Added
+
+- Added `scripts/v1-manual-dogfood.py` to run local v1 manual dogfood with 100
+  public-safe synthetic records and 25 workflow checks.
+- Added manual dogfood evidence docs and a Phase 36 feature spec.
+- Expanded the quality gate to compile the manual dogfood runner and verify the
+  dataset shape without running the full local-only dogfood protocol in CI.
+
+### Fixed
+
+- Hardened v1 event, claim, and session ID allocation after compaction/restore
+  so new records do not collide with retained source references.
+
 ## [0.41.0] - 2026-05-25
 
 ### Added
