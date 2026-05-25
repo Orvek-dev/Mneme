@@ -13,6 +13,10 @@ and must not be included in a runnable suite directory.
 Generated JSON reports belong under `evals/reports/` or `evals/runs/`; both are
 ignored by default.
 
+Generated candidate artifacts belong under `evals/candidates/`, which is also
+ignored by default. A candidate is a review artifact, not a runnable suite
+fixture, until its nested `scenario` block is manually reviewed and promoted.
+
 ## Commands
 
 Inspect available commands:
@@ -22,6 +26,7 @@ cargo run -p mneme-eval -- help
 cargo run -p mneme-eval -- run --help
 cargo run -p mneme-eval -- help baseline-gate
 cargo run -p mneme-eval -- help baseline-summary
+cargo run -p mneme-eval -- help candidate
 ```
 
 Validate a suite without running the fake runtime:
@@ -75,6 +80,13 @@ Summarize a saved provider baseline report for local triage:
 
 ```sh
 cargo run -p mneme-eval -- baseline-summary evals/reports/openai-dry-run-baseline.json
+```
+
+Create and validate local scenario candidates from a failed report:
+
+```sh
+cargo run -p mneme-eval -- candidate evals/reports/openai-live-baseline.json --out-dir evals/candidates/openai --limit 3
+cargo run -p mneme-eval -- candidate-check evals/candidates/openai
 ```
 
 `fake` is the default target. CI passes targets explicitly so future adapters

@@ -152,6 +152,12 @@ grep -q "Usage: mneme-eval baseline-gate" "$MNEME_EVAL_HELP"
 cargo run -p mneme-eval -- baseline-summary --help > "$MNEME_EVAL_HELP"
 grep -q "Usage: mneme-eval baseline-summary" "$MNEME_EVAL_HELP"
 grep -q "provider triage" "$MNEME_EVAL_HELP"
+cargo run -p mneme-eval -- candidate --help > "$MNEME_EVAL_HELP"
+grep -q "Usage: mneme-eval candidate" "$MNEME_EVAL_HELP"
+grep -q "scenario candidate artifacts" "$MNEME_EVAL_HELP"
+cargo run -p mneme-eval -- candidate-check --help > "$MNEME_EVAL_HELP"
+grep -q "Usage: mneme-eval candidate-check" "$MNEME_EVAL_HELP"
+grep -q "Validate local scenario candidate" "$MNEME_EVAL_HELP"
 
 STORE="${TMP_ROOT}/mneme-quality-gate-cli.json"
 rm -f "$STORE"
@@ -570,6 +576,13 @@ FAILED_BASELINE_REPORT="${TMP_ROOT}/mneme-seeded-fault-baseline.json"
 FAILED_BASELINE_STDOUT="${TMP_ROOT}/mneme-seeded-fault-baseline.stdout.json"
 FAILED_BASELINE_SUMMARY="${TMP_ROOT}/mneme-seeded-fault-baseline-summary.json"
 FAILED_BASELINE_SUMMARY_STDOUT="${TMP_ROOT}/mneme-seeded-fault-baseline-summary.stdout.json"
+CANDIDATE_DIR="${TMP_ROOT}/mneme-quality-gate-candidates"
+CANDIDATE_REPORT="${TMP_ROOT}/mneme-quality-gate-candidates.json"
+CANDIDATE_STDOUT="${TMP_ROOT}/mneme-quality-gate-candidates.stdout.json"
+CANDIDATE_CHECK_REPORT="${TMP_ROOT}/mneme-quality-gate-candidate-check.json"
+CANDIDATE_CHECK_STDOUT="${TMP_ROOT}/mneme-quality-gate-candidate-check.stdout.json"
+rm -rf "$CANDIDATE_DIR"
+rm -f "$CANDIDATE_REPORT" "$CANDIDATE_STDOUT" "$CANDIDATE_CHECK_REPORT" "$CANDIDATE_CHECK_STDOUT"
 MNEME_OPENAI_DRY_RUN=1 cargo run -p mneme-eval -- baseline --suite model \
   --target mneme-v1-command \
   --extractor-command wrappers/openai_extractor.py \
@@ -616,6 +629,28 @@ grep -q '"failed_scenario_count": 11' "$FAILED_BASELINE_SUMMARY"
 grep -q 'API_KEY=' "$FAILED_BASELINE_SUMMARY"
 grep -q 'redact or keep local before sharing' "$FAILED_BASELINE_SUMMARY"
 grep -q '"top_failed_checks"' "$FAILED_BASELINE_SUMMARY"
+
+cargo run -p mneme-eval -- candidate "$FAILED_BASELINE_REPORT" \
+  --out-dir "$CANDIDATE_DIR" \
+  --limit 3 \
+  --prefix dogfood \
+  --report "$CANDIDATE_REPORT" \
+  --json > "$CANDIDATE_STDOUT"
+grep -q '"command": "candidate"' "$CANDIDATE_STDOUT"
+grep -q '"candidate_count": 3' "$CANDIDATE_REPORT"
+grep -q '"redaction_finding_codes": \[' "$CANDIDATE_REPORT"
+grep -q 'api_key_assignment' "$CANDIDATE_REPORT"
+test -f "$CANDIDATE_DIR/dogfood-curation-restore-from-backup.candidate.yaml"
+if rg -n 'API_KEY=FAKE_TEST_VALUE|OPENAI_API_KEY|sk-' "$CANDIDATE_DIR"; then
+  echo "quality-gate: candidate artifact leaked redaction-sensitive text" >&2
+  exit 1
+fi
+cargo run -p mneme-eval -- candidate-check "$CANDIDATE_DIR" \
+  --report "$CANDIDATE_CHECK_REPORT" \
+  --json > "$CANDIDATE_CHECK_STDOUT"
+grep -q '"command": "candidate-check"' "$CANDIDATE_CHECK_STDOUT"
+grep -q '"ok": true' "$CANDIDATE_CHECK_REPORT"
+grep -q '"valid": 3' "$CANDIDATE_CHECK_REPORT"
 
 cargo run -p mneme-eval -- baseline-gate "$BASELINE_REPORT" \
   --report "$BASELINE_GATE_REPORT" \

@@ -39,7 +39,8 @@ so their file-list checks are the useful pre-publication signal until registry
 publication is explicitly enabled.
 
 The script blocks known private or generated paths such as local stores, eval
-reports, private planning files, and local harness/template copies.
+reports, eval candidates, private planning files, and local harness/template
+copies.
 
 Cargo will warn that the manifests have no `license` or `license-file`. That
 warning is expected until the project owner chooses a public license; do not add

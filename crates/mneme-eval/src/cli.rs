@@ -5,7 +5,12 @@ use std::path::{Path, PathBuf};
 use mneme_core::{BuildStage, PRODUCT_NAME};
 use serde::Serialize;
 
+use crate::candidate::{
+    check_candidates, generate_candidates, CandidateCheckReport, CandidateGenerateConfig,
+    CandidateReport,
+};
 use crate::error::EvalError;
+use crate::redaction;
 use crate::report::{
     AcceptanceGateReport, AcceptanceReport, BaselineCategorySummary, BaselineFailedCheckSummary,
     BaselineMetadata, BaselineReport, BaselineRunReport, BaselineScenarioMetadata,
@@ -61,10 +66,12 @@ pub fn run_cli(args: impl IntoIterator<Item = String>) -> Result<(), EvalError> 
         "baseline-summary" => {
             run_command_or_help("baseline-summary", raw_args, run_baseline_summary)
         }
+        "candidate" => run_command_or_help("candidate", raw_args, run_candidate),
+        "candidate-check" => run_command_or_help("candidate-check", raw_args, run_candidate_check),
         "replay" => run_command_or_help("replay", raw_args, run_replay),
         "run" => run_command_or_help("run", raw_args, run_suite),
         _ => Err(EvalError::invalid_cli(format!(
-            "unknown mneme-eval command: {command}\navailable commands: doctor, version, validate, acceptance, baseline, baseline-gate, baseline-summary, replay, run"
+            "unknown mneme-eval command: {command}\navailable commands: doctor, version, validate, acceptance, baseline, baseline-gate, baseline-summary, candidate, candidate-check, replay, run"
         ))),
     }
 }
@@ -104,7 +111,7 @@ fn print_help(command: Option<&str>) -> Result<(), EvalError> {
         None => MNEME_EVAL_HELP,
         Some(command) => command_help(command).ok_or_else(|| {
             EvalError::invalid_cli(format!(
-                "unknown mneme-eval help topic: {command}\navailable help topics: doctor, version, validate, acceptance, baseline, baseline-gate, baseline-summary, replay, run"
+                "unknown mneme-eval help topic: {command}\navailable help topics: doctor, version, validate, acceptance, baseline, baseline-gate, baseline-summary, candidate, candidate-check, replay, run"
             ))
         })?,
     };
@@ -121,6 +128,8 @@ fn command_help(command: &str) -> Option<&'static str> {
         "baseline" => Some(MNEME_EVAL_BASELINE_HELP),
         "baseline-gate" => Some(MNEME_EVAL_BASELINE_GATE_HELP),
         "baseline-summary" => Some(MNEME_EVAL_BASELINE_SUMMARY_HELP),
+        "candidate" => Some(MNEME_EVAL_CANDIDATE_HELP),
+        "candidate-check" => Some(MNEME_EVAL_CANDIDATE_CHECK_HELP),
         "replay" => Some(MNEME_EVAL_REPLAY_HELP),
         "run" => Some(MNEME_EVAL_RUN_HELP),
         _ => None,
@@ -144,6 +153,9 @@ Commands:
   baseline-gate  Gate a saved baseline JSON report.
   baseline-summary
                  Summarize baseline failures for triage.
+  candidate      Create local scenario candidate artifacts from failed reports.
+  candidate-check
+                 Validate local scenario candidate artifacts.
 
 Targets:
   fake, mneme-v1, mneme-v1-command
@@ -152,7 +164,8 @@ Examples:
   mneme-eval validate --suite core
   mneme-eval run --suite core --target mneme-v1
   mneme-eval help baseline
-  mneme-eval help baseline-summary"#;
+  mneme-eval help baseline-summary
+  mneme-eval help candidate"#;
 
 const MNEME_EVAL_DOCTOR_HELP: &str = r#"Usage: mneme-eval doctor
 
@@ -216,6 +229,22 @@ without bypassing baseline-gate.
 Example:
   mneme-eval baseline-summary evals/reports/openai-live-baseline.json --report evals/reports/openai-live-baseline.summary.json"#;
 
+const MNEME_EVAL_CANDIDATE_HELP: &str = r#"Usage: mneme-eval candidate <eval-or-baseline-report.json> [--out-dir <dir>] [--prefix <label>] [--limit <n>] [--suite <name>] [--json] [--report <path>]
+
+Create local, review-only scenario candidate artifacts from failed eval or
+baseline reports. Generated candidates are sanitized and should be reviewed
+before any scenario block is promoted into evals/scenarios/<suite>/.
+
+Example:
+  mneme-eval candidate evals/reports/openai-live-baseline.json --out-dir evals/candidates/openai --limit 3"#;
+
+const MNEME_EVAL_CANDIDATE_CHECK_HELP: &str = r#"Usage: mneme-eval candidate-check <candidate.yaml|dir> [--json] [--report <path>]
+
+Validate local scenario candidate artifacts before sharing or promoting them.
+
+Example:
+  mneme-eval candidate-check evals/candidates/openai --json"#;
+
 fn print_doctor() {
     println!(
         "{PRODUCT_NAME} eval harness: {}",
@@ -255,6 +284,22 @@ struct BaselineGateOptions {
 
 #[derive(Debug, Clone, Default)]
 struct BaselineSummaryOptions {
+    json: bool,
+    report_path: Option<PathBuf>,
+}
+
+#[derive(Debug, Clone)]
+struct CandidateOptions {
+    json: bool,
+    report_path: Option<PathBuf>,
+    out_dir: PathBuf,
+    prefix: String,
+    limit: Option<usize>,
+    suite: Option<String>,
+}
+
+#[derive(Debug, Clone, Default)]
+struct CandidateCheckOptions {
     json: bool,
     report_path: Option<PathBuf>,
 }
@@ -316,6 +361,19 @@ impl Default for BaselineGateOptions {
             require_provider_label: true,
             require_model_label: true,
             require_run_label: false,
+        }
+    }
+}
+
+impl Default for CandidateOptions {
+    fn default() -> Self {
+        Self {
+            json: false,
+            report_path: None,
+            out_dir: PathBuf::from("evals/candidates"),
+            prefix: "dogfood".to_owned(),
+            limit: None,
+            suite: None,
         }
     }
 }
@@ -590,12 +648,41 @@ fn run_baseline_summary(raw_args: Vec<String>) -> Result<(), EvalError> {
     emit_baseline_summary_report(&report, &options)
 }
 
+fn run_candidate(raw_args: Vec<String>) -> Result<(), EvalError> {
+    let (source_path, options) = parse_candidate_args(raw_args)?;
+    let config = CandidateGenerateConfig {
+        source_path,
+        out_dir: options.out_dir.clone(),
+        prefix: options.prefix.clone(),
+        limit: options.limit,
+        suite_override: options.suite.clone(),
+    };
+    let report = generate_candidates(&config)?;
+    emit_candidate_report(&report, &options)?;
+    if report.ok {
+        Ok(())
+    } else {
+        Err(EvalError::scenario("candidate generation failed"))
+    }
+}
+
+fn run_candidate_check(raw_args: Vec<String>) -> Result<(), EvalError> {
+    let (path, options) = parse_candidate_check_args(raw_args)?;
+    let report = check_candidates(&path)?;
+    emit_candidate_check_report(&report, &options)?;
+    if report.ok {
+        Ok(())
+    } else {
+        Err(EvalError::scenario("candidate validation failed"))
+    }
+}
+
 fn build_baseline_summary_report(
     path: &Path,
     raw_json: &str,
     baseline: &BaselineReport,
 ) -> BaselineSummaryReport {
-    let redaction_findings = redaction_findings(raw_json);
+    let redaction_findings = redaction::findings(raw_json);
     let top_failed_categories = top_failed_categories(baseline);
     let top_failed_scenarios = top_failed_scenarios(baseline);
     let top_failed_checks = top_failed_checks(baseline);
@@ -899,7 +986,7 @@ fn build_baseline_gate_report(
         ));
     }
 
-    let redaction_findings = redaction_findings(raw_json);
+    let redaction_findings = redaction::findings(raw_json);
     if redaction_findings.is_empty() {
         gates.push(AcceptanceGateReport::pass(
             "redaction.scan",
@@ -978,32 +1065,6 @@ fn check_optional_metadata_gate(
         (false, Some(value)) => AcceptanceGateReport::pass(name, format!("present: {value}")),
         (false, None) => AcceptanceGateReport::pass(name, "not required and not present"),
     }
-}
-
-fn redaction_findings(raw_json: &str) -> Vec<String> {
-    let uppercase = raw_json.to_ascii_uppercase();
-    let mut findings = Vec::new();
-    for pattern in [
-        "OPENAI_API_KEY",
-        "API_KEY=",
-        "API-KEY=",
-        "TOKEN=",
-        "PASSWORD=",
-        "SECRET=",
-        "BEARER ",
-    ] {
-        if uppercase.contains(pattern) {
-            findings.push(pattern.to_owned());
-        }
-    }
-    for pattern in ["sk-", "/Users/", "\\Users\\"] {
-        if raw_json.contains(pattern) {
-            findings.push(pattern.to_owned());
-        }
-    }
-    findings.sort();
-    findings.dedup();
-    findings
 }
 
 fn baseline_report_for_paths(
@@ -1554,6 +1615,116 @@ fn parse_baseline_summary_args(
     Ok((path, options))
 }
 
+fn parse_candidate_args(raw_args: Vec<String>) -> Result<(PathBuf, CandidateOptions), EvalError> {
+    let mut path = None;
+    let mut options = CandidateOptions::default();
+    let mut idx = 0;
+    while idx < raw_args.len() {
+        match raw_args[idx].as_str() {
+            "--json" => options.json = true,
+            "--report" => {
+                idx += 1;
+                let Some(value) = raw_args.get(idx) else {
+                    return Err(EvalError::invalid_cli("--report requires a path"));
+                };
+                options.report_path = Some(PathBuf::from(value));
+            }
+            "--out-dir" => {
+                idx += 1;
+                let Some(value) = raw_args.get(idx) else {
+                    return Err(EvalError::invalid_cli("--out-dir requires a path"));
+                };
+                options.out_dir = PathBuf::from(value);
+            }
+            "--prefix" => {
+                idx += 1;
+                let Some(value) = raw_args.get(idx) else {
+                    return Err(EvalError::invalid_cli("--prefix requires a value"));
+                };
+                options.prefix = parse_label("--prefix", value)?;
+            }
+            "--limit" => {
+                idx += 1;
+                let Some(value) = raw_args.get(idx) else {
+                    return Err(EvalError::invalid_cli("--limit requires a value"));
+                };
+                let limit = parse_nonnegative_usize("--limit", value)?;
+                if limit == 0 {
+                    return Err(EvalError::invalid_cli("--limit must be greater than zero"));
+                }
+                options.limit = Some(limit);
+            }
+            "--suite" => {
+                idx += 1;
+                let Some(value) = raw_args.get(idx) else {
+                    return Err(EvalError::invalid_cli("--suite requires a name"));
+                };
+                options.suite = Some(parse_label("--suite", value)?);
+            }
+            value if value.starts_with('-') => {
+                return Err(EvalError::invalid_cli(format!(
+                    "unknown candidate option: {value}"
+                )));
+            }
+            value => {
+                if path.is_some() {
+                    return Err(EvalError::invalid_cli(
+                        "candidate accepts one eval or baseline report path",
+                    ));
+                }
+                path = Some(PathBuf::from(value));
+            }
+        }
+        idx += 1;
+    }
+    let Some(path) = path else {
+        return Err(EvalError::invalid_cli(
+            "usage: mneme-eval candidate <eval-or-baseline-report.json> [--out-dir <dir>] [--prefix <label>] [--limit <n>] [--suite <name>] [--json] [--report <path>]",
+        ));
+    };
+    Ok((path, options))
+}
+
+fn parse_candidate_check_args(
+    raw_args: Vec<String>,
+) -> Result<(PathBuf, CandidateCheckOptions), EvalError> {
+    let mut path = None;
+    let mut options = CandidateCheckOptions::default();
+    let mut idx = 0;
+    while idx < raw_args.len() {
+        match raw_args[idx].as_str() {
+            "--json" => options.json = true,
+            "--report" => {
+                idx += 1;
+                let Some(value) = raw_args.get(idx) else {
+                    return Err(EvalError::invalid_cli("--report requires a path"));
+                };
+                options.report_path = Some(PathBuf::from(value));
+            }
+            value if value.starts_with('-') => {
+                return Err(EvalError::invalid_cli(format!(
+                    "unknown candidate-check option: {value}"
+                )));
+            }
+            value => {
+                if path.is_some() {
+                    return Err(EvalError::invalid_cli(
+                        "candidate-check accepts one candidate file or directory path",
+                    ));
+                }
+                path = Some(PathBuf::from(value));
+            }
+        }
+        idx += 1;
+    }
+    let Some(path) = path else {
+        return Err(EvalError::invalid_cli(
+            "usage: mneme-eval candidate-check <candidate.yaml|dir> [--json] [--report <path>]",
+        ));
+    };
+    Ok((path, options))
+}
+
 fn parse_iterations(value: &str) -> Result<usize, EvalError> {
     let iterations = value.parse::<usize>().map_err(|_| {
         EvalError::invalid_cli(format!("--iterations must be a positive integer: {value}"))
@@ -1761,6 +1932,40 @@ fn emit_baseline_summary_report(
     Ok(())
 }
 
+fn emit_candidate_report(
+    report: &CandidateReport,
+    options: &CandidateOptions,
+) -> Result<(), EvalError> {
+    if let Some(path) = &options.report_path {
+        write_report(path, report)?;
+    }
+    if options.json {
+        let json = serde_json::to_string_pretty(report)
+            .map_err(|source| EvalError::json(Path::new("<stdout>"), source))?;
+        println!("{json}");
+    } else {
+        print_candidate_report(report);
+    }
+    Ok(())
+}
+
+fn emit_candidate_check_report(
+    report: &CandidateCheckReport,
+    options: &CandidateCheckOptions,
+) -> Result<(), EvalError> {
+    if let Some(path) = &options.report_path {
+        write_report(path, report)?;
+    }
+    if options.json {
+        let json = serde_json::to_string_pretty(report)
+            .map_err(|source| EvalError::json(Path::new("<stdout>"), source))?;
+        println!("{json}");
+    } else {
+        print_candidate_check_report(report);
+    }
+    Ok(())
+}
+
 fn write_report<T: Serialize>(path: &Path, report: &T) -> Result<(), EvalError> {
     if let Some(parent) = path
         .parent()
@@ -1937,6 +2142,54 @@ fn print_summary_checks(checks: &[BaselineFailedCheckSummary]) {
     }
 }
 
+fn print_candidate_report(report: &CandidateReport) {
+    println!(
+        "candidate: source={}, kind={}, target={}, generated={}, failed_scenarios={}, out_dir={}",
+        report.source,
+        report.source_kind,
+        report.target,
+        report.candidate_count,
+        report.failed_scenario_count,
+        report.out_dir
+    );
+    if !report.redaction_finding_codes.is_empty() {
+        println!(
+            "- redaction sanitized codes={}",
+            report.redaction_finding_codes.join(",")
+        );
+    }
+    for candidate in &report.candidates {
+        println!(
+            "- {} {} -> {} (failed_attempts={}, failed_checks={})",
+            candidate.status,
+            candidate.source_scenario_id,
+            candidate.path,
+            candidate.failed_attempts,
+            candidate.failed_check_count
+        );
+    }
+    for action in &report.recommended_next_actions {
+        println!("- next {action}");
+    }
+}
+
+fn print_candidate_check_report(report: &CandidateCheckReport) {
+    println!(
+        "candidate-check: source={}, {} checked, {} valid, {} invalid",
+        report.source, report.checked_count, report.valid, report.invalid
+    );
+    for result in &report.results {
+        let status = if result.ok { "PASS" } else { "FAIL" };
+        match &result.candidate_id {
+            Some(candidate_id) => println!("- {status} {} ({candidate_id})", result.path),
+            None => println!("- {status} {}", result.path),
+        }
+        for error in &result.errors {
+            println!("  - {error}");
+        }
+    }
+}
+
 fn print_scenario_report(scenario: &ScenarioReport) {
     let status = if scenario.ok { "PASS" } else { "FAIL" };
     println!("- {status} {}", scenario.scenario_id);
@@ -1967,6 +2220,14 @@ mod tests {
         let summary_help = command_help("baseline-summary").expect("baseline-summary help");
         assert!(summary_help.contains("Usage: mneme-eval baseline-summary"));
         assert!(summary_help.contains("--report <path>"));
+
+        let candidate_help = command_help("candidate").expect("candidate help");
+        assert!(candidate_help.contains("Usage: mneme-eval candidate"));
+        assert!(candidate_help.contains("--out-dir <dir>"));
+
+        let candidate_check_help = command_help("candidate-check").expect("candidate-check help");
+        assert!(candidate_check_help.contains("Usage: mneme-eval candidate-check"));
+        assert!(candidate_check_help.contains("candidate artifacts"));
 
         let general = command_help("run").expect("run help");
         assert!(general.contains("mneme-eval run"));
@@ -2181,6 +2442,52 @@ mod tests {
         assert_eq!(
             options.report_path.as_deref(),
             Some(Path::new("evals/reports/openai-live-baseline.summary.json"))
+        );
+        assert!(options.json);
+        Ok(())
+    }
+
+    #[test]
+    fn parse_candidate_accepts_generation_options() -> Result<(), EvalError> {
+        let (path, options) = parse_candidate_args(vec![
+            "evals/reports/baseline.json".to_owned(),
+            "--out-dir".to_owned(),
+            "evals/candidates/local".to_owned(),
+            "--prefix".to_owned(),
+            "dogfood".to_owned(),
+            "--limit".to_owned(),
+            "3".to_owned(),
+            "--suite".to_owned(),
+            "model".to_owned(),
+            "--report".to_owned(),
+            "evals/reports/candidate.json".to_owned(),
+            "--json".to_owned(),
+        ])?;
+        assert_eq!(path, PathBuf::from("evals/reports/baseline.json"));
+        assert_eq!(options.out_dir, PathBuf::from("evals/candidates/local"));
+        assert_eq!(options.prefix, "dogfood");
+        assert_eq!(options.limit, Some(3));
+        assert_eq!(options.suite.as_deref(), Some("model"));
+        assert_eq!(
+            options.report_path.as_deref(),
+            Some(Path::new("evals/reports/candidate.json"))
+        );
+        assert!(options.json);
+        Ok(())
+    }
+
+    #[test]
+    fn parse_candidate_check_accepts_report_options() -> Result<(), EvalError> {
+        let (path, options) = parse_candidate_check_args(vec![
+            "evals/candidates/local".to_owned(),
+            "--report".to_owned(),
+            "evals/reports/candidate-check.json".to_owned(),
+            "--json".to_owned(),
+        ])?;
+        assert_eq!(path, PathBuf::from("evals/candidates/local"));
+        assert_eq!(
+            options.report_path.as_deref(),
+            Some(Path::new("evals/reports/candidate-check.json"))
         );
         assert!(options.json);
         Ok(())

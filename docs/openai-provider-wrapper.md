@@ -96,7 +96,9 @@ cargo run -p mneme-cli -- ingest "I work best with local-first tools." \
 
 For repeated live evals, use `mneme-eval baseline` and write the report under
 ignored `evals/reports/`. See [Live Provider Baseline](live-provider-baseline.md)
-and [Live Provider Baseline Runbook](live-provider-baseline-runbook.md).
+and [Live Provider Baseline Runbook](live-provider-baseline-runbook.md). Failed
+reports can be converted into ignored, sanitized review artifacts with
+`mneme-eval candidate` before any public scenario promotion.
 
 ## Safety Rules
 

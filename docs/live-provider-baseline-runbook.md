@@ -69,6 +69,17 @@ For the current suite, treat a live baseline as usable only when:
 If a run fails, keep the report locally and inspect category pass rates before
 changing code or prompts.
 
+To preserve a failure for future eval coverage, create local candidates after
+summary triage:
+
+```sh
+cargo run -p mneme-eval -- candidate evals/reports/openai-live-baseline.json --out-dir evals/candidates/openai --limit 3
+cargo run -p mneme-eval -- candidate-check evals/candidates/openai
+```
+
+Candidate files are ignored by git and must be reviewed before any nested
+`scenario` block is promoted into `evals/scenarios/`.
+
 ## Redaction Checklist
 
 Before sharing any live report outside the local machine:
