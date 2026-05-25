@@ -17,6 +17,17 @@ scenario fixtures under `evals/scenarios/`.
 - [Live Provider Baseline](live-provider-baseline.md)
 - [Live Provider Baseline Runbook](live-provider-baseline-runbook.md)
 
+Useful commands:
+
+- `mneme-eval baseline-summary <report.json>`
+- `mneme-eval baseline-compare <before.json> <after.json>`
+
 ## Dogfood Workflow
 
 - [Eval Candidate Workflow](eval-candidate-workflow.md)
+
+Useful commands:
+
+- `mneme-eval candidate <report.json>`
+- `mneme-eval candidate-check <candidate.yaml|dir>`
+- `mneme-eval candidate-promote <candidate.yaml>`

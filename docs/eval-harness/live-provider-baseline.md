@@ -55,12 +55,28 @@ actions. `baseline-summary` exits successfully for failed baseline reports so
 the failure can be inspected locally; it is not a replacement for
 `baseline-gate`.
 
+Compare two saved reports before accepting a prompt, wrapper, or runtime
+change:
+
+```sh
+cargo run -p mneme-eval -- baseline-compare \
+  evals/reports/openai-before.json \
+  evals/reports/openai-after.json \
+  --fail-on-regression
+```
+
+`baseline-compare` reports aggregate pass-rate deltas, category changes,
+scenario regressions/resolutions, and newly increased failed checks. Without
+`--fail-on-regression`, it emits the report and exits successfully so local
+triage can continue.
+
 When a failed report should become future eval coverage, generate ignored local
 candidate artifacts first:
 
 ```sh
 cargo run -p mneme-eval -- candidate evals/reports/openai-live-baseline.json --out-dir evals/candidates/openai --limit 3
 cargo run -p mneme-eval -- candidate-check evals/candidates/openai
+cargo run -p mneme-eval -- candidate-promote evals/candidates/openai/dogfood-example.candidate.yaml --suite model --filename dogfood-example.yaml
 ```
 
 Review and minimize the nested `scenario` block before promoting anything into

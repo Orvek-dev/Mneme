@@ -152,12 +152,18 @@ grep -q "Usage: mneme-eval baseline-gate" "$MNEME_EVAL_HELP"
 cargo run -p mneme-eval -- baseline-summary --help > "$MNEME_EVAL_HELP"
 grep -q "Usage: mneme-eval baseline-summary" "$MNEME_EVAL_HELP"
 grep -q "provider triage" "$MNEME_EVAL_HELP"
+cargo run -p mneme-eval -- baseline-compare --help > "$MNEME_EVAL_HELP"
+grep -q "Usage: mneme-eval baseline-compare" "$MNEME_EVAL_HELP"
+grep -q -- "--fail-on-regression" "$MNEME_EVAL_HELP"
 cargo run -p mneme-eval -- candidate --help > "$MNEME_EVAL_HELP"
 grep -q "Usage: mneme-eval candidate" "$MNEME_EVAL_HELP"
 grep -q "scenario candidate artifacts" "$MNEME_EVAL_HELP"
 cargo run -p mneme-eval -- candidate-check --help > "$MNEME_EVAL_HELP"
 grep -q "Usage: mneme-eval candidate-check" "$MNEME_EVAL_HELP"
 grep -q "Validate local scenario candidate" "$MNEME_EVAL_HELP"
+cargo run -p mneme-eval -- candidate-promote --help > "$MNEME_EVAL_HELP"
+grep -q "Usage: mneme-eval candidate-promote" "$MNEME_EVAL_HELP"
+grep -q -- "--scenario-root <dir>" "$MNEME_EVAL_HELP"
 
 STORE="${TMP_ROOT}/mneme-quality-gate-cli.json"
 rm -f "$STORE"
@@ -572,6 +578,11 @@ BASELINE_GATE_REPORT="${TMP_ROOT}/mneme-openai-wrapper-baseline-gate.json"
 BASELINE_GATE_STDOUT="${TMP_ROOT}/mneme-openai-wrapper-baseline-gate.stdout.json"
 BASELINE_SUMMARY_REPORT="${TMP_ROOT}/mneme-openai-wrapper-baseline-summary.json"
 BASELINE_SUMMARY_STDOUT="${TMP_ROOT}/mneme-openai-wrapper-baseline-summary.stdout.json"
+CORE_BASELINE_REPORT="${TMP_ROOT}/mneme-core-baseline.json"
+CORE_BASELINE_STDOUT="${TMP_ROOT}/mneme-core-baseline.stdout.json"
+BASELINE_COMPARE_REPORT="${TMP_ROOT}/mneme-baseline-compare.json"
+BASELINE_COMPARE_STDOUT="${TMP_ROOT}/mneme-baseline-compare.stdout.json"
+BASELINE_COMPARE_FAIL_STDOUT="${TMP_ROOT}/mneme-baseline-compare-fail.stdout.json"
 FAILED_BASELINE_REPORT="${TMP_ROOT}/mneme-seeded-fault-baseline.json"
 FAILED_BASELINE_STDOUT="${TMP_ROOT}/mneme-seeded-fault-baseline.stdout.json"
 FAILED_BASELINE_SUMMARY="${TMP_ROOT}/mneme-seeded-fault-baseline-summary.json"
@@ -581,8 +592,15 @@ CANDIDATE_REPORT="${TMP_ROOT}/mneme-quality-gate-candidates.json"
 CANDIDATE_STDOUT="${TMP_ROOT}/mneme-quality-gate-candidates.stdout.json"
 CANDIDATE_CHECK_REPORT="${TMP_ROOT}/mneme-quality-gate-candidate-check.json"
 CANDIDATE_CHECK_STDOUT="${TMP_ROOT}/mneme-quality-gate-candidate-check.stdout.json"
-rm -rf "$CANDIDATE_DIR"
-rm -f "$CANDIDATE_REPORT" "$CANDIDATE_STDOUT" "$CANDIDATE_CHECK_REPORT" "$CANDIDATE_CHECK_STDOUT"
+CANDIDATE_PROMOTE_ROOT="${TMP_ROOT}/mneme-quality-gate-promoted-scenarios"
+CANDIDATE_PROMOTE_REPORT="${TMP_ROOT}/mneme-quality-gate-candidate-promote.json"
+CANDIDATE_PROMOTE_STDOUT="${TMP_ROOT}/mneme-quality-gate-candidate-promote.stdout.json"
+PROMOTED_SCENARIO="${CANDIDATE_PROMOTE_ROOT}/dogfood/dogfood-curation-restore-from-backup.yaml"
+rm -rf "$CANDIDATE_DIR" "$CANDIDATE_PROMOTE_ROOT"
+rm -f "$CANDIDATE_REPORT" "$CANDIDATE_STDOUT" "$CANDIDATE_CHECK_REPORT" "$CANDIDATE_CHECK_STDOUT" \
+  "$CANDIDATE_PROMOTE_REPORT" "$CANDIDATE_PROMOTE_STDOUT" \
+  "$CORE_BASELINE_REPORT" "$CORE_BASELINE_STDOUT" "$BASELINE_COMPARE_REPORT" \
+  "$BASELINE_COMPARE_STDOUT" "$BASELINE_COMPARE_FAIL_STDOUT"
 MNEME_OPENAI_DRY_RUN=1 cargo run -p mneme-eval -- baseline --suite model \
   --target mneme-v1-command \
   --extractor-command wrappers/openai_extractor.py \
@@ -612,6 +630,14 @@ grep -q '"failed_category_count": 0' "$BASELINE_SUMMARY_REPORT"
 grep -q '"redaction_findings": \[\]' "$BASELINE_SUMMARY_REPORT"
 grep -q 'dry-run evidence' "$BASELINE_SUMMARY_REPORT"
 
+cargo run -p mneme-eval -- baseline --suite core \
+  --target fake \
+  --iterations 1 \
+  --report "$CORE_BASELINE_REPORT" \
+  --json > "$CORE_BASELINE_STDOUT"
+grep -q '"suite": "core"' "$CORE_BASELINE_REPORT"
+grep -q '"ok": true' "$CORE_BASELINE_REPORT"
+
 if cargo run -p mneme-eval -- baseline --suite core \
   --target fake \
   --seeded-fault skip-claims \
@@ -629,6 +655,20 @@ grep -q '"failed_scenario_count": 11' "$FAILED_BASELINE_SUMMARY"
 grep -q 'API_KEY=' "$FAILED_BASELINE_SUMMARY"
 grep -q 'redact or keep local before sharing' "$FAILED_BASELINE_SUMMARY"
 grep -q '"top_failed_checks"' "$FAILED_BASELINE_SUMMARY"
+
+cargo run -p mneme-eval -- baseline-compare "$CORE_BASELINE_REPORT" "$FAILED_BASELINE_REPORT" \
+  --report "$BASELINE_COMPARE_REPORT" \
+  --json > "$BASELINE_COMPARE_STDOUT"
+grep -q '"command": "baseline-compare"' "$BASELINE_COMPARE_STDOUT"
+grep -q '"regression_detected": true' "$BASELINE_COMPARE_REPORT"
+grep -q '"new_failed_scenarios": \[' "$BASELINE_COMPARE_REPORT"
+grep -q '"new_failed_checks": \[' "$BASELINE_COMPARE_REPORT"
+if cargo run -p mneme-eval -- baseline-compare "$CORE_BASELINE_REPORT" "$FAILED_BASELINE_REPORT" \
+  --fail-on-regression \
+  --json > "$BASELINE_COMPARE_FAIL_STDOUT"; then
+  echo "quality-gate: baseline-compare unexpectedly passed with --fail-on-regression" >&2
+  exit 1
+fi
 
 cargo run -p mneme-eval -- candidate "$FAILED_BASELINE_REPORT" \
   --out-dir "$CANDIDATE_DIR" \
@@ -651,6 +691,23 @@ cargo run -p mneme-eval -- candidate-check "$CANDIDATE_DIR" \
 grep -q '"command": "candidate-check"' "$CANDIDATE_CHECK_STDOUT"
 grep -q '"ok": true' "$CANDIDATE_CHECK_REPORT"
 grep -q '"valid": 3' "$CANDIDATE_CHECK_REPORT"
+
+cargo run -p mneme-eval -- candidate-promote "$CANDIDATE_DIR/dogfood-curation-restore-from-backup.candidate.yaml" \
+  --suite dogfood \
+  --filename dogfood-curation-restore-from-backup.yaml \
+  --scenario-root "$CANDIDATE_PROMOTE_ROOT" \
+  --apply \
+  --report "$CANDIDATE_PROMOTE_REPORT" \
+  --json > "$CANDIDATE_PROMOTE_STDOUT"
+grep -q '"command": "candidate-promote"' "$CANDIDATE_PROMOTE_STDOUT"
+grep -q '"applied": true' "$CANDIDATE_PROMOTE_REPORT"
+grep -q '"ok": true' "$CANDIDATE_PROMOTE_REPORT"
+test -f "$PROMOTED_SCENARIO"
+cargo run -p mneme-eval -- validate "$PROMOTED_SCENARIO"
+if rg -n 'API_KEY=FAKE_TEST_VALUE|OPENAI_API_KEY|sk-' "$CANDIDATE_PROMOTE_ROOT"; then
+  echo "quality-gate: promoted scenario leaked redaction-sensitive text" >&2
+  exit 1
+fi
 
 cargo run -p mneme-eval -- baseline-gate "$BASELINE_REPORT" \
   --report "$BASELINE_GATE_REPORT" \
