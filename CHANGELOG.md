@@ -4,6 +4,19 @@ This project follows the spirit of Keep a Changelog.
 
 ## Unreleased
 
+## [0.44.0] - 2026-05-25
+
+### Added
+
+- Added `scripts/v1-hard-dogfood.py` for hard-mode v1 validation with 100
+  normal records, 150 adversarial records, and 30 agent handoff workflows.
+- Added a hard-mode scorecard covering recall, precision, scope leak, secret
+  leak, citation coverage, handoff success, stale reuse, and agent attribution.
+- Added seeded-fault detection, local candidate artifact generation, regression
+  gates, and public-safe JSON/Markdown/HTML report outputs for hard dogfood.
+- Added Phase 38 hard-mode dogfood docs/spec and lightweight quality-gate
+  checks for the hard-mode contract, dataset shape, and seeded-fault coverage.
+
 ## [0.43.0] - 2026-05-25
 
 ### Added
