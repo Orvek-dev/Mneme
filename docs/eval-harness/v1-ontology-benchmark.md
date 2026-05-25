@@ -77,6 +77,12 @@ Check scorer fault detection:
 scripts/v1-ontology-benchmark.py --check-scorer
 ```
 
+Check capability gap analysis:
+
+```sh
+scripts/v1-ontology-benchmark.py --check-gap-analysis
+```
+
 Run a local baseline:
 
 ```sh
@@ -89,8 +95,9 @@ The evidence bundle is ignored by git and written under:
 evals/runs/v1-ontology-benchmark/<run-label>/
 ```
 
-It includes `summary.json`, `scorecard.json`, per-case run artifacts,
-`report.md`, `report.html`, and CLI command outputs.
+It includes `summary.json`, `scorecard.json`, `gap-analysis.json`,
+`gap-analysis.md`, per-case run artifacts, `report.md`, `report.html`, and CLI
+command outputs.
 
 ## Interpretation
 
@@ -98,3 +105,10 @@ Current v1 is expected to score well on explicit-marker anchor cases and poorly
 on natural-language ontology extraction, entity resolution, attributes, temporal
 state, and multi-hop context. Those gaps are the input for later v1 ontology
 design, not a reason to change v1 before measuring it.
+
+`gap-analysis.json` maps low scores into implementation buckets such as
+`natural_language_extraction`, `relation_mapping`, `entity_resolution`,
+`attribute_capture`, `temporal_state`, `multi_hop_context`, `scope_ownership`,
+`provenance`, and `safety`. A complete v1 ontology run should report
+`v1_ontology_ready`; otherwise the gap analysis names the next development
+phase.

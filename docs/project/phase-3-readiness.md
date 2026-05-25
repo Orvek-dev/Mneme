@@ -233,3 +233,8 @@ adding `scripts/v1-ontology-benchmark.py` and a public-safe golden ontology
 fixture so current v1 can be measured against natural-language entity,
 relation, attribute, scope, temporal, provenance, context, and safety checks
 before ontology implementation changes are designed.
+
+Phase 41 shipped the **V1 Completion Gap Analysis MVP** in `v0.47.0`, adding
+public v1 completion criteria and ontology gap-analysis outputs that turn raw
+benchmark misses into capability-level implementation priorities before the
+next v1 completion phase.

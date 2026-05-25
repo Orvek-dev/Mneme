@@ -11,6 +11,7 @@ through the shared Rust workspace crates rather than a separate duplicated
 - [Local CLI](local-cli.md)
 - [Personal Runtime](personal-runtime.md)
 - [Memory Review Artifacts](memory-review-artifacts.md)
+- [V1 Completion Criteria](v1-completion-criteria.md)
 
 ## Agent Integration
 
