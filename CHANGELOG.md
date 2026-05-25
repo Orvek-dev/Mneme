@@ -4,6 +4,15 @@ This project follows the spirit of Keep a Changelog.
 
 ## Unreleased
 
+## [0.49.0] - 2026-05-25
+
+### Added
+
+- Added public README positioning for Mneme v1 as a local-first personal-memory
+  runtime with cited, scope-safe, eval-gated agent workflows.
+- Added a version-controlled SVG evidence scorecard summarizing the current
+  public-safe v1 evaluation metrics.
+
 ## [0.48.0] - 2026-05-25
 
 ### Added

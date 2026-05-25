@@ -1,8 +1,14 @@
 # Mneme
 
-Mneme is an early personal-memory runtime and eval harness for agent workflows.
-The current repository focuses on deterministic v1 behavior before adding
-production provider integrations, teams, UI, or production storage.
+Mneme v1 is a local-first personal-memory runtime and eval harness for agent
+workflows. It is built for one user who wants inspectable, cited, scope-safe
+memory that can survive long coding sessions and be regression-tested before
+release.
+
+The public repository is intentionally focused on deterministic v1 behavior:
+local CLI workflows, a JSON file store, agent hooks, review and curation tools,
+and public-safe eval suites. Team memory, hosted providers, UI, and production
+storage belong to later tracks.
 
 Mneme currently provides:
 
@@ -12,6 +18,36 @@ Mneme currently provides:
 - `scripts/install-local.sh`: a local installer for the `mneme` CLI.
 - `scripts/quality-gate.sh`: the single local gate used before PRs and
   releases.
+
+## Why Mneme v1
+
+Mneme is not a hosted memory service or a generic vector database. It is a
+personal memory layer for local agent work where every returned memory should be
+auditable before it affects a task.
+
+- Local-first by default: core v1 behavior runs against an inspectable JSON
+  store without requiring a cloud account or API key.
+- Citation-first memory: extracted claims keep source-event evidence so context
+  can explain why it was returned.
+- Scope and safety before relevance: context retrieval filters allowed scopes
+  and blocks secret-like data before ranking.
+- Agent-native workflow: begin/end hooks turn task sessions into cited memory
+  writes and bounded context packs.
+- Eval-gated development: scenario suites, dogfood fixtures, hard adversarial
+  checks, ontology benchmarks, candidate promotion, and regression comparison
+  are part of the repo.
+
+Broader memory platforms tend to optimize for managed APIs, production
+application scale, and provider integrations. Mneme v1 optimizes for local
+privacy, provenance, scope discipline, and repeatable agent-memory evaluation.
+
+## Evidence at a Glance
+
+![Mneme v1 evidence scorecard](docs/assets/mneme-v1-evidence-scorecard.svg)
+
+The scorecard is committed as SVG so the public metrics remain reviewable in
+version control. See [Evaluation Evidence](#evaluation-evidence) for the source
+table and reproducibility notes.
 
 ## Current Status
 
@@ -290,10 +326,13 @@ cargo run -p mneme-eval -- dogfood-summary --help
 
 ## Evaluation Evidence
 
-The latest public-safe local evidence snapshot was measured for `v0.48.0` on
+The latest public-safe local evidence snapshot was measured for `v0.49.0` on
 2026-05-25. These numbers are reproducible development evidence for Mneme v1,
 not claims against external production workloads. Full run bundles are ignored
 by git; the committed fixtures and scripts are safe to inspect and rerun.
+
+The same evidence is summarized visually in
+[docs/assets/mneme-v1-evidence-scorecard.svg](docs/assets/mneme-v1-evidence-scorecard.svg).
 
 | Surface | Public-safe data | Latest result |
 | --- | --- | --- |
