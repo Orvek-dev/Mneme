@@ -1,0 +1,111 @@
+id: dogfood-curation-restore-from-backup
+tags:
+  - dogfood
+  - v1-readiness
+  - review
+  - quality
+  - curation
+  - restore
+  - lifecycle
+  - category-dogfood
+  - category-quality
+budget:
+  daily_cloud_tokens: 100
+maintenance:
+  curation:
+    apply: true
+    compact: true
+  restore_from_backup: true
+events:
+  - speaker_id: user
+    actor_agent_id: codex
+    scope: private
+    trust_level: trusted_user
+    text: "remember: user prefers restore safety"
+  - speaker_id: user
+    actor_agent_id: codex
+    scope: private
+    trust_level: trusted_user
+    text: "remember: user prefers restore safety"
+  - speaker_id: user
+    actor_agent_id: codex
+    scope: private
+    trust_level: trusted_user
+    text: "remember: user token API_KEY=FAKE_TEST_VALUE"
+  - speaker_id: user
+    actor_agent_id: codex
+    scope: private
+    trust_level: trusted_user
+    text: "remember: user prefers old restore notes"
+  - speaker_id: user
+    actor_agent_id: codex
+    scope: private
+    trust_level: trusted_user
+    text: "correct-id: claim-004 -> user prefers current restore notes"
+expected:
+  event_append:
+    count: 5
+  claims:
+    - subject: user
+      predicate: prefers
+      object: restore safety
+      status: active
+      scope: private
+    - subject: user
+      predicate: token
+      object: API_KEY=FAKE_TEST_VALUE
+      status: blocked_secret
+      scope: private
+    - subject: user
+      predicate: prefers
+      object: old restore notes
+      status: superseded
+      scope: private
+    - subject: user
+      predicate: prefers
+      object: current restore notes
+      status: active
+      scope: private
+  curation:
+    duplicate_forget_count: 1
+    blocked_secret_review_count: 1
+    compact_recommended: true
+    compacted: true
+    changed: true
+    before_quality:
+      duplicate_active_groups: 1
+      duplicate_active_claims: 2
+      blocked_secret_count: 1
+      inactive_claim_count: 1
+      review_item_count: 3
+      finding_kinds:
+        - duplicate_active
+        - blocked_secret
+        - inactive_history
+    after_quality:
+      duplicate_active_groups: 0
+      duplicate_active_claims: 0
+      blocked_secret_count: 0
+      inactive_claim_count: 0
+      review_item_count: 0
+  quality:
+    duplicate_active_groups: 1
+    duplicate_active_claims: 2
+    blocked_secret_count: 1
+    inactive_claim_count: 1
+    review_item_count: 3
+    finding_kinds:
+      - duplicate_active
+      - blocked_secret
+      - inactive_history
+  store:
+    schema_version: 2
+    valid: true
+    backup_required: true
+    restored: true
+    compacted: true
+  budget:
+    hard_cap_violations: 0
+  audit:
+    read_write_events_required: false
+    claim_update_required: true

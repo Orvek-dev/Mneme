@@ -164,6 +164,9 @@ grep -q "Validate local scenario candidate" "$MNEME_EVAL_HELP"
 cargo run -p mneme-eval -- candidate-promote --help > "$MNEME_EVAL_HELP"
 grep -q "Usage: mneme-eval candidate-promote" "$MNEME_EVAL_HELP"
 grep -q -- "--scenario-root <dir>" "$MNEME_EVAL_HELP"
+cargo run -p mneme-eval -- v1-readiness --help > "$MNEME_EVAL_HELP"
+grep -q "Usage: mneme-eval v1-readiness" "$MNEME_EVAL_HELP"
+grep -q "dogfood" "$MNEME_EVAL_HELP"
 
 STORE="${TMP_ROOT}/mneme-quality-gate-cli.json"
 rm -f "$STORE"
@@ -536,6 +539,7 @@ cargo run -p mneme-eval -- validate --suite core
 cargo run -p mneme-eval -- validate --suite model
 cargo run -p mneme-eval -- validate --suite runtime
 cargo run -p mneme-eval -- validate --suite agent
+cargo run -p mneme-eval -- validate --suite dogfood
 
 for scenario in evals/fixtures/invalid/*.yaml; do
   if cargo run -p mneme-eval -- validate "$scenario"; then
@@ -550,6 +554,8 @@ cargo run -p mneme-eval -- run --suite runtime --target fake
 cargo run -p mneme-eval -- run --suite runtime --target mneme-v1
 cargo run -p mneme-eval -- run --suite agent --target fake
 cargo run -p mneme-eval -- run --suite agent --target mneme-v1
+cargo run -p mneme-eval -- run --suite dogfood --target fake
+cargo run -p mneme-eval -- run --suite dogfood --target mneme-v1
 cargo run -p mneme-eval -- run --suite model --target mneme-v1-command --extractor-command evals/fixtures/command-extractor.sh
 
 MNEME_OPENAI_DRY_RUN=1 cargo run -p mneme-eval -- run --suite model \
@@ -567,6 +573,8 @@ cargo run -p mneme-eval -- acceptance --suite runtime --target fake
 cargo run -p mneme-eval -- acceptance --suite runtime --target mneme-v1
 cargo run -p mneme-eval -- acceptance --suite agent --target fake
 cargo run -p mneme-eval -- acceptance --suite agent --target mneme-v1
+cargo run -p mneme-eval -- acceptance --suite dogfood --target fake
+cargo run -p mneme-eval -- acceptance --suite dogfood --target mneme-v1
 cargo run -p mneme-eval -- acceptance --suite model --target mneme-v1-command --extractor-command evals/fixtures/command-extractor.sh
 
 MNEME_OPENAI_DRY_RUN=1 cargo run -p mneme-eval -- acceptance --suite model \
@@ -595,12 +603,15 @@ CANDIDATE_CHECK_STDOUT="${TMP_ROOT}/mneme-quality-gate-candidate-check.stdout.js
 CANDIDATE_PROMOTE_ROOT="${TMP_ROOT}/mneme-quality-gate-promoted-scenarios"
 CANDIDATE_PROMOTE_REPORT="${TMP_ROOT}/mneme-quality-gate-candidate-promote.json"
 CANDIDATE_PROMOTE_STDOUT="${TMP_ROOT}/mneme-quality-gate-candidate-promote.stdout.json"
+V1_READINESS_REPORT="${TMP_ROOT}/mneme-quality-gate-v1-readiness.json"
+V1_READINESS_STDOUT="${TMP_ROOT}/mneme-quality-gate-v1-readiness.stdout.json"
 PROMOTED_SCENARIO="${CANDIDATE_PROMOTE_ROOT}/dogfood/dogfood-curation-restore-from-backup.yaml"
 rm -rf "$CANDIDATE_DIR" "$CANDIDATE_PROMOTE_ROOT"
 rm -f "$CANDIDATE_REPORT" "$CANDIDATE_STDOUT" "$CANDIDATE_CHECK_REPORT" "$CANDIDATE_CHECK_STDOUT" \
   "$CANDIDATE_PROMOTE_REPORT" "$CANDIDATE_PROMOTE_STDOUT" \
   "$CORE_BASELINE_REPORT" "$CORE_BASELINE_STDOUT" "$BASELINE_COMPARE_REPORT" \
-  "$BASELINE_COMPARE_STDOUT" "$BASELINE_COMPARE_FAIL_STDOUT"
+  "$BASELINE_COMPARE_STDOUT" "$BASELINE_COMPARE_FAIL_STDOUT" \
+  "$V1_READINESS_REPORT" "$V1_READINESS_STDOUT"
 MNEME_OPENAI_DRY_RUN=1 cargo run -p mneme-eval -- baseline --suite model \
   --target mneme-v1-command \
   --extractor-command wrappers/openai_extractor.py \
@@ -708,6 +719,14 @@ if rg -n 'API_KEY=FAKE_TEST_VALUE|OPENAI_API_KEY|sk-' "$CANDIDATE_PROMOTE_ROOT";
   echo "quality-gate: promoted scenario leaked redaction-sensitive text" >&2
   exit 1
 fi
+
+cargo run -p mneme-eval -- v1-readiness \
+  --report "$V1_READINESS_REPORT" \
+  --json > "$V1_READINESS_STDOUT"
+grep -q '"command": "v1-readiness"' "$V1_READINESS_STDOUT"
+grep -q '"readiness_status": "ready_for_v1_dogfood"' "$V1_READINESS_REPORT"
+grep -q '"suite": "dogfood"' "$V1_READINESS_REPORT"
+grep -q '"scenario_count": 22' "$V1_READINESS_REPORT"
 
 cargo run -p mneme-eval -- baseline-gate "$BASELINE_REPORT" \
   --report "$BASELINE_GATE_REPORT" \

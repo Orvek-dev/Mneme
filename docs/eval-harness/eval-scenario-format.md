@@ -29,6 +29,7 @@ cargo run -p mneme-eval -- help baseline-summary
 cargo run -p mneme-eval -- help baseline-compare
 cargo run -p mneme-eval -- help candidate
 cargo run -p mneme-eval -- help candidate-promote
+cargo run -p mneme-eval -- help v1-readiness
 ```
 
 Validate a suite without running the fake runtime:
@@ -56,6 +57,7 @@ cargo run -p mneme-eval -- run --suite core --target fake
 cargo run -p mneme-eval -- run --suite core --target mneme-v1
 cargo run -p mneme-eval -- run --suite runtime --target mneme-v1
 cargo run -p mneme-eval -- run --suite agent --target mneme-v1
+cargo run -p mneme-eval -- run --suite dogfood --target mneme-v1
 cargo run -p mneme-eval -- run --suite model --target mneme-v1-command --extractor-command evals/fixtures/command-extractor.sh
 ```
 
@@ -66,6 +68,7 @@ cargo run -p mneme-eval -- acceptance --suite core --target fake
 cargo run -p mneme-eval -- acceptance --suite core --target mneme-v1
 cargo run -p mneme-eval -- acceptance --suite runtime --target mneme-v1
 cargo run -p mneme-eval -- acceptance --suite agent --target mneme-v1
+cargo run -p mneme-eval -- acceptance --suite dogfood --target mneme-v1
 cargo run -p mneme-eval -- acceptance --suite model --target mneme-v1-command --extractor-command evals/fixtures/command-extractor.sh
 ```
 
@@ -98,6 +101,12 @@ cargo run -p mneme-eval -- candidate-check evals/candidates/openai
 cargo run -p mneme-eval -- candidate-promote evals/candidates/openai/dogfood-example.candidate.yaml --suite model --filename dogfood-example.yaml
 ```
 
+Run v1 product-readiness gates:
+
+```sh
+cargo run -p mneme-eval -- v1-readiness --json --report evals/reports/v1-readiness.json
+```
+
 `fake` is the default target. CI passes targets explicitly so future adapters
 cannot silently change what is being tested.
 
@@ -105,6 +114,10 @@ The `model` suite is opt-in and is intended for command-backed/model-backed
 extraction checks. Use `mneme-v1-command` with `--extractor-command`; the
 tracked fixture at `evals/fixtures/command-extractor.sh` is deterministic and
 does not require provider credentials.
+
+The `dogfood` suite is deterministic and intended for v1 product-readiness
+checks. It is included in `mneme-eval v1-readiness` with `core`, `runtime`, and
+`agent`.
 
 ## Schema
 

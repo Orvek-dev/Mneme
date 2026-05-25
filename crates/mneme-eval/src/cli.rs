@@ -14,7 +14,7 @@ use crate::redaction;
 use crate::report::{
     AcceptanceGateReport, AcceptanceReport, BaselineCategorySummary, BaselineFailedCheckSummary,
     BaselineMetadata, BaselineReport, BaselineRunReport, BaselineScenarioMetadata,
-    BaselineScenarioSummary, EvalReport, ScenarioReport, ScenarioValidationReport,
+    BaselineScenarioSummary, CheckStatus, EvalReport, ScenarioReport, ScenarioValidationReport,
     ValidationReport,
 };
 use crate::runtime::replay_scenario;
@@ -28,6 +28,9 @@ const DEFAULT_BASELINE_ITERATIONS: usize = 3;
 const MAX_BASELINE_ITERATIONS: usize = 100;
 const BASELINE_SUMMARY_SCHEMA_VERSION: u32 = 1;
 const BASELINE_SUMMARY_LIMIT: usize = 5;
+const V1_READINESS_SCHEMA_VERSION: u32 = 1;
+const V1_READINESS_SUITES: &[&str] = &["core", "runtime", "agent", "dogfood"];
+const V1_READINESS_MIN_DOGFOOD_SCENARIOS: usize = 4;
 
 /// Runs the Mneme eval harness command-line interface.
 pub fn run_cli(args: impl IntoIterator<Item = String>) -> Result<(), EvalError> {
@@ -75,10 +78,11 @@ pub fn run_cli(args: impl IntoIterator<Item = String>) -> Result<(), EvalError> 
         "candidate-promote" => {
             run_command_or_help("candidate-promote", raw_args, run_candidate_promote)
         }
+        "v1-readiness" => run_command_or_help("v1-readiness", raw_args, run_v1_readiness),
         "replay" => run_command_or_help("replay", raw_args, run_replay),
         "run" => run_command_or_help("run", raw_args, run_suite),
         _ => Err(EvalError::invalid_cli(format!(
-            "unknown mneme-eval command: {command}\navailable commands: doctor, version, validate, acceptance, baseline, baseline-gate, baseline-summary, baseline-compare, candidate, candidate-check, candidate-promote, replay, run"
+            "unknown mneme-eval command: {command}\navailable commands: doctor, version, validate, acceptance, baseline, baseline-gate, baseline-summary, baseline-compare, candidate, candidate-check, candidate-promote, v1-readiness, replay, run"
         ))),
     }
 }
@@ -118,7 +122,7 @@ fn print_help(command: Option<&str>) -> Result<(), EvalError> {
         None => MNEME_EVAL_HELP,
         Some(command) => command_help(command).ok_or_else(|| {
             EvalError::invalid_cli(format!(
-                "unknown mneme-eval help topic: {command}\navailable help topics: doctor, version, validate, acceptance, baseline, baseline-gate, baseline-summary, baseline-compare, candidate, candidate-check, candidate-promote, replay, run"
+                "unknown mneme-eval help topic: {command}\navailable help topics: doctor, version, validate, acceptance, baseline, baseline-gate, baseline-summary, baseline-compare, candidate, candidate-check, candidate-promote, v1-readiness, replay, run"
             ))
         })?,
     };
@@ -139,6 +143,7 @@ fn command_help(command: &str) -> Option<&'static str> {
         "candidate" => Some(MNEME_EVAL_CANDIDATE_HELP),
         "candidate-check" => Some(MNEME_EVAL_CANDIDATE_CHECK_HELP),
         "candidate-promote" => Some(MNEME_EVAL_CANDIDATE_PROMOTE_HELP),
+        "v1-readiness" => Some(MNEME_EVAL_V1_READINESS_HELP),
         "replay" => Some(MNEME_EVAL_REPLAY_HELP),
         "run" => Some(MNEME_EVAL_RUN_HELP),
         _ => None,
@@ -169,6 +174,7 @@ Commands:
                  Validate local scenario candidate artifacts.
   candidate-promote
                  Promote a reviewed candidate into a scenario suite.
+  v1-readiness  Run deterministic v1 product-readiness gates.
 
 Targets:
   fake, mneme-v1, mneme-v1-command
@@ -179,7 +185,8 @@ Examples:
   mneme-eval help baseline
   mneme-eval help baseline-summary
   mneme-eval help baseline-compare
-  mneme-eval help candidate"#;
+  mneme-eval help candidate
+  mneme-eval v1-readiness --json --report evals/reports/v1-readiness.json"#;
 
 const MNEME_EVAL_DOCTOR_HELP: &str = r#"Usage: mneme-eval doctor
 
@@ -278,6 +285,15 @@ write evals/scenarios/<suite>/<filename>.
 Example:
   mneme-eval candidate-promote evals/candidates/openai/example.candidate.yaml --suite model --filename dogfood-example.yaml --apply"#;
 
+const MNEME_EVAL_V1_READINESS_HELP: &str = r#"Usage: mneme-eval v1-readiness [--json] [--report <path>]
+
+Run deterministic v1 product-readiness gates against the mneme-v1 target. The
+gate validates and replays the core, runtime, agent, and dogfood suites without
+requiring provider credentials.
+
+Example:
+  mneme-eval v1-readiness --json --report evals/reports/v1-readiness.json"#;
+
 fn print_doctor() {
     println!(
         "{PRODUCT_NAME} eval harness: {}",
@@ -356,6 +372,12 @@ struct CandidatePromoteOptions {
     apply: bool,
 }
 
+#[derive(Debug, Clone, Default)]
+struct V1ReadinessOptions {
+    json: bool,
+    report_path: Option<PathBuf>,
+}
+
 #[derive(Debug, Clone, Serialize)]
 struct BaselineSummaryReport {
     report_schema_version: u32,
@@ -380,6 +402,53 @@ struct BaselineSummaryReport {
     top_failed_scenarios: Vec<BaselineScenarioSummary>,
     top_failed_checks: Vec<BaselineFailedCheckSummary>,
     recommended_next_actions: Vec<String>,
+}
+
+#[derive(Debug, Clone, Serialize)]
+struct V1ReadinessReport {
+    report_schema_version: u32,
+    command: &'static str,
+    target: String,
+    ok: bool,
+    readiness_status: String,
+    required_suites: Vec<String>,
+    suite_count: usize,
+    passed_suites: usize,
+    failed_suites: usize,
+    scenario_count: usize,
+    passed_scenarios: usize,
+    failed_scenarios: usize,
+    suites: Vec<V1ReadinessSuiteReport>,
+    criteria: Vec<AcceptanceGateReport>,
+    recommended_next_actions: Vec<String>,
+}
+
+#[derive(Debug, Clone, Serialize)]
+struct V1ReadinessSuiteReport {
+    suite: String,
+    target: String,
+    discovery_ok: bool,
+    validation_ok: bool,
+    run_ok: bool,
+    scenario_count: usize,
+    passed: usize,
+    failed: usize,
+    failed_scenarios: Vec<String>,
+    failed_checks: Vec<V1ReadinessFailedCheck>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    error: Option<String>,
+}
+
+impl V1ReadinessSuiteReport {
+    fn ok(&self) -> bool {
+        self.discovery_ok && self.validation_ok && self.run_ok
+    }
+}
+
+#[derive(Debug, Clone, Serialize)]
+struct V1ReadinessFailedCheck {
+    scenario_id: String,
+    check: String,
 }
 
 impl Default for CommandOptions {
@@ -787,6 +856,286 @@ fn run_candidate_promote(raw_args: Vec<String>) -> Result<(), EvalError> {
     } else {
         Err(EvalError::scenario("candidate promotion failed"))
     }
+}
+
+fn run_v1_readiness(raw_args: Vec<String>) -> Result<(), EvalError> {
+    let options = parse_v1_readiness_args(raw_args)?;
+    let report = build_v1_readiness_report();
+    emit_v1_readiness_report(&report, &options)?;
+    if report.ok {
+        Ok(())
+    } else {
+        Err(EvalError::scenario("v1 readiness gate failed"))
+    }
+}
+
+fn build_v1_readiness_report() -> V1ReadinessReport {
+    let target_kind = TargetKind::MnemeV1;
+    let target = target_kind.as_str().to_owned();
+    let suites = V1_READINESS_SUITES
+        .iter()
+        .map(|suite| build_v1_readiness_suite_report(suite, target_kind))
+        .collect::<Vec<_>>();
+    let criteria = v1_readiness_criteria(&suites);
+    let ok = criteria
+        .iter()
+        .all(|criterion| criterion.status == CheckStatus::Pass);
+    let suite_count = suites.len();
+    let passed_suites = suites.iter().filter(|suite| suite.ok()).count();
+    let failed_suites = suite_count.saturating_sub(passed_suites);
+    let scenario_count = suites.iter().map(|suite| suite.scenario_count).sum();
+    let passed_scenarios = suites.iter().map(|suite| suite.passed).sum();
+    let failed_scenarios = suites.iter().map(|suite| suite.failed).sum();
+    V1ReadinessReport {
+        report_schema_version: V1_READINESS_SCHEMA_VERSION,
+        command: "v1-readiness",
+        target,
+        ok,
+        readiness_status: if ok {
+            "ready_for_v1_dogfood"
+        } else {
+            "blocked"
+        }
+        .to_owned(),
+        required_suites: V1_READINESS_SUITES
+            .iter()
+            .map(|suite| (*suite).to_owned())
+            .collect(),
+        suite_count,
+        passed_suites,
+        failed_suites,
+        scenario_count,
+        passed_scenarios,
+        failed_scenarios,
+        suites,
+        criteria,
+        recommended_next_actions: v1_readiness_next_actions(ok, failed_scenarios),
+    }
+}
+
+fn build_v1_readiness_suite_report(suite: &str, target_kind: TargetKind) -> V1ReadinessSuiteReport {
+    let target = target_kind.as_str().to_owned();
+    let paths = match scenario_paths_for_suite(suite) {
+        Ok(paths) => paths,
+        Err(error) => {
+            return V1ReadinessSuiteReport {
+                suite: suite.to_owned(),
+                target,
+                discovery_ok: false,
+                validation_ok: false,
+                run_ok: false,
+                scenario_count: 0,
+                passed: 0,
+                failed: 0,
+                failed_scenarios: Vec::new(),
+                failed_checks: Vec::new(),
+                error: Some(error.to_string()),
+            };
+        }
+    };
+
+    let validation = validate_paths(paths.clone());
+    if !validation.ok {
+        return V1ReadinessSuiteReport {
+            suite: suite.to_owned(),
+            target,
+            discovery_ok: true,
+            validation_ok: false,
+            run_ok: false,
+            scenario_count: validation.scenario_count,
+            passed: 0,
+            failed: validation.invalid,
+            failed_scenarios: validation
+                .results
+                .iter()
+                .filter(|result| !result.ok)
+                .map(|result| result.path.clone())
+                .collect(),
+            failed_checks: Vec::new(),
+            error: Some(format!(
+                "{} invalid scenario(s) in suite {suite}",
+                validation.invalid
+            )),
+        };
+    }
+
+    let options = CommandOptions {
+        target_kind,
+        ..Default::default()
+    };
+    match eval_report_for_paths(&paths, &options) {
+        Ok(report) => {
+            let failed_scenarios = report
+                .results
+                .iter()
+                .filter(|result| !result.ok)
+                .map(|result| result.scenario_id.clone())
+                .collect::<Vec<_>>();
+            let failed_checks = report
+                .results
+                .iter()
+                .flat_map(|result| {
+                    result
+                        .checks
+                        .iter()
+                        .filter(|check| check.status == CheckStatus::Fail)
+                        .map(|check| V1ReadinessFailedCheck {
+                            scenario_id: result.scenario_id.clone(),
+                            check: check.name.clone(),
+                        })
+                })
+                .collect::<Vec<_>>();
+            V1ReadinessSuiteReport {
+                suite: suite.to_owned(),
+                target,
+                discovery_ok: true,
+                validation_ok: true,
+                run_ok: report.ok,
+                scenario_count: report.scenario_count,
+                passed: report.passed,
+                failed: report.failed,
+                failed_scenarios,
+                failed_checks,
+                error: None,
+            }
+        }
+        Err(error) => V1ReadinessSuiteReport {
+            suite: suite.to_owned(),
+            target,
+            discovery_ok: true,
+            validation_ok: true,
+            run_ok: false,
+            scenario_count: validation.scenario_count,
+            passed: 0,
+            failed: validation.scenario_count,
+            failed_scenarios: validation
+                .results
+                .iter()
+                .filter_map(|result| result.scenario_id.clone())
+                .collect(),
+            failed_checks: Vec::new(),
+            error: Some(error.to_string()),
+        },
+    }
+}
+
+fn v1_readiness_criteria(suites: &[V1ReadinessSuiteReport]) -> Vec<AcceptanceGateReport> {
+    let mut criteria = Vec::new();
+    let missing = V1_READINESS_SUITES
+        .iter()
+        .filter(|required| !suites.iter().any(|suite| suite.suite == **required))
+        .copied()
+        .collect::<Vec<_>>();
+    if missing.is_empty() {
+        criteria.push(AcceptanceGateReport::pass(
+            "required-suites.present",
+            format!(
+                "required suites present: {}",
+                V1_READINESS_SUITES.join(", ")
+            ),
+        ));
+    } else {
+        criteria.push(AcceptanceGateReport::fail(
+            "required-suites.present",
+            format!("missing required suite(s): {}", missing.join(", ")),
+        ));
+    }
+
+    let discovery_failed = suites
+        .iter()
+        .filter(|suite| !suite.discovery_ok)
+        .map(|suite| suite.suite.as_str())
+        .collect::<Vec<_>>();
+    if discovery_failed.is_empty() {
+        criteria.push(AcceptanceGateReport::pass(
+            "suite.discovery",
+            "all required suite directories were discovered",
+        ));
+    } else {
+        criteria.push(AcceptanceGateReport::fail(
+            "suite.discovery",
+            format!("suite discovery failed for {}", discovery_failed.join(", ")),
+        ));
+    }
+
+    let validation_failed = suites
+        .iter()
+        .filter(|suite| !suite.validation_ok)
+        .map(|suite| suite.suite.as_str())
+        .collect::<Vec<_>>();
+    if validation_failed.is_empty() {
+        criteria.push(AcceptanceGateReport::pass(
+            "scenario.validation",
+            "all required scenarios are valid",
+        ));
+    } else {
+        criteria.push(AcceptanceGateReport::fail(
+            "scenario.validation",
+            format!(
+                "scenario validation failed for {}",
+                validation_failed.join(", ")
+            ),
+        ));
+    }
+
+    let dogfood_count = suites
+        .iter()
+        .find(|suite| suite.suite == "dogfood")
+        .map(|suite| suite.scenario_count)
+        .unwrap_or_default();
+    if dogfood_count >= V1_READINESS_MIN_DOGFOOD_SCENARIOS {
+        criteria.push(AcceptanceGateReport::pass(
+            "dogfood.coverage",
+            format!("{dogfood_count} dogfood scenario(s) cover v1 user workflows"),
+        ));
+    } else {
+        criteria.push(AcceptanceGateReport::fail(
+            "dogfood.coverage",
+            format!(
+                "{dogfood_count} dogfood scenario(s) found; expected at least {V1_READINESS_MIN_DOGFOOD_SCENARIOS}"
+            ),
+        ));
+    }
+
+    let run_failed = suites
+        .iter()
+        .filter(|suite| !suite.run_ok)
+        .map(|suite| suite.suite.as_str())
+        .collect::<Vec<_>>();
+    if run_failed.is_empty() {
+        criteria.push(AcceptanceGateReport::pass(
+            "target.mneme-v1",
+            "mneme-v1 passed all deterministic readiness suites",
+        ));
+    } else {
+        criteria.push(AcceptanceGateReport::fail(
+            "target.mneme-v1",
+            format!("mneme-v1 failed suite(s): {}", run_failed.join(", ")),
+        ));
+    }
+
+    criteria
+}
+
+fn v1_readiness_next_actions(ok: bool, failed_scenarios: usize) -> Vec<String> {
+    if ok {
+        return vec![
+            "Use this report as the deterministic gate before v1 release candidates.".to_owned(),
+            "Run provider/model baselines separately when extractor behavior changes.".to_owned(),
+        ];
+    }
+    let mut actions = vec![
+        "Inspect failed suite entries and replay the listed scenarios with `mneme-eval replay`."
+            .to_owned(),
+        "Do not treat v1 as dogfood-ready until this command reports ready_for_v1_dogfood."
+            .to_owned(),
+    ];
+    if failed_scenarios > 0 {
+        actions.push(format!(
+            "Fix or explicitly re-scope {failed_scenarios} failed scenario(s) before continuing v1 product work."
+        ));
+    }
+    actions
 }
 
 fn build_baseline_summary_report(
@@ -1779,6 +2128,30 @@ fn parse_baseline_compare_args(
     }
 }
 
+fn parse_v1_readiness_args(raw_args: Vec<String>) -> Result<V1ReadinessOptions, EvalError> {
+    let mut options = V1ReadinessOptions::default();
+    let mut idx = 0;
+    while idx < raw_args.len() {
+        match raw_args[idx].as_str() {
+            "--json" => options.json = true,
+            "--report" => {
+                idx += 1;
+                let Some(value) = raw_args.get(idx) else {
+                    return Err(EvalError::invalid_cli("--report requires a path"));
+                };
+                options.report_path = Some(PathBuf::from(value));
+            }
+            value => {
+                return Err(EvalError::invalid_cli(format!(
+                    "unknown v1-readiness option: {value}"
+                )));
+            }
+        }
+        idx += 1;
+    }
+    Ok(options)
+}
+
 fn parse_candidate_args(raw_args: Vec<String>) -> Result<(PathBuf, CandidateOptions), EvalError> {
     let mut path = None;
     let mut options = CandidateOptions::default();
@@ -2226,6 +2599,23 @@ fn emit_candidate_promote_report(
     Ok(())
 }
 
+fn emit_v1_readiness_report(
+    report: &V1ReadinessReport,
+    options: &V1ReadinessOptions,
+) -> Result<(), EvalError> {
+    if let Some(path) = &options.report_path {
+        write_report(path, report)?;
+    }
+    if options.json {
+        let json = serde_json::to_string_pretty(report)
+            .map_err(|source| EvalError::json(Path::new("<stdout>"), source))?;
+        println!("{json}");
+    } else {
+        print_v1_readiness_report(report);
+    }
+    Ok(())
+}
+
 fn write_report<T: Serialize>(path: &Path, report: &T) -> Result<(), EvalError> {
     if let Some(parent) = path
         .parent()
@@ -2271,7 +2661,7 @@ fn print_acceptance_report(report: &AcceptanceReport) {
         report.target, report.gate_count, report.passed, report.failed
     );
     for gate in &report.gates {
-        let status = if gate.status == crate::report::CheckStatus::Pass {
+        let status = if gate.status == CheckStatus::Pass {
             "PASS"
         } else {
             "FAIL"
@@ -2547,12 +2937,58 @@ fn print_candidate_promote_report(report: &CandidatePromoteReport) {
         report.candidate_id, report.target_suite, report.destination, report.applied, report.ok
     );
     for gate in &report.gates {
-        let status = if gate.status == crate::report::CheckStatus::Pass {
+        let status = if gate.status == CheckStatus::Pass {
             "PASS"
         } else {
             "FAIL"
         };
         println!("- {status} {}: {}", gate.name, gate.detail);
+    }
+    println!("next:");
+    for action in &report.recommended_next_actions {
+        println!("- {action}");
+    }
+}
+
+fn print_v1_readiness_report(report: &V1ReadinessReport) {
+    println!(
+        "v1-readiness: status={}, target={}, suites={}/{}, scenarios={}/{}",
+        report.readiness_status,
+        report.target,
+        report.passed_suites,
+        report.suite_count,
+        report.passed_scenarios,
+        report.scenario_count
+    );
+    for suite in &report.suites {
+        let status = if suite.ok() { "PASS" } else { "FAIL" };
+        println!(
+            "- {status} suite {}: discovery={}, validation={}, run={}, {}/{} scenario(s)",
+            suite.suite,
+            suite.discovery_ok,
+            suite.validation_ok,
+            suite.run_ok,
+            suite.passed,
+            suite.scenario_count
+        );
+        if let Some(error) = &suite.error {
+            println!("  - error={error}");
+        }
+        if !suite.failed_scenarios.is_empty() {
+            println!("  - failed scenarios={}", suite.failed_scenarios.join(", "));
+        }
+        for check in &suite.failed_checks {
+            println!("  - {} failed check={}", check.scenario_id, check.check);
+        }
+    }
+    println!("criteria:");
+    for criterion in &report.criteria {
+        let status = if criterion.status == CheckStatus::Pass {
+            "PASS"
+        } else {
+            "FAIL"
+        };
+        println!("- {status} {}: {}", criterion.name, criterion.detail);
     }
     println!("next:");
     for action in &report.recommended_next_actions {
@@ -2567,7 +3003,7 @@ fn print_scenario_report(scenario: &ScenarioReport) {
         if scenario.ok {
             continue;
         }
-        if check.status == crate::report::CheckStatus::Fail {
+        if check.status == CheckStatus::Fail {
             let artifact = check.artifact.as_deref().unwrap_or("n/a");
             println!(
                 "  - {} expected={} actual={} artifact={}",
@@ -2607,6 +3043,10 @@ mod tests {
             command_help("candidate-promote").expect("candidate-promote help");
         assert!(candidate_promote_help.contains("Usage: mneme-eval candidate-promote"));
         assert!(candidate_promote_help.contains("--apply"));
+
+        let v1_readiness_help = command_help("v1-readiness").expect("v1-readiness help");
+        assert!(v1_readiness_help.contains("Usage: mneme-eval v1-readiness"));
+        assert!(v1_readiness_help.contains("core, runtime, agent, and dogfood"));
 
         let general = command_help("run").expect("run help");
         assert!(general.contains("mneme-eval run"));
@@ -2709,6 +3149,27 @@ mod tests {
             Some(Path::new("evals/reports/acceptance.json"))
         );
         Ok(())
+    }
+
+    #[test]
+    fn parse_v1_readiness_accepts_report_options() -> Result<(), EvalError> {
+        let options = parse_v1_readiness_args(vec![
+            "--json".to_owned(),
+            "--report".to_owned(),
+            "evals/reports/v1-readiness.json".to_owned(),
+        ])?;
+        assert!(options.json);
+        assert_eq!(
+            options.report_path.as_deref(),
+            Some(Path::new("evals/reports/v1-readiness.json"))
+        );
+        Ok(())
+    }
+
+    #[test]
+    fn parse_v1_readiness_rejects_positional_args() {
+        let result = parse_v1_readiness_args(vec!["core".to_owned()]);
+        assert!(result.is_err());
     }
 
     #[test]

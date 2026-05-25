@@ -189,3 +189,8 @@ Phase 32 shipped the **Candidate Promotion & Regression Intelligence MVP** in
 `v0.38.0`, adding `mneme-eval candidate-promote` and
 `mneme-eval baseline-compare` so reviewed dogfood failures can become public
 regression scenarios and baseline reports can be compared before release.
+
+Phase 33 shipped the **V1 Dogfood Readiness MVP** in `v0.39.0`, adding the
+public `dogfood` suite and `mneme-eval v1-readiness` so the current v1 runtime
+can be judged as `ready_for_v1_dogfood` through one deterministic product gate
+before manual dogfood or provider-backed experiments.
