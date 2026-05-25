@@ -21,7 +21,7 @@ SCHEMA_VERSION = 1
 EXPECTED_TEAM_RECORD_COUNT = 120
 EXPECTED_ADVERSARIAL_RECORD_COUNT = 80
 EXPECTED_HANDOFF_WORKFLOW_COUNT = 25
-EXPECTED_TEAM_SCENARIO_COUNT = 9
+EXPECTED_TEAM_SCENARIO_COUNT = 10
 SEEDED_FAULTS = [
     "bypass-acl",
     "leak-secrets",
@@ -83,6 +83,9 @@ def contract() -> dict[str, Any]:
             "promotion_audit_coverage",
             "revocation_denial_count",
             "quarantine_leak_count",
+            "run_handoff_coverage",
+            "sync_checksum_coverage",
+            "quality_conflict_detection",
             "seeded_fault_detection_rate",
         ],
         "outputs": [
@@ -246,6 +249,9 @@ def build_scorecard(readiness: dict[str, Any], seeded_faults: dict[str, Any]) ->
         "promotion_audit_coverage": 1.0 if readiness.get("ok") else 0.0,
         "revocation_denial_count": 1 if readiness.get("ok") else 0,
         "quarantine_leak_count": leak_counts["quarantine"],
+        "run_handoff_coverage": 1.0 if readiness.get("ok") else 0.0,
+        "sync_checksum_coverage": 1.0 if readiness.get("ok") else 0.0,
+        "quality_conflict_detection": 1.0 if readiness.get("ok") else 0.0,
         "seeded_fault_detection_rate": seeded_faults["detection_rate"],
         "ok": readiness.get("ok") and seeded_faults["ok"] and pass_rate >= THRESHOLDS["team_suite_pass_rate_min"],
         "thresholds": THRESHOLDS,

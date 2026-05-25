@@ -20,8 +20,10 @@ use mneme_core::{
     StoreErrorKind, StoreFileInspection, StoreFileStatus, StoreInspection, StoreRepairReport,
     StoreRestoreReport, TeamActor, TeamAdapterManifest, TeamAgentInput, TeamContextPack,
     TeamContextQuery, TeamFirewallReport, TeamHandoffPackage, TeamMemoryConfig, TeamMemoryEngine,
-    TeamMemoryRecord, TeamMemoryState, TeamOntologyReport, TeamProjectInput,
-    TeamPromotionCreateInput, TeamPromotionRecord, TeamPromotionReviewInput, TeamRole,
+    TeamMemoryQualityReport, TeamMemoryRecord, TeamMemoryState, TeamOntologyReport,
+    TeamProjectInput, TeamPromotionCreateInput, TeamPromotionRecord, TeamPromotionReviewInput,
+    TeamPromotionReviewReport, TeamRole, TeamRunBeginInput, TeamRunBeginReport, TeamRunEndInput,
+    TeamRunEndReport, TeamRunHandoffInput, TeamRunNoteInput, TeamRunNoteReport,
     TeamStateValidationReport, TeamSyncApplyReport, TeamSyncEnvelope, TeamSyncExportInput,
     TeamUserInput, ValidationSeverity, DEFAULT_CONTEXT_MAX_ITEMS, DEFAULT_TEAM_CONTEXT_MAX_ITEMS,
     PRODUCT_NAME,
@@ -729,6 +731,57 @@ impl Default for TeamContextOptions {
     }
 }
 
+#[derive(Debug, Clone)]
+struct TeamRunBeginOptions {
+    actor: TeamActorOptions,
+    query: Option<String>,
+    scope: Option<String>,
+    max_items: usize,
+}
+
+impl Default for TeamRunBeginOptions {
+    fn default() -> Self {
+        Self {
+            actor: TeamActorOptions::default(),
+            query: None,
+            scope: None,
+            max_items: DEFAULT_TEAM_CONTEXT_MAX_ITEMS,
+        }
+    }
+}
+
+#[derive(Debug, Clone, Default)]
+struct TeamRunNoteOptions {
+    actor: TeamActorOptions,
+    scope: String,
+}
+
+#[derive(Debug, Clone, Default)]
+struct TeamRunEndOptions {
+    actor: TeamActorOptions,
+    summary: Option<String>,
+    next_steps: Vec<String>,
+    remember: Vec<String>,
+    scope: Option<String>,
+}
+
+#[derive(Debug, Clone)]
+struct TeamRunHandoffOptions {
+    actor: TeamActorOptions,
+    query: Option<String>,
+    max_items: usize,
+}
+
+impl Default for TeamRunHandoffOptions {
+    fn default() -> Self {
+        Self {
+            actor: TeamActorOptions::default(),
+            query: None,
+            max_items: DEFAULT_TEAM_CONTEXT_MAX_ITEMS,
+        }
+    }
+}
+
 #[derive(Debug, Clone, Default)]
 struct TeamSyncExportOptions {
     actor: TeamActorOptions,
@@ -1342,11 +1395,55 @@ struct TeamHandoffCliReport {
 }
 
 #[derive(Debug, Serialize)]
+struct TeamRunBeginCliReport {
+    command: &'static str,
+    store: String,
+    actor_user_id: String,
+    actor_agent_id: Option<String>,
+    report: TeamRunBeginReport,
+    validation: TeamStateValidationReport,
+}
+
+#[derive(Debug, Serialize)]
+struct TeamRunNoteCliReport {
+    command: &'static str,
+    store: String,
+    report: TeamRunNoteReport,
+    validation: TeamStateValidationReport,
+}
+
+#[derive(Debug, Serialize)]
+struct TeamRunEndCliReport {
+    command: &'static str,
+    store: String,
+    report: TeamRunEndReport,
+    validation: TeamStateValidationReport,
+}
+
+#[derive(Debug, Serialize)]
+struct TeamRunHandoffCliReport {
+    command: &'static str,
+    store: String,
+    run_id: String,
+    context_item_count: usize,
+    sync_memory_count: usize,
+    firewall_ok: bool,
+    package: TeamHandoffPackage,
+}
+
+#[derive(Debug, Serialize)]
 struct TeamPromotionReport {
     command: &'static str,
     store: String,
     promotion: TeamPromotionRecord,
     validation: TeamStateValidationReport,
+}
+
+#[derive(Debug, Serialize)]
+struct TeamPromotionReviewCliReport {
+    command: &'static str,
+    store: String,
+    report: TeamPromotionReviewReport,
 }
 
 #[derive(Debug, Serialize)]
@@ -1374,6 +1471,13 @@ struct TeamFirewallCliReport {
     command: &'static str,
     store: String,
     firewall: TeamFirewallReport,
+}
+
+#[derive(Debug, Serialize)]
+struct TeamQualityCliReport {
+    command: &'static str,
+    store: String,
+    quality: TeamMemoryQualityReport,
 }
 
 #[derive(Debug, Serialize)]
@@ -2015,7 +2119,7 @@ fn run_agent_hook_end(raw_args: Vec<String>, writer: &mut impl Write) -> Result<
 fn run_team(raw_args: Vec<String>, writer: &mut impl Write) -> Result<(), CliError> {
     if raw_args.is_empty() {
         return Err(CliError::invalid_cli(
-            "usage: mneme team <init|user|agent|project|remember|context|handoff|promote|review|sync|firewall|ontology|adapter|revoke-user|revoke-agent|validate|snapshot> [options]",
+            "usage: mneme team <init|user|agent|project|remember|context|handoff|run|promote|promotion|review|sync|firewall|quality|ontology|adapter|revoke-user|revoke-agent|validate|snapshot> [options]",
         ));
     }
     let mut raw_args = raw_args;
@@ -2028,10 +2132,13 @@ fn run_team(raw_args: Vec<String>, writer: &mut impl Write) -> Result<(), CliErr
         "remember" => run_team_remember(raw_args, writer),
         "context" => run_team_context(raw_args, writer),
         "handoff" => run_team_handoff(raw_args, writer),
+        "run" => run_team_run(raw_args, writer),
         "promote" => run_team_promote(raw_args, writer),
+        "promotion" => run_team_promotion(raw_args, writer),
         "review" => run_team_review(raw_args, writer),
         "sync" => run_team_sync(raw_args, writer),
         "firewall" => run_team_firewall(raw_args, writer),
+        "quality" => run_team_quality(raw_args, writer),
         "ontology" => run_team_ontology(raw_args, writer),
         "adapter" => run_team_adapter(raw_args, writer),
         "revoke-user" => run_team_revoke_user(raw_args, writer),
@@ -2039,7 +2146,7 @@ fn run_team(raw_args: Vec<String>, writer: &mut impl Write) -> Result<(), CliErr
         "validate" => run_team_validate(raw_args, writer),
         "snapshot" => run_team_snapshot(raw_args, writer),
         value => Err(CliError::invalid_cli(format!(
-            "unknown team operation: {value}\navailable team operations: init, user, agent, project, remember, context, handoff, promote, review, sync, firewall, ontology, adapter, revoke-user, revoke-agent, validate, snapshot"
+            "unknown team operation: {value}\navailable team operations: init, user, agent, project, remember, context, handoff, run, promote, promotion, review, sync, firewall, quality, ontology, adapter, revoke-user, revoke-agent, validate, snapshot"
         ))),
     }
 }
@@ -2275,6 +2382,127 @@ fn run_team_handoff(raw_args: Vec<String>, writer: &mut impl Write) -> Result<()
     emit_team_handoff_report(&report, options.actor.common.json, writer)
 }
 
+fn run_team_run(mut raw_args: Vec<String>, writer: &mut impl Write) -> Result<(), CliError> {
+    let Some(subcommand) = raw_args.first().cloned() else {
+        return Err(CliError::invalid_cli(
+            "usage: mneme team run <begin|note|end|handoff> [options]",
+        ));
+    };
+    raw_args.remove(0);
+    match subcommand.as_str() {
+        "begin" => run_team_run_begin(raw_args, writer),
+        "note" => run_team_run_note(raw_args, writer),
+        "end" => run_team_run_end(raw_args, writer),
+        "handoff" => run_team_run_handoff(raw_args, writer),
+        value => Err(CliError::invalid_cli(format!(
+            "unknown team run operation: {value}\navailable team run operations: begin, note, end, handoff"
+        ))),
+    }
+}
+
+fn run_team_run_begin(raw_args: Vec<String>, writer: &mut impl Write) -> Result<(), CliError> {
+    let (task, options) = parse_team_run_begin_args(raw_args)?;
+    let actor = required_team_actor(&options.actor)?;
+    let store_path = resolve_team_store_path(&options.actor.common)?;
+    let mut engine = load_team_engine(&store_path)?;
+    let report = engine
+        .begin_run(TeamRunBeginInput {
+            actor: actor.clone(),
+            task,
+            query: options.query,
+            scope: options.scope,
+            max_items: Some(options.max_items),
+        })
+        .map_err(team_policy_error)?;
+    persist_team_engine(&store_path, &engine)?;
+    let cli_report = TeamRunBeginCliReport {
+        command: "team.run.begin",
+        store: store_path.display().to_string(),
+        actor_user_id: actor.user_id,
+        actor_agent_id: actor.agent_id,
+        report,
+        validation: mneme_core::validate_team_state(&engine.state()),
+    };
+    emit_team_run_begin_report(&cli_report, options.actor.common.json, writer)
+}
+
+fn run_team_run_note(raw_args: Vec<String>, writer: &mut impl Write) -> Result<(), CliError> {
+    let (run_id, text, options) = parse_team_run_note_args(raw_args)?;
+    let actor = required_team_actor(&options.actor)?;
+    let store_path = resolve_team_store_path(&options.actor.common)?;
+    let mut engine = load_team_engine(&store_path)?;
+    let report = engine
+        .note_run(TeamRunNoteInput {
+            actor,
+            run_id,
+            text,
+            scope: options.scope,
+        })
+        .map_err(team_policy_error)?;
+    persist_team_engine(&store_path, &engine)?;
+    let cli_report = TeamRunNoteCliReport {
+        command: "team.run.note",
+        store: store_path.display().to_string(),
+        report,
+        validation: mneme_core::validate_team_state(&engine.state()),
+    };
+    emit_team_run_note_report(&cli_report, options.actor.common.json, writer)
+}
+
+fn run_team_run_end(raw_args: Vec<String>, writer: &mut impl Write) -> Result<(), CliError> {
+    let (run_id, options) = parse_team_run_end_args(raw_args)?;
+    let actor = required_team_actor(&options.actor)?;
+    let summary = options
+        .summary
+        .ok_or_else(|| CliError::invalid_cli("mneme team run end requires --summary <text>"))?;
+    let store_path = resolve_team_store_path(&options.actor.common)?;
+    let mut engine = load_team_engine(&store_path)?;
+    let report = engine
+        .end_run(TeamRunEndInput {
+            actor,
+            run_id,
+            summary,
+            next_steps: options.next_steps,
+            remember: options.remember,
+            scope: options.scope,
+        })
+        .map_err(team_policy_error)?;
+    persist_team_engine(&store_path, &engine)?;
+    let cli_report = TeamRunEndCliReport {
+        command: "team.run.end",
+        store: store_path.display().to_string(),
+        report,
+        validation: mneme_core::validate_team_state(&engine.state()),
+    };
+    emit_team_run_end_report(&cli_report, options.actor.common.json, writer)
+}
+
+fn run_team_run_handoff(raw_args: Vec<String>, writer: &mut impl Write) -> Result<(), CliError> {
+    let (run_id, options) = parse_team_run_handoff_args(raw_args)?;
+    let actor = required_team_actor(&options.actor)?;
+    let store_path = resolve_team_store_path(&options.actor.common)?;
+    let mut engine = load_team_engine(&store_path)?;
+    let package = engine
+        .build_run_handoff_package(TeamRunHandoffInput {
+            actor,
+            run_id: run_id.clone(),
+            query: options.query,
+            max_items: Some(options.max_items),
+        })
+        .map_err(team_policy_error)?;
+    persist_team_engine(&store_path, &engine)?;
+    let report = TeamRunHandoffCliReport {
+        command: "team.run.handoff",
+        store: store_path.display().to_string(),
+        run_id,
+        context_item_count: package.context_pack.items.len(),
+        sync_memory_count: package.sync_envelope.memories.len(),
+        firewall_ok: package.firewall.ok,
+        package,
+    };
+    emit_team_run_handoff_report(&report, options.actor.common.json, writer)
+}
+
 fn run_team_promote(raw_args: Vec<String>, writer: &mut impl Write) -> Result<(), CliError> {
     let (memory_id, options) = parse_team_promote_args(raw_args)?;
     let actor = required_team_actor(&options.actor)?;
@@ -2295,6 +2523,37 @@ fn run_team_promote(raw_args: Vec<String>, writer: &mut impl Write) -> Result<()
         validation: mneme_core::validate_team_state(&engine.state()),
     };
     emit_team_promotion_report(&report, options.actor.common.json, writer)
+}
+
+fn run_team_promotion(mut raw_args: Vec<String>, writer: &mut impl Write) -> Result<(), CliError> {
+    let Some(subcommand) = raw_args.first().cloned() else {
+        return Err(CliError::invalid_cli(
+            "usage: mneme team promotion report <promotion-id> [--store <path>] [--json]",
+        ));
+    };
+    raw_args.remove(0);
+    match subcommand.as_str() {
+        "report" => {
+            let (promotion_id, options) = parse_pathless_target_args(
+                raw_args,
+                "usage: mneme team promotion report <promotion-id> [--store <path>] [--json]",
+            )?;
+            let store_path = resolve_team_store_path(&options)?;
+            let engine = load_team_engine(&store_path)?;
+            let report = engine
+                .promotion_review_report(&promotion_id)
+                .map_err(team_policy_error)?;
+            let cli_report = TeamPromotionReviewCliReport {
+                command: "team.promotion.report",
+                store: store_path.display().to_string(),
+                report,
+            };
+            emit_team_promotion_review_report(&cli_report, options.json, writer)
+        }
+        value => Err(CliError::invalid_cli(format!(
+            "unknown team promotion operation: {value}\navailable team promotion operations: report"
+        ))),
+    }
 }
 
 fn run_team_review(raw_args: Vec<String>, writer: &mut impl Write) -> Result<(), CliError> {
@@ -2414,6 +2673,28 @@ fn run_team_firewall(raw_args: Vec<String>, writer: &mut impl Write) -> Result<(
             "scan team firewall",
             &store_path,
             "active memory firewall finding",
+        ))
+    }
+}
+
+fn run_team_quality(raw_args: Vec<String>, writer: &mut impl Write) -> Result<(), CliError> {
+    let options = parse_no_position_args(raw_args, "team quality")?;
+    let store_path = resolve_team_store_path(&options)?;
+    let engine = load_team_engine(&store_path)?;
+    let quality = engine.quality_report();
+    let report = TeamQualityCliReport {
+        command: "team.quality",
+        store: store_path.display().to_string(),
+        quality,
+    };
+    emit_team_quality_report(&report, options.json, writer)?;
+    if report.quality.ok {
+        Ok(())
+    } else {
+        Err(CliError::store(
+            "scan team quality",
+            &store_path,
+            "high-severity team memory quality finding",
         ))
     }
 }
@@ -3093,6 +3374,186 @@ fn parse_team_context_args(
     Ok((require_nonempty(positionals.remove(0), "query")?, options))
 }
 
+fn parse_team_run_begin_args(
+    raw_args: Vec<String>,
+) -> Result<(String, TeamRunBeginOptions), CliError> {
+    let mut options = TeamRunBeginOptions::default();
+    let mut positionals = Vec::new();
+    let mut idx = 0;
+    while idx < raw_args.len() {
+        if parse_team_actor_option(&raw_args, &mut idx, &mut options.actor)? {
+            idx += 1;
+            continue;
+        }
+        match raw_args[idx].as_str() {
+            "--query" => {
+                idx += 1;
+                options.query = Some(require_nonempty(
+                    required_arg(&raw_args, idx, "--query")?,
+                    "run query",
+                )?);
+            }
+            "--scope" => {
+                idx += 1;
+                options.scope = Some(require_nonempty(
+                    required_arg(&raw_args, idx, "--scope")?,
+                    "run scope",
+                )?);
+            }
+            "--max-items" => {
+                idx += 1;
+                options.max_items = parse_max_items(required_arg(&raw_args, idx, "--max-items")?)?;
+            }
+            value if value.starts_with('-') => {
+                return Err(CliError::invalid_cli(format!(
+                    "unknown team run begin option: {value}"
+                )));
+            }
+            value => positionals.push(value.to_owned()),
+        }
+        idx += 1;
+    }
+    if positionals.len() != 1 {
+        return Err(CliError::invalid_cli(
+            "usage: mneme team run begin <task> --actor <user> [--agent <agent>] [--query <query>] [--scope <scope>] [--max-items <n>] [--store <path>] [--json]",
+        ));
+    }
+    Ok((require_nonempty(positionals.remove(0), "task")?, options))
+}
+
+fn parse_team_run_note_args(
+    raw_args: Vec<String>,
+) -> Result<(String, String, TeamRunNoteOptions), CliError> {
+    let mut options = TeamRunNoteOptions::default();
+    let mut positionals = Vec::new();
+    let mut idx = 0;
+    while idx < raw_args.len() {
+        if parse_team_actor_option(&raw_args, &mut idx, &mut options.actor)? {
+            idx += 1;
+            continue;
+        }
+        match raw_args[idx].as_str() {
+            "--scope" => {
+                idx += 1;
+                options.scope =
+                    require_nonempty(required_arg(&raw_args, idx, "--scope")?, "scope")?;
+            }
+            value if value.starts_with('-') => {
+                return Err(CliError::invalid_cli(format!(
+                    "unknown team run note option: {value}"
+                )));
+            }
+            value => positionals.push(value.to_owned()),
+        }
+        idx += 1;
+    }
+    if positionals.len() != 2 || options.scope.trim().is_empty() {
+        return Err(CliError::invalid_cli(
+            "usage: mneme team run note <run-id> <text> --actor <user> [--agent <agent>] --scope <scope> [--store <path>] [--json]",
+        ));
+    }
+    Ok((
+        require_nonempty(positionals.remove(0), "run id")?,
+        require_nonempty(positionals.remove(0), "note text")?,
+        options,
+    ))
+}
+
+fn parse_team_run_end_args(raw_args: Vec<String>) -> Result<(String, TeamRunEndOptions), CliError> {
+    let mut options = TeamRunEndOptions::default();
+    let mut positionals = Vec::new();
+    let mut idx = 0;
+    while idx < raw_args.len() {
+        if parse_team_actor_option(&raw_args, &mut idx, &mut options.actor)? {
+            idx += 1;
+            continue;
+        }
+        match raw_args[idx].as_str() {
+            "--summary" => {
+                idx += 1;
+                options.summary = Some(require_nonempty(
+                    required_arg(&raw_args, idx, "--summary")?,
+                    "run summary",
+                )?);
+            }
+            "--next" => {
+                idx += 1;
+                options.next_steps.push(require_nonempty(
+                    required_arg(&raw_args, idx, "--next")?,
+                    "next step",
+                )?);
+            }
+            "--remember" => {
+                idx += 1;
+                options.remember.push(require_nonempty(
+                    required_arg(&raw_args, idx, "--remember")?,
+                    "run memory",
+                )?);
+            }
+            "--scope" => {
+                idx += 1;
+                options.scope = Some(require_nonempty(
+                    required_arg(&raw_args, idx, "--scope")?,
+                    "scope",
+                )?);
+            }
+            value if value.starts_with('-') => {
+                return Err(CliError::invalid_cli(format!(
+                    "unknown team run end option: {value}"
+                )));
+            }
+            value => positionals.push(value.to_owned()),
+        }
+        idx += 1;
+    }
+    if positionals.len() != 1 {
+        return Err(CliError::invalid_cli(
+            "usage: mneme team run end <run-id> --actor <user> [--agent <agent>] --summary <text> [--next <text>]... [--remember <text>]... [--scope <scope>] [--store <path>] [--json]",
+        ));
+    }
+    Ok((require_nonempty(positionals.remove(0), "run id")?, options))
+}
+
+fn parse_team_run_handoff_args(
+    raw_args: Vec<String>,
+) -> Result<(String, TeamRunHandoffOptions), CliError> {
+    let mut options = TeamRunHandoffOptions::default();
+    let mut positionals = Vec::new();
+    let mut idx = 0;
+    while idx < raw_args.len() {
+        if parse_team_actor_option(&raw_args, &mut idx, &mut options.actor)? {
+            idx += 1;
+            continue;
+        }
+        match raw_args[idx].as_str() {
+            "--query" => {
+                idx += 1;
+                options.query = Some(require_nonempty(
+                    required_arg(&raw_args, idx, "--query")?,
+                    "handoff query",
+                )?);
+            }
+            "--max-items" => {
+                idx += 1;
+                options.max_items = parse_max_items(required_arg(&raw_args, idx, "--max-items")?)?;
+            }
+            value if value.starts_with('-') => {
+                return Err(CliError::invalid_cli(format!(
+                    "unknown team run handoff option: {value}"
+                )));
+            }
+            value => positionals.push(value.to_owned()),
+        }
+        idx += 1;
+    }
+    if positionals.len() != 1 {
+        return Err(CliError::invalid_cli(
+            "usage: mneme team run handoff <run-id> --actor <user> [--agent <agent>] [--query <query>] [--max-items <n>] [--store <path>] [--json]",
+        ));
+    }
+    Ok((require_nonempty(positionals.remove(0), "run id")?, options))
+}
+
 fn parse_team_sync_export_args(
     raw_args: Vec<String>,
 ) -> Result<(PathBuf, TeamSyncExportOptions), CliError> {
@@ -3267,6 +3728,37 @@ fn parse_team_actor_target_args(
             value if value.starts_with('-') => {
                 return Err(CliError::invalid_cli(format!(
                     "unknown team actor option: {value}"
+                )));
+            }
+            value => positionals.push(value.to_owned()),
+        }
+        idx += 1;
+    }
+    if positionals.len() != 1 {
+        return Err(CliError::invalid_cli(usage));
+    }
+    Ok((
+        require_nonempty(positionals.remove(0), "target id")?,
+        options,
+    ))
+}
+
+fn parse_pathless_target_args(
+    raw_args: Vec<String>,
+    usage: &'static str,
+) -> Result<(String, CommonOptions), CliError> {
+    let mut options = CommonOptions::default();
+    let mut positionals = Vec::new();
+    let mut idx = 0;
+    while idx < raw_args.len() {
+        if parse_common_option(&raw_args, &mut idx, &mut options)? {
+            idx += 1;
+            continue;
+        }
+        match raw_args[idx].as_str() {
+            value if value.starts_with('-') => {
+                return Err(CliError::invalid_cli(format!(
+                    "unknown target option: {value}"
                 )));
             }
             value => positionals.push(value.to_owned()),
@@ -6126,6 +6618,81 @@ fn emit_team_handoff_report(
     Ok(())
 }
 
+fn emit_team_run_begin_report(
+    report: &TeamRunBeginCliReport,
+    json: bool,
+    writer: &mut impl Write,
+) -> Result<(), CliError> {
+    if json {
+        return write_json(writer, report);
+    }
+    writeln!(
+        writer,
+        "mneme: team run began {} (run={}, actor={}, context_items={}, validation_ok={})",
+        report.store,
+        report.report.run.id,
+        report.actor_user_id,
+        report.report.context_pack.items.len(),
+        report.validation.ok
+    )
+    .map_err(|source| CliError::io("write", Path::new("<stdout>"), source))
+}
+
+fn emit_team_run_note_report(
+    report: &TeamRunNoteCliReport,
+    json: bool,
+    writer: &mut impl Write,
+) -> Result<(), CliError> {
+    if json {
+        return write_json(writer, report);
+    }
+    writeln!(
+        writer,
+        "mneme: team run note {} (run={}, memory={}, validation_ok={})",
+        report.store, report.report.run.id, report.report.memory.id, report.validation.ok
+    )
+    .map_err(|source| CliError::io("write", Path::new("<stdout>"), source))
+}
+
+fn emit_team_run_end_report(
+    report: &TeamRunEndCliReport,
+    json: bool,
+    writer: &mut impl Write,
+) -> Result<(), CliError> {
+    if json {
+        return write_json(writer, report);
+    }
+    writeln!(
+        writer,
+        "mneme: team run ended {} (run={}, remembered={}, validation_ok={})",
+        report.store,
+        report.report.run.id,
+        report.report.remembered_memory_ids.len(),
+        report.validation.ok
+    )
+    .map_err(|source| CliError::io("write", Path::new("<stdout>"), source))
+}
+
+fn emit_team_run_handoff_report(
+    report: &TeamRunHandoffCliReport,
+    json: bool,
+    writer: &mut impl Write,
+) -> Result<(), CliError> {
+    if json {
+        return write_json(writer, report);
+    }
+    writeln!(
+        writer,
+        "mneme: team run handoff {} (run={}, items={}, sync_memories={}, firewall_ok={})",
+        report.store,
+        report.run_id,
+        report.context_item_count,
+        report.sync_memory_count,
+        report.firewall_ok
+    )
+    .map_err(|source| CliError::io("write", Path::new("<stdout>"), source))
+}
+
 fn emit_team_promotion_report(
     report: &TeamPromotionReport,
     json: bool,
@@ -6143,6 +6710,25 @@ fn emit_team_promotion_report(
         report.promotion.status.as_str(),
         report.promotion.produced_memory_id,
         report.validation.ok
+    )
+    .map_err(|source| CliError::io("write", Path::new("<stdout>"), source))
+}
+
+fn emit_team_promotion_review_report(
+    report: &TeamPromotionReviewCliReport,
+    json: bool,
+    writer: &mut impl Write,
+) -> Result<(), CliError> {
+    if json {
+        return write_json(writer, report);
+    }
+    writeln!(
+        writer,
+        "mneme: team promotion report {} (promotion={}, ok_to_approve={}, risks={})",
+        report.store,
+        report.report.promotion.id,
+        report.report.ok_to_approve,
+        report.report.risk_count
     )
     .map_err(|source| CliError::io("write", Path::new("<stdout>"), source))
 }
@@ -6203,6 +6789,36 @@ fn emit_team_firewall_report(
             writer,
             "- {:?} {} {} ({})",
             finding.severity, finding.kind, finding.memory_id, finding.detail
+        )
+        .map_err(|source| CliError::io("write", Path::new("<stdout>"), source))?;
+    }
+    Ok(())
+}
+
+fn emit_team_quality_report(
+    report: &TeamQualityCliReport,
+    json: bool,
+    writer: &mut impl Write,
+) -> Result<(), CliError> {
+    if json {
+        return write_json(writer, report);
+    }
+    writeln!(
+        writer,
+        "mneme: team quality {} (ok={}, health={}, duplicates={}, conflicts={}, findings={})",
+        report.store,
+        report.quality.ok,
+        report.quality.health,
+        report.quality.duplicate_group_count,
+        report.quality.conflict_group_count,
+        report.quality.findings.len()
+    )
+    .map_err(|source| CliError::io("write", Path::new("<stdout>"), source))?;
+    for finding in &report.quality.findings {
+        writeln!(
+            writer,
+            "- {:?} {} ({})",
+            finding.severity, finding.kind, finding.detail
         )
         .map_err(|source| CliError::io("write", Path::new("<stdout>"), source))?;
     }

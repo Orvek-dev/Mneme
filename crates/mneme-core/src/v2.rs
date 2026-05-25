@@ -6,7 +6,7 @@
 //! policy layer after ACL, promotion, offboarding, and audit behavior are
 //! stable under eval.
 
-use std::collections::BTreeSet;
+use std::collections::{BTreeMap, BTreeSet};
 use std::fmt;
 use std::fs::{self, File, OpenOptions};
 use std::io::{self, Write};
@@ -53,6 +53,7 @@ impl TeamMemoryEngine {
                 events: Vec::new(),
                 memories: Vec::new(),
                 promotions: Vec::new(),
+                runs: Vec::new(),
                 audit: Vec::new(),
             },
         }
@@ -109,9 +110,34 @@ impl TeamMemoryEngine {
                     vec!["actor.user_id", "query"],
                 ),
                 TeamAdapterTool::new(
+                    "mneme.team.run.begin",
+                    "Open a task run with actor-scoped context.",
+                    vec!["actor.user_id", "task"],
+                ),
+                TeamAdapterTool::new(
+                    "mneme.team.run.note",
+                    "Attach scoped memory to an open task run.",
+                    vec!["actor.user_id", "run_id", "text", "scope"],
+                ),
+                TeamAdapterTool::new(
+                    "mneme.team.run.end",
+                    "Close a task run with summary, next steps, and optional memories.",
+                    vec!["actor.user_id", "run_id", "summary"],
+                ),
+                TeamAdapterTool::new(
+                    "mneme.team.run.handoff",
+                    "Build a policy-filtered handoff package for one task run.",
+                    vec!["actor.user_id", "run_id"],
+                ),
+                TeamAdapterTool::new(
                     "mneme.team.promote",
                     "Create a reviewable promotion candidate.",
                     vec!["actor.user_id", "memory_id"],
+                ),
+                TeamAdapterTool::new(
+                    "mneme.team.promotion.report",
+                    "Inspect promotion quality and reviewer risk before decision.",
+                    vec!["promotion_id"],
                 ),
                 TeamAdapterTool::new(
                     "mneme.team.review",
@@ -131,6 +157,11 @@ impl TeamMemoryEngine {
                 TeamAdapterTool::new(
                     "mneme.team.firewall",
                     "Scan team memory for active leakage or memory-poisoning risk.",
+                    Vec::new(),
+                ),
+                TeamAdapterTool::new(
+                    "mneme.team.quality",
+                    "Analyze duplicates, conflicts, stale candidates, and promotion risk.",
                     Vec::new(),
                 ),
                 TeamAdapterTool::new(
@@ -293,9 +324,11 @@ impl TeamMemoryEngine {
             .filter(|project| included_project_ids.contains(&project.id))
             .cloned()
             .collect::<Vec<_>>();
-        let envelope = TeamSyncEnvelope {
+        let mut envelope = TeamSyncEnvelope {
             schema_version: MNEME_TEAM_SYNC_SCHEMA_VERSION.to_owned(),
             workspace_id: self.state.workspace_id.clone(),
+            envelope_id: new_sync_envelope_id(&self.state.workspace_id, &input.actor.user_id),
+            checksum: String::new(),
             exported_by_user_id: input.actor.user_id.clone(),
             exported_by_agent_id: input.actor.agent_id.clone(),
             policy: TeamSyncExportPolicy {
@@ -314,6 +347,7 @@ impl TeamMemoryEngine {
             audit: Vec::new(),
             omitted,
         };
+        envelope.checksum = sync_envelope_checksum(&envelope);
         self.audit(
             TeamAuditKind::SyncExport,
             &input.actor,
@@ -344,8 +378,22 @@ impl TeamMemoryEngine {
             applied: TeamSyncApplyCounts::default(),
             skipped: TeamSyncApplyCounts::default(),
             rejected: Vec::new(),
+            envelope_id: envelope.envelope_id.clone(),
+            checksum_verified: false,
+            diff: TeamSyncDiffReport::default(),
             validation: validate_team_state(&working),
         };
+
+        report.diff = diff_sync_envelope(&working, &envelope);
+        if !envelope.checksum.trim().is_empty() {
+            let expected = sync_envelope_checksum(&envelope);
+            if envelope.checksum == expected {
+                report.checksum_verified = true;
+            } else {
+                report.reject("envelope", &envelope.envelope_id, "checksum_mismatch");
+                return report.finish_with_validation(&working);
+            }
+        }
 
         if envelope.schema_version != MNEME_TEAM_SYNC_SCHEMA_VERSION {
             report.reject(
@@ -796,10 +844,231 @@ impl TeamMemoryEngine {
             workspace_id: self.state.workspace_id.clone(),
             actor: query.actor,
             query: query.query,
+            run: None,
             context_pack,
             sync_envelope: envelope,
             firewall,
+            quality: self.quality_report(),
             ontology,
+        })
+    }
+
+    /// Opens a task run and captures the initial actor-scoped context IDs.
+    pub fn begin_run(
+        &mut self,
+        input: TeamRunBeginInput,
+    ) -> Result<TeamRunBeginReport, TeamPolicyError> {
+        let actor = self.validate_actor(&input.actor)?;
+        let query = input.query.unwrap_or_else(|| input.task.clone());
+        let max_items = input.max_items.unwrap_or(DEFAULT_TEAM_CONTEXT_MAX_ITEMS);
+        let context_pack = self.build_context_pack(TeamContextQuery {
+            actor: input.actor.clone(),
+            query: query.clone(),
+            max_items,
+        });
+        let run = TeamRunRecord {
+            id: next_id("team-run", self.next_run_number()),
+            task: input.task,
+            status: TeamRunStatus::Open,
+            actor_user_id: actor.user_id,
+            actor_agent_id: actor.agent_id,
+            scope: input.scope.unwrap_or_else(|| "team".to_owned()),
+            context_query: query,
+            context_memory_ids: context_pack
+                .items
+                .iter()
+                .map(|item| item.memory_id.clone())
+                .collect(),
+            memory_ids: Vec::new(),
+            summary: None,
+            next_steps: Vec::new(),
+            opened_at_unix_seconds: unix_timestamp(),
+            closed_at_unix_seconds: None,
+        };
+        self.audit(
+            TeamAuditKind::RunBegin,
+            &input.actor,
+            &run.id,
+            true,
+            "run_opened",
+        );
+        self.state.runs.push(run.clone());
+        Ok(TeamRunBeginReport { run, context_pack })
+    }
+
+    /// Adds one scoped memory to an open task run.
+    pub fn note_run(
+        &mut self,
+        input: TeamRunNoteInput,
+    ) -> Result<TeamRunNoteReport, TeamPolicyError> {
+        let run_position = self.require_open_run_for_actor(&input.run_id, &input.actor)?;
+        let memory = self.remember(TeamRememberInput {
+            actor: input.actor.clone(),
+            text: input.text,
+            scope: input.scope,
+        })?;
+        self.state.runs[run_position]
+            .memory_ids
+            .push(memory.id.clone());
+        let run = self.state.runs[run_position].clone();
+        self.audit(
+            TeamAuditKind::RunNote,
+            &input.actor,
+            &run.id,
+            true,
+            "run_note_added",
+        );
+        Ok(TeamRunNoteReport { run, memory })
+    }
+
+    /// Closes an open task run and optionally records closing memories.
+    pub fn end_run(&mut self, input: TeamRunEndInput) -> Result<TeamRunEndReport, TeamPolicyError> {
+        let run_position = self.require_open_run_for_actor(&input.run_id, &input.actor)?;
+        let default_scope = self.state.runs[run_position].scope.clone();
+        let mut remembered_memory_ids = Vec::new();
+        for text in input.remember {
+            let memory = self.remember(TeamRememberInput {
+                actor: input.actor.clone(),
+                text,
+                scope: input.scope.clone().unwrap_or_else(|| default_scope.clone()),
+            })?;
+            remembered_memory_ids.push(memory.id.clone());
+            self.state.runs[run_position].memory_ids.push(memory.id);
+        }
+        self.state.runs[run_position].status = TeamRunStatus::Closed;
+        self.state.runs[run_position].summary = Some(input.summary);
+        self.state.runs[run_position].next_steps = input.next_steps;
+        self.state.runs[run_position].closed_at_unix_seconds = Some(unix_timestamp());
+        let run = self.state.runs[run_position].clone();
+        self.audit(
+            TeamAuditKind::RunEnd,
+            &input.actor,
+            &run.id,
+            true,
+            "run_closed",
+        );
+        Ok(TeamRunEndReport {
+            run,
+            remembered_memory_ids,
+        })
+    }
+
+    /// Builds a handoff package anchored to one task run.
+    pub fn build_run_handoff_package(
+        &mut self,
+        input: TeamRunHandoffInput,
+    ) -> Result<TeamHandoffPackage, TeamPolicyError> {
+        let run_position = self.require_run_for_actor(&input.run_id, &input.actor)?;
+        let run = self.state.runs[run_position].clone();
+        let mut query = input.query.unwrap_or_else(|| run.context_query.clone());
+        if let Some(summary) = &run.summary {
+            query.push(' ');
+            query.push_str(summary);
+        }
+        if !run.next_steps.is_empty() {
+            query.push(' ');
+            query.push_str(&run.next_steps.join(" "));
+        }
+        let mut package = self.build_handoff_package(TeamContextQuery {
+            actor: input.actor.clone(),
+            query,
+            max_items: input.max_items.unwrap_or(DEFAULT_TEAM_CONTEXT_MAX_ITEMS),
+        })?;
+        package.run = Some(run.clone());
+        self.audit(
+            TeamAuditKind::RunHandoff,
+            &input.actor,
+            &run.id,
+            true,
+            "run_handoff_built",
+        );
+        Ok(package)
+    }
+
+    /// Analyzes active team memory for duplicates, conflicts, stale sources, and review risk.
+    #[must_use]
+    pub fn quality_report(&self) -> TeamMemoryQualityReport {
+        build_team_memory_quality_report(&self.state)
+    }
+
+    /// Builds a reviewer-facing report for one promotion candidate.
+    pub fn promotion_review_report(
+        &self,
+        promotion_id: &str,
+    ) -> Result<TeamPromotionReviewReport, TeamPolicyError> {
+        let promotion = self
+            .state
+            .promotions
+            .iter()
+            .find(|promotion| promotion.id == promotion_id)
+            .cloned()
+            .ok_or_else(|| TeamPolicyError::new(format!("unknown promotion: {promotion_id}")))?;
+        let source = self
+            .state
+            .memories
+            .iter()
+            .find(|memory| memory.id == promotion.source_memory_id)
+            .cloned();
+        let mut risks = Vec::new();
+        if let Some(source) = &source {
+            if source.status != TeamMemoryStatus::Active {
+                risks.push(TeamPromotionRisk {
+                    kind: "source_not_active".to_owned(),
+                    severity: TeamQualitySeverity::High,
+                    detail: format!("source memory is {}", source.status.as_str()),
+                });
+            }
+            if source.scope == "team" {
+                risks.push(TeamPromotionRisk {
+                    kind: "already_team_scope".to_owned(),
+                    severity: TeamQualitySeverity::Medium,
+                    detail: "source is already team-visible".to_owned(),
+                });
+            }
+            if looks_like_secret(&source.text) || looks_like_memory_poisoning(&source.text) {
+                risks.push(TeamPromotionRisk {
+                    kind: "unsafe_source_text".to_owned(),
+                    severity: TeamQualitySeverity::High,
+                    detail: "source text matches a safety detector".to_owned(),
+                });
+            }
+            for memory in &self.state.memories {
+                if memory.id != source.id
+                    && memory.status == TeamMemoryStatus::Active
+                    && memory.scope == "team"
+                    && normalize_quality_text(&memory.text) == normalize_quality_text(&source.text)
+                {
+                    risks.push(TeamPromotionRisk {
+                        kind: "duplicate_team_memory".to_owned(),
+                        severity: TeamQualitySeverity::Medium,
+                        detail: format!("team memory {} already has the same text", memory.id),
+                    });
+                }
+            }
+        } else {
+            risks.push(TeamPromotionRisk {
+                kind: "missing_source_memory".to_owned(),
+                severity: TeamQualitySeverity::High,
+                detail: "promotion source memory is missing".to_owned(),
+            });
+        }
+        let high_risk_count = risks
+            .iter()
+            .filter(|risk| risk.severity == TeamQualitySeverity::High)
+            .count();
+        Ok(TeamPromotionReviewReport {
+            schema_version: "mneme.team_promotion_review.v1".to_owned(),
+            workspace_id: self.state.workspace_id.clone(),
+            promotion,
+            source_memory: source,
+            ok_to_approve: high_risk_count == 0,
+            risk_count: risks.len(),
+            risks,
+            recommendation: if high_risk_count == 0 {
+                "reviewer_can_approve_if_scope_and_wording_are_intended".to_owned()
+            } else {
+                "reject_or_fix_source_before_approval".to_owned()
+            },
         })
     }
 
@@ -1451,6 +1720,81 @@ impl TeamMemoryEngine {
         })
     }
 
+    fn require_open_run_for_actor(
+        &mut self,
+        run_id: &str,
+        actor: &TeamActor,
+    ) -> Result<usize, TeamPolicyError> {
+        let position = self.require_run_for_actor(run_id, actor)?;
+        if self.state.runs[position].status != TeamRunStatus::Open {
+            let error = TeamPolicyError::new(format!("run {run_id} is not open"));
+            self.audit(
+                TeamAuditKind::PolicyDeny,
+                actor,
+                run_id,
+                false,
+                &error.to_string(),
+            );
+            return Err(error);
+        }
+        Ok(position)
+    }
+
+    fn require_run_for_actor(
+        &mut self,
+        run_id: &str,
+        actor: &TeamActor,
+    ) -> Result<usize, TeamPolicyError> {
+        let validated = match self.validate_actor(actor) {
+            Ok(actor) => actor,
+            Err(error) => {
+                self.audit(
+                    TeamAuditKind::PolicyDeny,
+                    actor,
+                    run_id,
+                    false,
+                    &error.to_string(),
+                );
+                return Err(error);
+            }
+        };
+        let Some(position) = self.state.runs.iter().position(|run| run.id == run_id) else {
+            let error = TeamPolicyError::new(format!("unknown run: {run_id}"));
+            self.audit(
+                TeamAuditKind::PolicyDeny,
+                actor,
+                run_id,
+                false,
+                &error.to_string(),
+            );
+            return Err(error);
+        };
+        let run = &self.state.runs[position];
+        if run.actor_user_id != validated.user_id {
+            let error = TeamPolicyError::new(format!("run {run_id} belongs to another user"));
+            self.audit(
+                TeamAuditKind::PolicyDeny,
+                actor,
+                run_id,
+                false,
+                &error.to_string(),
+            );
+            return Err(error);
+        }
+        if run.actor_agent_id != validated.agent_id {
+            let error = TeamPolicyError::new(format!("run {run_id} belongs to another agent"));
+            self.audit(
+                TeamAuditKind::PolicyDeny,
+                actor,
+                run_id,
+                false,
+                &error.to_string(),
+            );
+            return Err(error);
+        }
+        Ok(position)
+    }
+
     fn audit(
         &mut self,
         kind: TeamAuditKind,
@@ -1503,6 +1847,13 @@ impl TeamMemoryEngine {
                 .map(|promotion| promotion.id.as_str()),
         )
     }
+
+    fn next_run_number(&self) -> usize {
+        next_number_for_prefix(
+            "team-run",
+            self.state.runs.iter().map(|run| run.id.as_str()),
+        )
+    }
 }
 
 /// Engine configuration for one v2 team workspace.
@@ -1539,6 +1890,9 @@ pub struct TeamMemoryState {
     pub memories: Vec<TeamMemoryRecord>,
     /// Promotion candidates and review outcomes.
     pub promotions: Vec<TeamPromotionRecord>,
+    /// Task runs that anchor agent/team handoff workflows.
+    #[serde(default)]
+    pub runs: Vec<TeamRunRecord>,
     /// Immutable local audit trail for policy decisions.
     pub audit: Vec<TeamAuditRecord>,
 }
@@ -1734,6 +2088,151 @@ pub struct TeamContextQuery {
     pub max_items: usize,
 }
 
+/// Input used to begin a team task run.
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct TeamRunBeginInput {
+    /// Actor opening the run.
+    pub actor: TeamActor,
+    /// Human task or objective.
+    pub task: String,
+    /// Optional retrieval query. Defaults to `task`.
+    #[serde(default)]
+    pub query: Option<String>,
+    /// Default scope for run closing memories.
+    #[serde(default)]
+    pub scope: Option<String>,
+    /// Optional context budget.
+    #[serde(default)]
+    pub max_items: Option<usize>,
+}
+
+/// Input used to attach memory to an open team task run.
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct TeamRunNoteInput {
+    /// Actor adding the note.
+    pub actor: TeamActor,
+    /// Run identifier.
+    pub run_id: String,
+    /// Memory text.
+    pub text: String,
+    /// Target scope.
+    pub scope: String,
+}
+
+/// Input used to close a team task run.
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct TeamRunEndInput {
+    /// Actor closing the run.
+    pub actor: TeamActor,
+    /// Run identifier.
+    pub run_id: String,
+    /// Closing summary.
+    pub summary: String,
+    /// Explicit next steps for a future actor or agent.
+    #[serde(default)]
+    pub next_steps: Vec<String>,
+    /// Optional memories recorded at close time.
+    #[serde(default)]
+    pub remember: Vec<String>,
+    /// Scope for close-time memories. Defaults to the run scope.
+    #[serde(default)]
+    pub scope: Option<String>,
+}
+
+/// Input used to build a task-run handoff package.
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct TeamRunHandoffInput {
+    /// Actor receiving/asking for the handoff.
+    pub actor: TeamActor,
+    /// Run identifier.
+    pub run_id: String,
+    /// Optional handoff query. Defaults to the run query plus summary/next steps.
+    #[serde(default)]
+    pub query: Option<String>,
+    /// Optional context budget.
+    #[serde(default)]
+    pub max_items: Option<usize>,
+}
+
+/// Team task run lifecycle status.
+#[derive(Debug, Clone, Copy, Eq, PartialEq, Serialize, Deserialize)]
+#[serde(rename_all = "snake_case")]
+pub enum TeamRunStatus {
+    /// Run is open and can accept notes.
+    Open,
+    /// Run is closed and ready for handoff/review.
+    Closed,
+}
+
+impl TeamRunStatus {
+    /// Stable status identifier.
+    #[must_use]
+    pub const fn as_str(self) -> &'static str {
+        match self {
+            Self::Open => "open",
+            Self::Closed => "closed",
+        }
+    }
+}
+
+/// One team task run.
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct TeamRunRecord {
+    /// Stable run identifier.
+    pub id: String,
+    /// Human task or objective.
+    pub task: String,
+    /// Run status.
+    pub status: TeamRunStatus,
+    /// User responsible for the run.
+    pub actor_user_id: String,
+    /// Agent acting for the user, when available.
+    pub actor_agent_id: Option<String>,
+    /// Default memory scope for run-close memories.
+    pub scope: String,
+    /// Initial context query.
+    pub context_query: String,
+    /// Context memories shown when the run opened.
+    pub context_memory_ids: Vec<String>,
+    /// Memories written during the run.
+    pub memory_ids: Vec<String>,
+    /// Closing summary, when available.
+    pub summary: Option<String>,
+    /// Explicit next steps for handoff.
+    pub next_steps: Vec<String>,
+    /// Local open timestamp.
+    pub opened_at_unix_seconds: u64,
+    /// Local close timestamp, when closed.
+    pub closed_at_unix_seconds: Option<u64>,
+}
+
+/// Result of opening a team task run.
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct TeamRunBeginReport {
+    /// Run record.
+    pub run: TeamRunRecord,
+    /// Initial actor-scoped context.
+    pub context_pack: TeamContextPack,
+}
+
+/// Result of adding a run note.
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct TeamRunNoteReport {
+    /// Updated run.
+    pub run: TeamRunRecord,
+    /// Memory written by the note.
+    pub memory: TeamMemoryRecord,
+}
+
+/// Result of closing a team task run.
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct TeamRunEndReport {
+    /// Closed run.
+    pub run: TeamRunRecord,
+    /// Memories recorded at close time.
+    pub remembered_memory_ids: Vec<String>,
+}
+
 /// Team context-pack output.
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct TeamContextPack {
@@ -1898,6 +2397,14 @@ pub enum TeamAuditKind {
     SyncImport,
     /// Agent handoff package built.
     HandoffBuild,
+    /// Task run opened.
+    RunBegin,
+    /// Task run note added.
+    RunNote,
+    /// Task run closed.
+    RunEnd,
+    /// Task run handoff built.
+    RunHandoff,
 }
 
 impl TeamAuditKind {
@@ -1923,6 +2430,10 @@ impl TeamAuditKind {
             Self::SyncExport => "team.sync.export",
             Self::SyncImport => "team.sync.import",
             Self::HandoffBuild => "team.handoff.build",
+            Self::RunBegin => "team.run.begin",
+            Self::RunNote => "team.run.note",
+            Self::RunEnd => "team.run.end",
+            Self::RunHandoff => "team.run.handoff",
         }
     }
 }
@@ -1944,6 +2455,12 @@ pub struct TeamSyncEnvelope {
     pub schema_version: String,
     /// Workspace identifier.
     pub workspace_id: String,
+    /// Stable envelope identifier for import diff and replay inspection.
+    #[serde(default)]
+    pub envelope_id: String,
+    /// Stable checksum over the envelope with this field blanked.
+    #[serde(default)]
+    pub checksum: String,
     /// User that exported this envelope.
     pub exported_by_user_id: String,
     /// Agent that exported this envelope, when available.
@@ -2011,6 +2528,13 @@ pub struct TeamSyncApplyReport {
     pub skipped: TeamSyncApplyCounts,
     /// Rejected records and reasons.
     pub rejected: Vec<TeamSyncReject>,
+    /// Envelope identifier, when present.
+    #[serde(default)]
+    pub envelope_id: String,
+    /// Whether a non-empty envelope checksum matched the payload.
+    pub checksum_verified: bool,
+    /// Dry-run/apply diff summary.
+    pub diff: TeamSyncDiffReport,
     /// Validation result after merge simulation.
     pub validation: TeamStateValidationReport,
 }
@@ -2059,6 +2583,27 @@ pub struct TeamSyncReject {
     pub id: String,
     /// Stable rejection reason.
     pub reason: String,
+}
+
+/// Diff summary for a sync envelope against the local store.
+#[derive(Debug, Clone, Default, Serialize, Deserialize)]
+pub struct TeamSyncDiffReport {
+    /// Incoming event records that do not exist locally.
+    pub new_events: usize,
+    /// Incoming memory records that do not exist locally.
+    pub new_memories: usize,
+    /// Incoming event records identical to local records.
+    pub identical_events: usize,
+    /// Incoming memory records identical to local records.
+    pub identical_memories: usize,
+    /// Incoming event records that conflict by ID.
+    pub conflicting_events: usize,
+    /// Incoming memory records that conflict by ID.
+    pub conflicting_memories: usize,
+    /// Metadata records that must already exist locally before apply.
+    pub metadata_rejections: usize,
+    /// Omitted records carried by the envelope.
+    pub omitted_records: usize,
 }
 
 /// Memory firewall report.
@@ -2206,14 +2751,132 @@ pub struct TeamHandoffPackage {
     pub actor: TeamActor,
     /// Query/task being handed off.
     pub query: String,
+    /// Run anchor, when this handoff is tied to a task run.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub run: Option<TeamRunRecord>,
     /// Policy-filtered context pack.
     pub context_pack: TeamContextPack,
     /// Connector-safe sync payload available to downstream tooling.
     pub sync_envelope: TeamSyncEnvelope,
     /// Safety scan at handoff time.
     pub firewall: TeamFirewallReport,
+    /// Memory quality report at handoff time.
+    pub quality: TeamMemoryQualityReport,
     /// Entity/relation/attribute projection at handoff time.
     pub ontology: TeamOntologyReport,
+}
+
+/// Memory quality report for v2 team state.
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct TeamMemoryQualityReport {
+    /// Quality report schema.
+    pub schema_version: String,
+    /// Workspace identifier.
+    pub workspace_id: String,
+    /// Whether no high-severity quality issues were detected.
+    pub ok: bool,
+    /// Overall health label.
+    pub health: String,
+    /// Total memories.
+    pub memory_count: usize,
+    /// Active memories.
+    pub active_memory_count: usize,
+    /// Duplicate active text/scope groups.
+    pub duplicate_group_count: usize,
+    /// Active memories beyond the first item in duplicate groups.
+    pub duplicate_memory_count: usize,
+    /// Active conflict groups.
+    pub conflict_group_count: usize,
+    /// Memories that have already produced downstream team memory.
+    pub promoted_source_count: usize,
+    /// Open task runs.
+    pub open_run_count: usize,
+    /// Closed task runs.
+    pub closed_run_count: usize,
+    /// Pending promotions.
+    pub pending_promotion_count: usize,
+    /// Findings.
+    pub findings: Vec<TeamMemoryQualityFinding>,
+}
+
+impl Default for TeamMemoryQualityReport {
+    fn default() -> Self {
+        Self {
+            schema_version: "mneme.team_quality.v1".to_owned(),
+            workspace_id: String::new(),
+            ok: true,
+            health: "clean".to_owned(),
+            memory_count: 0,
+            active_memory_count: 0,
+            duplicate_group_count: 0,
+            duplicate_memory_count: 0,
+            conflict_group_count: 0,
+            promoted_source_count: 0,
+            open_run_count: 0,
+            closed_run_count: 0,
+            pending_promotion_count: 0,
+            findings: Vec::new(),
+        }
+    }
+}
+
+/// One team-memory quality finding.
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct TeamMemoryQualityFinding {
+    /// Stable finding kind.
+    pub kind: String,
+    /// Severity.
+    pub severity: TeamQualitySeverity,
+    /// Related memory IDs.
+    pub memory_ids: Vec<String>,
+    /// Human-readable detail.
+    pub detail: String,
+    /// Suggested handling.
+    pub recommendation: String,
+}
+
+/// Team quality severity.
+#[derive(Debug, Clone, Copy, Eq, PartialEq, Serialize, Deserialize)]
+#[serde(rename_all = "snake_case")]
+pub enum TeamQualitySeverity {
+    /// Needs human review before trust.
+    High,
+    /// Should be cleaned up before wider rollout.
+    Medium,
+    /// Useful operational note.
+    Info,
+}
+
+/// Reviewer-facing promotion report.
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct TeamPromotionReviewReport {
+    /// Report schema.
+    pub schema_version: String,
+    /// Workspace identifier.
+    pub workspace_id: String,
+    /// Promotion candidate.
+    pub promotion: TeamPromotionRecord,
+    /// Source memory, when still present.
+    pub source_memory: Option<TeamMemoryRecord>,
+    /// Whether the candidate has no high-severity risks.
+    pub ok_to_approve: bool,
+    /// Risk count.
+    pub risk_count: usize,
+    /// Risks found before review.
+    pub risks: Vec<TeamPromotionRisk>,
+    /// Suggested reviewer action.
+    pub recommendation: String,
+}
+
+/// One promotion risk.
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct TeamPromotionRisk {
+    /// Stable risk kind.
+    pub kind: String,
+    /// Severity.
+    pub severity: TeamQualitySeverity,
+    /// Human-readable detail.
+    pub detail: String,
 }
 
 /// Adapter manifest for external tools.
@@ -2291,6 +2954,11 @@ pub fn validate_team_state(state: &TeamMemoryState) -> TeamStateValidationReport
     let memory_ids = collect_unique_ids(
         state.memories.iter().map(|memory| memory.id.as_str()),
         "memory",
+        &mut issues,
+    );
+    let _run_ids = collect_unique_ids(
+        state.runs.iter().map(|run| run.id.as_str()),
+        "run",
         &mut issues,
     );
 
@@ -2377,6 +3045,45 @@ pub fn validate_team_state(state: &TeamMemoryState) -> TeamStateValidationReport
             ));
         }
     }
+    for run in &state.runs {
+        if !user_ids.contains(&run.actor_user_id) {
+            issues.push(TeamStateValidationIssue::error(
+                "run.unknown_actor",
+                format!(
+                    "run {} references unknown user {}",
+                    run.id, run.actor_user_id
+                ),
+            ));
+        }
+        if let Some(agent_id) = &run.actor_agent_id {
+            if !agent_ids.contains(agent_id) {
+                issues.push(TeamStateValidationIssue::error(
+                    "run.unknown_agent",
+                    format!("run {} references unknown agent {agent_id}", run.id),
+                ));
+            }
+        }
+        if parse_team_scope(&run.scope).is_err() {
+            issues.push(TeamStateValidationIssue::error(
+                "run.invalid_scope",
+                format!("run {} has invalid scope {}", run.id, run.scope),
+            ));
+        }
+        for memory_id in run.context_memory_ids.iter().chain(run.memory_ids.iter()) {
+            if !memory_ids.contains(memory_id) {
+                issues.push(TeamStateValidationIssue::error(
+                    "run.unknown_memory",
+                    format!("run {} references missing memory {memory_id}", run.id),
+                ));
+            }
+        }
+        if run.status == TeamRunStatus::Closed && run.closed_at_unix_seconds.is_none() {
+            issues.push(TeamStateValidationIssue::error(
+                "run.closed_without_timestamp",
+                format!("run {} is closed without closed_at_unix_seconds", run.id),
+            ));
+        }
+    }
 
     let error_count = issues
         .iter()
@@ -2390,6 +3097,7 @@ pub fn validate_team_state(state: &TeamMemoryState) -> TeamStateValidationReport
         project_count: state.projects.len(),
         memory_count: state.memories.len(),
         promotion_count: state.promotions.len(),
+        run_count: state.runs.len(),
         audit_count: state.audit.len(),
         error_count,
         issues,
@@ -2413,6 +3121,8 @@ pub struct TeamStateValidationReport {
     pub memory_count: usize,
     /// Number of promotion records.
     pub promotion_count: usize,
+    /// Number of task run records.
+    pub run_count: usize,
     /// Number of audit records.
     pub audit_count: usize,
     /// Error count.
@@ -2824,6 +3534,322 @@ fn contains_aws_access_key_like(text: &str) -> bool {
                     .chars()
                     .all(|character| character.is_ascii_uppercase() || character.is_ascii_digit())
         })
+}
+
+fn new_sync_envelope_id(workspace_id: &str, user_id: &str) -> String {
+    format!(
+        "team-sync-{}-{}-{}",
+        stable_id_fragment(workspace_id),
+        stable_id_fragment(user_id),
+        unix_timestamp()
+    )
+}
+
+fn sync_envelope_checksum(envelope: &TeamSyncEnvelope) -> String {
+    let mut canonical = envelope.clone();
+    canonical.checksum.clear();
+    let json = serde_json::to_string(&canonical).unwrap_or_default();
+    format!("fnv1a64:{:016x}", stable_hash64(json.as_bytes()))
+}
+
+fn stable_hash64(bytes: &[u8]) -> u64 {
+    let mut hash = 0xcbf29ce484222325u64;
+    for byte in bytes {
+        hash ^= u64::from(*byte);
+        hash = hash.wrapping_mul(0x100000001b3);
+    }
+    hash
+}
+
+fn stable_id_fragment(value: &str) -> String {
+    let fragment = value
+        .chars()
+        .filter(|character| character.is_ascii_alphanumeric() || *character == '-')
+        .collect::<String>();
+    if fragment.is_empty() {
+        "unknown".to_owned()
+    } else {
+        fragment
+    }
+}
+
+fn diff_sync_envelope(state: &TeamMemoryState, envelope: &TeamSyncEnvelope) -> TeamSyncDiffReport {
+    TeamSyncDiffReport {
+        new_events: count_new_records(&state.events, &envelope.events, |record| record.id.as_str()),
+        new_memories: count_new_records(&state.memories, &envelope.memories, |record| {
+            record.id.as_str()
+        }),
+        identical_events: count_identical_records(&state.events, &envelope.events, |record| {
+            record.id.as_str()
+        }),
+        identical_memories: count_identical_records(
+            &state.memories,
+            &envelope.memories,
+            |record| record.id.as_str(),
+        ),
+        conflicting_events: count_conflicting_records(&state.events, &envelope.events, |record| {
+            record.id.as_str()
+        }),
+        conflicting_memories: count_conflicting_records(
+            &state.memories,
+            &envelope.memories,
+            |record| record.id.as_str(),
+        ),
+        metadata_rejections: count_metadata_rejections(&state.users, &envelope.users, |record| {
+            record.id.as_str()
+        }) + count_metadata_rejections(
+            &state.agents,
+            &envelope.agents,
+            |record| record.id.as_str(),
+        ) + count_metadata_rejections(
+            &state.projects,
+            &envelope.projects,
+            |record| record.id.as_str(),
+        ) + count_metadata_rejections(
+            &state.promotions,
+            &envelope.promotions,
+            |record| record.id.as_str(),
+        ) + count_metadata_rejections(
+            &state.audit,
+            &envelope.audit,
+            |record| record.target_id.as_str(),
+        ),
+        omitted_records: envelope.omitted.len(),
+    }
+}
+
+fn count_new_records<T, F>(existing: &[T], incoming: &[T], id: F) -> usize
+where
+    F: Fn(&T) -> &str,
+{
+    incoming
+        .iter()
+        .filter(|record| {
+            let incoming_id = id(record);
+            existing.iter().all(|current| id(current) != incoming_id)
+        })
+        .count()
+}
+
+fn count_identical_records<T, F>(existing: &[T], incoming: &[T], id: F) -> usize
+where
+    T: Serialize,
+    F: Fn(&T) -> &str,
+{
+    incoming
+        .iter()
+        .filter(|record| {
+            let incoming_id = id(record);
+            existing
+                .iter()
+                .any(|current| id(current) == incoming_id && same_json_value(current, record))
+        })
+        .count()
+}
+
+fn count_conflicting_records<T, F>(existing: &[T], incoming: &[T], id: F) -> usize
+where
+    T: Serialize,
+    F: Fn(&T) -> &str,
+{
+    incoming
+        .iter()
+        .filter(|record| {
+            let incoming_id = id(record);
+            existing
+                .iter()
+                .any(|current| id(current) == incoming_id && !same_json_value(current, record))
+        })
+        .count()
+}
+
+fn count_metadata_rejections<T, F>(existing: &[T], incoming: &[T], id: F) -> usize
+where
+    T: Serialize,
+    F: Fn(&T) -> &str,
+{
+    incoming
+        .iter()
+        .filter(|record| {
+            let incoming_id = id(record);
+            !existing
+                .iter()
+                .any(|current| id(current) == incoming_id && same_json_value(current, record))
+        })
+        .count()
+}
+
+fn build_team_memory_quality_report(state: &TeamMemoryState) -> TeamMemoryQualityReport {
+    let active = state
+        .memories
+        .iter()
+        .filter(|memory| memory.status == TeamMemoryStatus::Active)
+        .collect::<Vec<_>>();
+    let mut findings = Vec::new();
+    let mut duplicate_group_count = 0usize;
+    let mut duplicate_memory_count = 0usize;
+    let mut groups = BTreeMap::<(String, String), Vec<String>>::new();
+    for memory in &active {
+        groups
+            .entry((memory.scope.clone(), normalize_quality_text(&memory.text)))
+            .or_default()
+            .push(memory.id.clone());
+    }
+    for ((scope, _), memory_ids) in groups {
+        if memory_ids.len() > 1 {
+            duplicate_group_count += 1;
+            duplicate_memory_count += memory_ids.len().saturating_sub(1);
+            findings.push(TeamMemoryQualityFinding {
+                kind: "duplicate_active_memory".to_owned(),
+                severity: TeamQualitySeverity::Medium,
+                memory_ids,
+                detail: format!(
+                    "multiple active memories have the same normalized text in {scope}"
+                ),
+                recommendation: "keep the newest or most cited record and supersede duplicates"
+                    .to_owned(),
+            });
+        }
+    }
+
+    let mut conflict_group_count = 0usize;
+    let mut conflict_groups = BTreeMap::<(String, String), Vec<(String, String)>>::new();
+    for memory in &active {
+        if let Some(polarity) = quality_polarity(&memory.text) {
+            conflict_groups
+                .entry((memory.scope.clone(), conflict_key(&memory.text)))
+                .or_default()
+                .push((polarity, memory.id.clone()));
+        }
+    }
+    for ((scope, key), values) in conflict_groups {
+        let polarities = values
+            .iter()
+            .map(|(polarity, _)| polarity.clone())
+            .collect::<BTreeSet<_>>();
+        if polarities.len() > 1 {
+            conflict_group_count += 1;
+            findings.push(TeamMemoryQualityFinding {
+                kind: "conflicting_active_memory".to_owned(),
+                severity: TeamQualitySeverity::High,
+                memory_ids: values.into_iter().map(|(_, id)| id).collect(),
+                detail: format!("active memories disagree in {scope}: {key}"),
+                recommendation: "resolve the current truth before using this scope for handoff"
+                    .to_owned(),
+            });
+        }
+    }
+
+    let promoted_sources = state
+        .memories
+        .iter()
+        .filter(|memory| memory.status == TeamMemoryStatus::Active && memory.scope == "team")
+        .flat_map(|memory| memory.source_memory_ids.iter().cloned())
+        .collect::<BTreeSet<_>>();
+    for memory_id in &promoted_sources {
+        findings.push(TeamMemoryQualityFinding {
+            kind: "promoted_source_still_active".to_owned(),
+            severity: TeamQualitySeverity::Info,
+            memory_ids: vec![memory_id.clone()],
+            detail: "a scoped source memory has already produced team memory".to_owned(),
+            recommendation: "keep the source for provenance, or retire it if it creates confusion"
+                .to_owned(),
+        });
+    }
+    for promotion in state
+        .promotions
+        .iter()
+        .filter(|promotion| promotion.status == TeamPromotionStatus::Pending)
+    {
+        findings.push(TeamMemoryQualityFinding {
+            kind: "pending_promotion_review".to_owned(),
+            severity: TeamQualitySeverity::Info,
+            memory_ids: vec![promotion.source_memory_id.clone()],
+            detail: format!("promotion {} awaits review", promotion.id),
+            recommendation: "run a promotion report before approving team-wide visibility"
+                .to_owned(),
+        });
+    }
+
+    let high_count = findings
+        .iter()
+        .filter(|finding| finding.severity == TeamQualitySeverity::High)
+        .count();
+    let medium_count = findings
+        .iter()
+        .filter(|finding| finding.severity == TeamQualitySeverity::Medium)
+        .count();
+    TeamMemoryQualityReport {
+        schema_version: "mneme.team_quality.v1".to_owned(),
+        workspace_id: state.workspace_id.clone(),
+        ok: high_count == 0,
+        health: if high_count > 0 {
+            "needs_resolution".to_owned()
+        } else if medium_count > 0 {
+            "needs_cleanup".to_owned()
+        } else {
+            "clean".to_owned()
+        },
+        memory_count: state.memories.len(),
+        active_memory_count: active.len(),
+        duplicate_group_count,
+        duplicate_memory_count,
+        conflict_group_count,
+        promoted_source_count: promoted_sources.len(),
+        open_run_count: state
+            .runs
+            .iter()
+            .filter(|run| run.status == TeamRunStatus::Open)
+            .count(),
+        closed_run_count: state
+            .runs
+            .iter()
+            .filter(|run| run.status == TeamRunStatus::Closed)
+            .count(),
+        pending_promotion_count: state
+            .promotions
+            .iter()
+            .filter(|promotion| promotion.status == TeamPromotionStatus::Pending)
+            .count(),
+        findings,
+    }
+}
+
+fn normalize_quality_text(text: &str) -> String {
+    text.to_ascii_lowercase()
+        .split_whitespace()
+        .collect::<Vec<_>>()
+        .join(" ")
+}
+
+fn quality_polarity(text: &str) -> Option<String> {
+    let normalized = text.to_ascii_lowercase();
+    if normalized.contains(" disabled")
+        || normalized.contains(" is off")
+        || normalized.contains(" false")
+        || normalized.contains(" not required")
+    {
+        Some("negative".to_owned())
+    } else if normalized.contains(" enabled")
+        || normalized.contains(" is on")
+        || normalized.contains(" true")
+        || normalized.contains(" required")
+    {
+        Some("positive".to_owned())
+    } else {
+        None
+    }
+}
+
+fn conflict_key(text: &str) -> String {
+    normalize_quality_text(text)
+        .replace(" enabled", "")
+        .replace(" disabled", "")
+        .replace(" is on", "")
+        .replace(" is off", "")
+        .replace(" true", "")
+        .replace(" false", "")
+        .replace(" not required", " required")
 }
 
 fn merge_one_record<T, F>(
@@ -3331,5 +4357,133 @@ mod tests {
         assert!(package.firewall.ok);
         assert!(package.ontology.entity_count >= 6);
         assert!(package.ontology.relation_count >= 8);
+    }
+
+    #[test]
+    fn run_lifecycle_builds_handoff_with_quality_and_sync_checksum() {
+        let mut engine = configured_engine();
+        engine
+            .remember(TeamRememberInput {
+                actor: TeamActor {
+                    user_id: "bob".to_owned(),
+                    agent_id: Some("codex-bob".to_owned()),
+                },
+                text: "remember: Atlas deploy flag is enabled".to_owned(),
+                scope: "project:atlas".to_owned(),
+            })
+            .expect("project memory write should succeed");
+        engine
+            .remember(TeamRememberInput {
+                actor: TeamActor {
+                    user_id: "bob".to_owned(),
+                    agent_id: Some("codex-bob".to_owned()),
+                },
+                text: "remember: Atlas deploy flag is disabled".to_owned(),
+                scope: "project:atlas".to_owned(),
+            })
+            .expect("conflicting project memory write should succeed");
+
+        let begin = engine
+            .begin_run(TeamRunBeginInput {
+                actor: TeamActor {
+                    user_id: "bob".to_owned(),
+                    agent_id: Some("codex-bob".to_owned()),
+                },
+                task: "Atlas deploy handoff".to_owned(),
+                query: Some("deploy flag".to_owned()),
+                scope: Some("project:atlas".to_owned()),
+                max_items: Some(8),
+            })
+            .expect("run should begin");
+        assert_eq!(begin.run.status, TeamRunStatus::Open);
+        assert_eq!(begin.context_pack.items.len(), 2);
+
+        let note = engine
+            .note_run(TeamRunNoteInput {
+                actor: TeamActor {
+                    user_id: "bob".to_owned(),
+                    agent_id: Some("codex-bob".to_owned()),
+                },
+                run_id: begin.run.id.clone(),
+                text: "remember: Atlas run requires smoke test".to_owned(),
+                scope: "project:atlas".to_owned(),
+            })
+            .expect("run note should write memory");
+        assert_eq!(note.run.memory_ids.len(), 1);
+
+        let end = engine
+            .end_run(TeamRunEndInput {
+                actor: TeamActor {
+                    user_id: "bob".to_owned(),
+                    agent_id: Some("codex-bob".to_owned()),
+                },
+                run_id: begin.run.id.clone(),
+                summary: "Deploy flag reviewed".to_owned(),
+                next_steps: vec!["Check smoke test".to_owned()],
+                remember: vec!["remember: Atlas next agent should verify smoke test".to_owned()],
+                scope: Some("project:atlas".to_owned()),
+            })
+            .expect("run should close");
+        assert_eq!(end.run.status, TeamRunStatus::Closed);
+        assert_eq!(end.remembered_memory_ids.len(), 1);
+
+        let package = engine
+            .build_run_handoff_package(TeamRunHandoffInput {
+                actor: TeamActor {
+                    user_id: "bob".to_owned(),
+                    agent_id: Some("codex-bob".to_owned()),
+                },
+                run_id: begin.run.id,
+                query: Some("smoke test deploy flag".to_owned()),
+                max_items: Some(8),
+            })
+            .expect("run handoff should build");
+        assert!(package.run.is_some());
+        assert!(!package.quality.ok);
+        assert_eq!(package.quality.conflict_group_count, 1);
+        assert!(package.sync_envelope.checksum.starts_with("fnv1a64:"));
+    }
+
+    #[test]
+    fn promotion_review_report_flags_duplicate_team_memory() {
+        let mut engine = configured_engine();
+        engine
+            .remember(TeamRememberInput {
+                actor: TeamActor {
+                    user_id: "alice".to_owned(),
+                    agent_id: None,
+                },
+                text: "remember: Team deploys require rollback owner".to_owned(),
+                scope: "team".to_owned(),
+            })
+            .expect("team memory write should succeed");
+        let memory = engine
+            .remember(TeamRememberInput {
+                actor: TeamActor {
+                    user_id: "bob".to_owned(),
+                    agent_id: Some("codex-bob".to_owned()),
+                },
+                text: "remember: Team deploys require rollback owner".to_owned(),
+                scope: "project:atlas".to_owned(),
+            })
+            .expect("project memory write should succeed");
+        let promotion = engine
+            .create_promotion(TeamPromotionCreateInput {
+                actor: TeamActor {
+                    user_id: "bob".to_owned(),
+                    agent_id: Some("codex-bob".to_owned()),
+                },
+                source_memory_id: memory.id,
+                note: None,
+            })
+            .expect("promotion should be created");
+        let report = engine
+            .promotion_review_report(&promotion.id)
+            .expect("promotion report should build");
+        assert!(report.ok_to_approve);
+        assert!(report
+            .risks
+            .iter()
+            .any(|risk| risk.kind == "duplicate_team_memory"));
     }
 }

@@ -131,8 +131,9 @@ Goal: safe team memory control plane with personal/project/team boundaries.
 
 Status: active local preview. The current implementation includes the v2 local
 team-memory policy core, connector-safe sync envelopes, handoff packages,
-firewall and ontology reports, CLI workflow, team eval suite, v2 readiness
-gate, and team dogfood evidence script. Hosted sync/server deployment is still
+task-run lifecycle, quality reports, promotion review reports, sync checksums,
+firewall and ontology reports, CLI workflow, team eval suite, v2 readiness gate,
+and team dogfood evidence script. Hosted sync/server deployment is still
 planned.
 
 Suggested slices:
@@ -144,6 +145,9 @@ Suggested slices:
 - team promotion workflow: shipped locally
 - connector sync envelope: shipped locally
 - handoff package: shipped locally
+- task-run lifecycle: shipped locally
+- memory quality / promotion review reports: shipped locally
+- sync checksum and import diff: shipped locally
 - firewall / ontology reports: shipped locally
 - admin audit: shipped locally
 - offboarding: shipped locally
@@ -265,7 +269,7 @@ connector-ready core:
 
 1. Run real team dogfood with sanitized handoff feedback.
 2. Add hosted sync/server design only after local ACL, promotion, revoke,
-   citation, sync-envelope, handoff, firewall, and seeded-fault gates stay
-   green.
+   citation, sync-envelope, handoff, run, quality, firewall, and seeded-fault
+   gates stay green.
 3. Preserve any dogfood failures as public-safe team scenarios or local
    candidate artifacts before changing storage or deployment behavior.

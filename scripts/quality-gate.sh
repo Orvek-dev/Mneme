@@ -20,7 +20,7 @@ python3 -m py_compile scripts/v2-team-dogfood.py
 python3 -m py_compile scripts/mneme-mcp-stdio.py
 python3 -m py_compile scripts/v1-real-use-pilot.py
 python3 -m py_compile scripts/v1-ontology-benchmark.py
-scripts/mneme-mcp-stdio.py --self-test | grep -q '"tool_count": 7'
+scripts/mneme-mcp-stdio.py --self-test | grep -q '"tool_count": 13'
 MANUAL_DOGFOOD_DATASET="${TMP_ROOT}/mneme-quality-gate-manual-dogfood-dataset.json"
 scripts/v1-manual-dogfood.py --check-dataset > "$MANUAL_DOGFOOD_DATASET"
 grep -q '"mock_record_count": 100' "$MANUAL_DOGFOOD_DATASET"
@@ -268,14 +268,20 @@ cargo run -p mneme-cli -- context "local-first" --store "$STORE" --json | grep -
 TEAM_STORE="${TMP_ROOT}/mneme-quality-gate-team-v2.json"
 TEAM_CONTEXT="${TMP_ROOT}/mneme-quality-gate-team-context.json"
 TEAM_HANDOFF="${TMP_ROOT}/mneme-quality-gate-team-handoff.json"
+TEAM_RUN_BEGIN="${TMP_ROOT}/mneme-quality-gate-team-run-begin.json"
+TEAM_RUN_NOTE="${TMP_ROOT}/mneme-quality-gate-team-run-note.json"
+TEAM_RUN_END="${TMP_ROOT}/mneme-quality-gate-team-run-end.json"
+TEAM_RUN_HANDOFF="${TMP_ROOT}/mneme-quality-gate-team-run-handoff.json"
 TEAM_SYNC="${TMP_ROOT}/mneme-quality-gate-team-sync.json"
 TEAM_SYNC_EXPORT="${TMP_ROOT}/mneme-quality-gate-team-sync-export.json"
 TEAM_FIREWALL="${TMP_ROOT}/mneme-quality-gate-team-firewall.json"
+TEAM_QUALITY="${TMP_ROOT}/mneme-quality-gate-team-quality.json"
 TEAM_ONTOLOGY="${TMP_ROOT}/mneme-quality-gate-team-ontology.json"
 TEAM_ADAPTER="${TMP_ROOT}/mneme-quality-gate-team-adapter.json"
 TEAM_VALIDATE="${TMP_ROOT}/mneme-quality-gate-team-validate.json"
 rm -f "$TEAM_STORE" "$TEAM_CONTEXT" "$TEAM_HANDOFF" "$TEAM_SYNC" "$TEAM_SYNC_EXPORT" \
-  "$TEAM_FIREWALL" "$TEAM_ONTOLOGY" "$TEAM_ADAPTER" "$TEAM_VALIDATE"
+  "$TEAM_RUN_BEGIN" "$TEAM_RUN_NOTE" "$TEAM_RUN_END" "$TEAM_RUN_HANDOFF" \
+  "$TEAM_FIREWALL" "$TEAM_QUALITY" "$TEAM_ONTOLOGY" "$TEAM_ADAPTER" "$TEAM_VALIDATE"
 cargo run -p mneme-cli -- team init --admin alice --store "$TEAM_STORE" --json | grep -q '"command": "team.init"'
 cargo run -p mneme-cli -- team user add bob --role member --store "$TEAM_STORE" --json | grep -q '"command": "team.user.add"'
 cargo run -p mneme-cli -- team agent add codex-bob --owner bob --store "$TEAM_STORE" --json | grep -q '"command": "team.agent.add"'
@@ -289,13 +295,27 @@ grep -q 'rollback notes' "$TEAM_CONTEXT"
 cargo run -p mneme-cli -- team handoff "rollback notes" --actor bob --agent codex-bob --store "$TEAM_STORE" --json > "$TEAM_HANDOFF"
 grep -q '"command": "team.handoff"' "$TEAM_HANDOFF"
 grep -q '"schema_version": "mneme.team_handoff.v1"' "$TEAM_HANDOFF"
+cargo run -p mneme-cli -- team run begin "Atlas deploy handoff" --actor bob --agent codex-bob --query "rollback notes" --scope project:atlas --store "$TEAM_STORE" --json > "$TEAM_RUN_BEGIN"
+grep -q '"command": "team.run.begin"' "$TEAM_RUN_BEGIN"
+grep -q '"id": "team-run-001"' "$TEAM_RUN_BEGIN"
+cargo run -p mneme-cli -- team run note team-run-001 "Atlas run requires smoke test" --actor bob --agent codex-bob --scope project:atlas --store "$TEAM_STORE" --json > "$TEAM_RUN_NOTE"
+grep -q '"command": "team.run.note"' "$TEAM_RUN_NOTE"
+cargo run -p mneme-cli -- team run end team-run-001 --actor bob --agent codex-bob --summary "Rollback notes reviewed" --next "Run smoke test" --store "$TEAM_STORE" --json > "$TEAM_RUN_END"
+grep -q '"status": "closed"' "$TEAM_RUN_END"
+cargo run -p mneme-cli -- team run handoff team-run-001 --actor bob --agent codex-bob --store "$TEAM_STORE" --json > "$TEAM_RUN_HANDOFF"
+grep -q '"command": "team.run.handoff"' "$TEAM_RUN_HANDOFF"
+grep -q '"run": {' "$TEAM_RUN_HANDOFF"
 cargo run -p mneme-cli -- team sync export "$TEAM_SYNC" --actor bob --agent codex-bob --include-projects --store "$TEAM_STORE" --json > "$TEAM_SYNC_EXPORT"
 grep -q '"command": "team.sync.export"' "$TEAM_SYNC_EXPORT"
 grep -q '"schema_version": "mneme.team_sync.v1"' "$TEAM_SYNC"
+cargo run -p mneme-cli -- team promotion report team-promotion-001 --store "$TEAM_STORE" --json | grep -q '"command": "team.promotion.report"'
 cargo run -p mneme-cli -- team sync import "$TEAM_SYNC" --store "$TEAM_STORE" --json | grep -q '"mode": "dry_run"'
 cargo run -p mneme-cli -- team firewall --store "$TEAM_STORE" --json > "$TEAM_FIREWALL"
 grep -q '"command": "team.firewall"' "$TEAM_FIREWALL"
 grep -q '"ok": true' "$TEAM_FIREWALL"
+cargo run -p mneme-cli -- team quality --store "$TEAM_STORE" --json > "$TEAM_QUALITY"
+grep -q '"command": "team.quality"' "$TEAM_QUALITY"
+grep -q '"health"' "$TEAM_QUALITY"
 cargo run -p mneme-cli -- team ontology --store "$TEAM_STORE" --json > "$TEAM_ONTOLOGY"
 grep -q '"command": "team.ontology"' "$TEAM_ONTOLOGY"
 grep -q '"relation_count"' "$TEAM_ONTOLOGY"
@@ -872,7 +892,7 @@ cargo run -p mneme-eval -- v2-readiness \
 grep -q '"command": "v2-readiness"' "$V2_READINESS_STDOUT"
 grep -q '"readiness_status": "ready_for_team_v2_dogfood"' "$V2_READINESS_REPORT"
 grep -q '"suite": "team"' "$V2_READINESS_REPORT"
-grep -q '"scenario_count": 9' "$V2_READINESS_REPORT"
+grep -q '"scenario_count": 10' "$V2_READINESS_REPORT"
 
 MNEME_DOGFOOD_RUN_LABEL="quality-gate" \
 MNEME_DOGFOOD_OUT_DIR="$DOGFOOD_OUT_DIR" \

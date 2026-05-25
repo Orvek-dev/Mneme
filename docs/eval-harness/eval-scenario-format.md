@@ -341,6 +341,24 @@ Each expected claim requires:
 - `curation.before_quality`: quality expectations before curation.
 - `curation.after_quality`: quality expectations after curation.
 
+Team scenarios use `team_flow` and `expected.team`.
+
+- `team_flow.users`, `agents`, and `projects`: local v2 workspace setup.
+- `team_flow.memories`: scoped memory writes with `actor`, `text`, and `scope`.
+- `team_flow.promotions` and `reviews`: promotion candidate and review actions.
+- `team_flow.runs`: task-run workflows with `task`, optional `query`/`scope`,
+  run `notes`, optional `end` summary/next/remember fields, and optional
+  `handoff`.
+- `team_flow.contexts`: actor-scoped context retrieval checks.
+- `expected.team.run_count`, `open_run_count`, and `closed_run_count`: run
+  lifecycle expectations.
+- `expected.team.sync_checksum_verified`: requires exported sync envelope
+  checksum verification during dry-run inspection.
+- `expected.team.quality_ok`, `quality_duplicate_group_count`, and
+  `quality_conflict_group_count`: quality-report expectations.
+- `expected.team.full_output_must_not_include`: scans context, sync, handoff,
+  firewall, ontology, run, and quality JSON surfaces for leak strings.
+
 Unknown fields are rejected. This keeps public fixtures strict enough for long
 term compatibility.
 

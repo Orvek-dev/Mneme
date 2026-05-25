@@ -4,6 +4,29 @@ This project follows the spirit of Keep a Changelog.
 
 ## Unreleased
 
+## [0.63.0] - 2026-05-25
+
+### Added
+
+- Added v2 task-run lifecycle APIs and CLI commands for `team run begin`,
+  `team run note`, `team run end`, and `team run handoff`.
+- Added run-anchored handoff packages so agents can transfer a closed task
+  with cited context, sync payload, firewall, quality, and ontology reports.
+- Added v2 team-memory quality reports for duplicate active memory, conflicting
+  active memory, promoted-source cleanup, pending review, and run state.
+- Added promotion review reports that flag missing, unsafe, already-team, and
+  duplicate-team-memory risks before approval.
+- Added sync envelope IDs, stable checksums, and dry-run diff summaries for
+  connector import inspection.
+- Expanded the MCP stdio adapter with run, quality, and promotion-report tools.
+
+### Changed
+
+- Expanded the public v2 team suite from 9 to 10 scenarios with run lifecycle,
+  quality conflict detection, and sync checksum coverage.
+- Updated v2 dogfood scorecards and quality gate checks for the expanded team
+  adapter surface.
+
 ## [0.62.0] - 2026-05-25
 
 ### Security

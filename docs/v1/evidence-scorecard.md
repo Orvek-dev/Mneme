@@ -3,7 +3,7 @@
 This scorecard uses GitHub-native Markdown so the public evidence summary stays
 readable without generated images or renderer-specific SVG behavior.
 
-Measured for `v0.62.0` on 2026-05-25.
+Measured for `v0.63.0` on 2026-05-25.
 
 ## Summary
 
@@ -11,10 +11,10 @@ Measured for `v0.62.0` on 2026-05-25.
 | --- | --- | --- |
 | Ontology readiness | 13 golden ontology cases | `v1_ontology_ready` |
 | Hard dogfood | 100 normal records, 150 adversarial records, 30 agent handoff workflows | `30/30` workflows passed |
-| Public scenario suites | `core`, `runtime`, `agent`, `dogfood`, `model`, `team` | `45` public scenarios passed through quality gates |
+| Public scenario suites | `core`, `runtime`, `agent`, `dogfood`, `model`, `team` | `46` public scenarios passed through quality gates |
 | Safety guardrails | scope leak and secret leak checks | `0` scope leaks, `0` secret leaks |
 | Seeded faults | dropped citation, scope leak, secret leak, stale reuse, handoff miss | `5/5` detected |
-| Team v2 privacy | actor-scoped context, handoff, sync, ontology, and firewall surfaces | `9/9` team scenarios passed; full-output leak checks passed |
+| Team v2 privacy | actor-scoped context, handoff, sync, ontology, firewall, run, and quality surfaces | `10/10` team scenarios passed; full-output leak checks passed |
 
 ## Metric Bars
 
@@ -29,7 +29,7 @@ Measured for `v0.62.0` on 2026-05-25.
 | Scope Leak | `[----------] 0` |
 | Secret Leak | `[----------] 0` |
 | Seeded Fault Detection | `[##########] 5/5` |
-| V2 Team Readiness | `[##########] 9/9` |
+| V2 Team Readiness | `[##########] 10/10` |
 
 ## What This Means
 

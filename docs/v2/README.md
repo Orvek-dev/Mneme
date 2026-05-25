@@ -24,12 +24,16 @@ hosted sync, server deployment, and UI are still future work.
 - Connector-safe sync envelopes that omit private, agent-private, blocked, and
   quarantined memory.
 - Agent handoff packages with context, sync payload, firewall report, and
-  ontology projection.
+- quality report, and ontology projection.
+- Task-run lifecycle for `begin`, `note`, `end`, and run-anchored handoff.
+- Quality reports for duplicate memory, active conflicts, pending promotions,
+  promoted-source cleanup, and run state.
+- Sync envelope IDs, stable checksums, and import diff summaries.
 - Entity/relation/attribute ontology reports for team state.
 - A thin stdio bridge for MCP-style agent runtime integration.
 - A v2 eval suite and readiness gate for ACL leaks, secret leaks, promotion
-  review, citation coverage, revoked-agent denial, sync privacy, handoff, and
-  quarantine behavior.
+  review, citation coverage, revoked-agent denial, sync privacy, handoff, run
+  lifecycle, quality checks, checksum verification, and quarantine behavior.
 
 ## Quick Start
 
@@ -46,12 +50,29 @@ cargo run -p mneme-cli -- team promote team-memory-001 --actor bob --agent codex
 cargo run -p mneme-cli -- team review team-promotion-001 --actor alice --approve
 cargo run -p mneme-cli -- team context "rollback notes" --actor alice --json
 cargo run -p mneme-cli -- team handoff "rollback notes" --actor bob --agent codex-bob --json
+cargo run -p mneme-cli -- team run begin "Atlas deploy handoff" \
+  --actor bob \
+  --agent codex-bob \
+  --query "rollback notes" \
+  --scope project:atlas \
+  --json
+cargo run -p mneme-cli -- team run end team-run-001 \
+  --actor bob \
+  --agent codex-bob \
+  --summary "Rollback owner confirmed" \
+  --next "Run smoke test" \
+  --json
+cargo run -p mneme-cli -- team run handoff team-run-001 \
+  --actor bob \
+  --agent codex-bob \
+  --json
 cargo run -p mneme-cli -- team sync export /tmp/mneme-team-sync.json \
   --actor bob \
   --agent codex-bob \
   --include-projects \
   --json
 cargo run -p mneme-cli -- team firewall --json
+cargo run -p mneme-cli -- team quality --json
 cargo run -p mneme-cli -- team ontology --actor bob --agent codex-bob --json
 ```
 
@@ -70,7 +91,7 @@ scripts/v2-team-dogfood.py --check-dataset
 scripts/v2-team-dogfood.py --check-seeded-faults
 ```
 
-The readiness gate currently requires nine public-safe team scenarios and
+The readiness gate currently requires ten public-safe team scenarios and
 seeded-fault detection for ACL bypass, secret leak, dropped citations,
 unapproved promotion, ignored revocation, and quarantined-memory leakage.
 
@@ -83,6 +104,9 @@ Implemented:
 - `mneme team ...` CLI;
 - connector-safe sync export/import;
 - agent handoff packages;
+- task-run lifecycle and run-anchored handoff;
+- team memory quality and promotion review reports;
+- sync checksums and import diff summaries;
 - firewall and ontology reports;
 - CLI adapter manifest and `scripts/mneme-mcp-stdio.py`;
 - `mneme-v2` eval target;

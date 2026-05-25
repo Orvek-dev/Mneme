@@ -125,6 +125,7 @@ pub(crate) struct TeamFlow {
     pub(crate) reviews: Vec<TeamFlowReview>,
     pub(crate) revoke_users: Vec<TeamFlowRevocation>,
     pub(crate) revoke_agents: Vec<TeamFlowRevocation>,
+    pub(crate) runs: Vec<TeamFlowRun>,
     pub(crate) contexts: Vec<TeamFlowContext>,
 }
 
@@ -197,7 +198,35 @@ pub(crate) struct TeamFlowContext {
     pub(crate) max_items: Option<usize>,
 }
 
+#[derive(Debug, Clone, Default, Deserialize, Serialize)]
+#[serde(default, deny_unknown_fields)]
+pub(crate) struct TeamFlowRun {
+    pub(crate) actor: TeamFlowActor,
+    pub(crate) task: String,
+    pub(crate) query: Option<String>,
+    pub(crate) scope: Option<String>,
+    pub(crate) notes: Vec<TeamFlowRunNote>,
+    pub(crate) end: Option<TeamFlowRunEnd>,
+    pub(crate) handoff: bool,
+}
+
 #[derive(Debug, Clone, Deserialize, Serialize)]
+#[serde(deny_unknown_fields)]
+pub(crate) struct TeamFlowRunNote {
+    pub(crate) text: String,
+    pub(crate) scope: String,
+}
+
+#[derive(Debug, Clone, Default, Deserialize, Serialize)]
+#[serde(default, deny_unknown_fields)]
+pub(crate) struct TeamFlowRunEnd {
+    pub(crate) summary: String,
+    pub(crate) next: Vec<String>,
+    pub(crate) remember: Vec<String>,
+    pub(crate) scope: Option<String>,
+}
+
+#[derive(Debug, Clone, Default, Deserialize, Serialize)]
 #[serde(deny_unknown_fields)]
 pub(crate) struct TeamFlowActor {
     pub(crate) user_id: String,
@@ -335,6 +364,9 @@ pub(crate) struct TeamExpected {
     pub(crate) blocked_secret_count: Option<usize>,
     pub(crate) quarantined_count: Option<usize>,
     pub(crate) promotion_count: Option<usize>,
+    pub(crate) run_count: Option<usize>,
+    pub(crate) open_run_count: Option<usize>,
+    pub(crate) closed_run_count: Option<usize>,
     pub(crate) pending_promotion_count: Option<usize>,
     pub(crate) approved_promotion_count: Option<usize>,
     pub(crate) rejected_promotion_count: Option<usize>,
@@ -343,12 +375,16 @@ pub(crate) struct TeamExpected {
     pub(crate) secret_leak_count: Option<usize>,
     pub(crate) sync_memory_count: Option<usize>,
     pub(crate) sync_omitted_count: Option<usize>,
+    pub(crate) sync_checksum_verified: Option<bool>,
     pub(crate) handoff_context_item_count: Option<usize>,
     pub(crate) firewall_ok: Option<bool>,
     pub(crate) firewall_high_count: Option<usize>,
     pub(crate) ontology_entity_count: Option<usize>,
     pub(crate) ontology_relation_count: Option<usize>,
     pub(crate) ontology_attribute_count: Option<usize>,
+    pub(crate) quality_ok: Option<bool>,
+    pub(crate) quality_duplicate_group_count: Option<usize>,
+    pub(crate) quality_conflict_group_count: Option<usize>,
     pub(crate) context_item_count: Option<usize>,
     pub(crate) context_must_include: Vec<String>,
     pub(crate) context_must_not_include: Vec<String>,
@@ -705,6 +741,50 @@ fn validate_team_flow(team_flow: &TeamFlow, scenario_id: &str) -> Result<(), Eva
                 "scenario {scenario_id} team_flow context {} has zero max_items",
                 idx + 1
             )));
+        }
+    }
+    for (idx, run) in team_flow.runs.iter().enumerate() {
+        validate_team_actor(&run.actor, scenario_id, "run", idx + 1)?;
+        if run.task.trim().is_empty() {
+            return Err(EvalError::scenario(format!(
+                "scenario {scenario_id} team_flow run {} has empty task",
+                idx + 1
+            )));
+        }
+        if run
+            .query
+            .as_ref()
+            .is_some_and(|query| query.trim().is_empty())
+        {
+            return Err(EvalError::scenario(format!(
+                "scenario {scenario_id} team_flow run {} has empty query",
+                idx + 1
+            )));
+        }
+        for (note_idx, note) in run.notes.iter().enumerate() {
+            if note.text.trim().is_empty() || note.scope.trim().is_empty() {
+                return Err(EvalError::scenario(format!(
+                    "scenario {scenario_id} team_flow run {} note {} must include text and scope",
+                    idx + 1,
+                    note_idx + 1
+                )));
+            }
+        }
+        if let Some(end) = &run.end {
+            if end.summary.trim().is_empty() {
+                return Err(EvalError::scenario(format!(
+                    "scenario {scenario_id} team_flow run {} end has empty summary",
+                    idx + 1
+                )));
+            }
+            if end.next.iter().any(|value| value.trim().is_empty())
+                || end.remember.iter().any(|value| value.trim().is_empty())
+            {
+                return Err(EvalError::scenario(format!(
+                    "scenario {scenario_id} team_flow run {} end next/remember entries must not be empty",
+                    idx + 1
+                )));
+            }
         }
     }
     Ok(())

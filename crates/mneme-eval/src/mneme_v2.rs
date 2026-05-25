@@ -2,6 +2,7 @@ use mneme_core::{
     validate_team_state, TeamActor, TeamAgentInput, TeamContextPack, TeamContextQuery,
     TeamMemoryConfig, TeamMemoryEngine, TeamMemoryStatus, TeamProjectInput,
     TeamPromotionCreateInput, TeamPromotionReviewInput, TeamPromotionStatus, TeamRole,
+    TeamRunBeginInput, TeamRunEndInput, TeamRunHandoffInput, TeamRunNoteInput, TeamRunStatus,
     TeamSyncExportInput, TeamUserInput, DEFAULT_TEAM_CONTEXT_MAX_ITEMS,
 };
 
@@ -136,6 +137,78 @@ fn run_team_flow(scenario: &Scenario, options: TargetRunOptions) -> Result<Actua
             Err(_) => denied_count += 1,
         }
     }
+    for run in &flow.runs {
+        let actor = team_actor(&run.actor);
+        match engine.begin_run(TeamRunBeginInput {
+            actor: actor.clone(),
+            task: run.task.clone(),
+            query: run.query.clone(),
+            scope: run.scope.clone(),
+            max_items: Some(DEFAULT_TEAM_CONTEXT_MAX_ITEMS),
+        }) {
+            Ok(begin) => {
+                push_json_surface(&mut serialized_surface_parts, "run_begin", &begin);
+                last_context_actor = Some(actor.clone());
+                last_context_query = Some(begin.run.context_query.clone());
+                last_context_pack = Some(begin.context_pack);
+                let run_id = begin.run.id.clone();
+                for note in &run.notes {
+                    match engine.note_run(TeamRunNoteInput {
+                        actor: actor.clone(),
+                        run_id: run_id.clone(),
+                        text: note.text.clone(),
+                        scope: note.scope.clone(),
+                    }) {
+                        Ok(note_report) => {
+                            push_json_surface(
+                                &mut serialized_surface_parts,
+                                "run_note",
+                                &note_report,
+                            );
+                        }
+                        Err(_) => denied_count += 1,
+                    }
+                }
+                if let Some(end) = &run.end {
+                    match engine.end_run(TeamRunEndInput {
+                        actor: actor.clone(),
+                        run_id: run_id.clone(),
+                        summary: end.summary.clone(),
+                        next_steps: end.next.clone(),
+                        remember: end.remember.clone(),
+                        scope: end.scope.clone(),
+                    }) {
+                        Ok(end_report) => {
+                            push_json_surface(
+                                &mut serialized_surface_parts,
+                                "run_end",
+                                &end_report,
+                            );
+                        }
+                        Err(_) => denied_count += 1,
+                    }
+                }
+                if run.handoff {
+                    match engine.build_run_handoff_package(TeamRunHandoffInput {
+                        actor: actor.clone(),
+                        run_id,
+                        query: run.query.clone(),
+                        max_items: Some(DEFAULT_TEAM_CONTEXT_MAX_ITEMS),
+                    }) {
+                        Ok(handoff) => {
+                            push_json_surface(
+                                &mut serialized_surface_parts,
+                                "run_handoff",
+                                &handoff,
+                            );
+                        }
+                        Err(_) => denied_count += 1,
+                    }
+                }
+            }
+            Err(_) => denied_count += 1,
+        }
+    }
     for context in &flow.contexts {
         let actor = team_actor(&context.actor);
         last_context_actor = Some(actor.clone());
@@ -151,6 +224,7 @@ fn run_team_flow(scenario: &Scenario, options: TargetRunOptions) -> Result<Actua
 
     let mut sync_memory_count = 0usize;
     let mut sync_omitted_count = 0usize;
+    let mut sync_checksum_verified = false;
     let mut handoff_context_item_count = 0usize;
     if let (Some(actor), Some(query)) = (&last_context_actor, &last_context_query) {
         if let Ok(envelope) = engine.export_sync_envelope(TeamSyncExportInput {
@@ -159,7 +233,10 @@ fn run_team_flow(scenario: &Scenario, options: TargetRunOptions) -> Result<Actua
         }) {
             sync_memory_count = envelope.memories.len();
             sync_omitted_count = envelope.omitted.len();
+            let report = engine.apply_sync_envelope(envelope.clone(), false, None);
+            sync_checksum_verified = report.checksum_verified;
             push_json_surface(&mut serialized_surface_parts, "sync_envelope", &envelope);
+            push_json_surface(&mut serialized_surface_parts, "sync_dry_run", &report);
         }
         if let Ok(handoff) = engine.build_handoff_package(TeamContextQuery {
             actor: actor.clone(),
@@ -172,8 +249,10 @@ fn run_team_flow(scenario: &Scenario, options: TargetRunOptions) -> Result<Actua
     }
     let firewall = engine.firewall_report();
     let ontology = engine.ontology_report();
+    let quality = engine.quality_report();
     push_json_surface(&mut serialized_surface_parts, "firewall", &firewall);
     push_json_surface(&mut serialized_surface_parts, "ontology", &ontology);
+    push_json_surface(&mut serialized_surface_parts, "quality", &quality);
 
     let state = engine.state();
     let validation = validate_team_state(&state);
@@ -196,6 +275,16 @@ fn run_team_flow(scenario: &Scenario, options: TargetRunOptions) -> Result<Actua
         .promotions
         .iter()
         .filter(|promotion| promotion.status == TeamPromotionStatus::Pending)
+        .count();
+    let open_run_count = state
+        .runs
+        .iter()
+        .filter(|run| run.status == TeamRunStatus::Open)
+        .count();
+    let closed_run_count = state
+        .runs
+        .iter()
+        .filter(|run| run.status == TeamRunStatus::Closed)
         .count();
     let approved_promotion_count = state
         .promotions
@@ -221,6 +310,9 @@ fn run_team_flow(scenario: &Scenario, options: TargetRunOptions) -> Result<Actua
         blocked_secret_count,
         quarantined_count,
         promotion_count: state.promotions.len(),
+        run_count: state.runs.len(),
+        open_run_count,
+        closed_run_count,
         pending_promotion_count,
         approved_promotion_count,
         rejected_promotion_count,
@@ -229,12 +321,16 @@ fn run_team_flow(scenario: &Scenario, options: TargetRunOptions) -> Result<Actua
         secret_leak_count: 0,
         sync_memory_count,
         sync_omitted_count,
+        sync_checksum_verified,
         handoff_context_item_count,
         firewall_ok: firewall.ok,
         firewall_high_count: firewall.high_count,
         ontology_entity_count: ontology.entity_count,
         ontology_relation_count: ontology.relation_count,
         ontology_attribute_count: ontology.attribute_count,
+        quality_ok: quality.ok,
+        quality_duplicate_group_count: quality.duplicate_group_count,
+        quality_conflict_group_count: quality.conflict_group_count,
         serialized_surface: serialized_surface_parts.join("\n"),
         context_pack: team_context.take(),
     };

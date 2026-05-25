@@ -8,10 +8,12 @@ The v2 core is designed around a small control plane:
 | Agents | Bind an agent to the user it acts for. |
 | Projects | Define project-scoped memory membership. |
 | Memory | Store active, blocked-secret, or quarantined team-aware records. |
+| Run | Anchor task sessions, notes, summaries, next steps, and handoff. |
 | Promotion | Move private/project memory into team memory only after review. |
 | Sync | Move only connector-safe records through a public envelope. |
 | Handoff | Package allowed context for the next agent. |
 | Firewall | Flag active memory that should have been blocked or quarantined. |
+| Quality | Flag duplicates, conflicts, pending review, promoted-source cleanup, and run state. |
 | Ontology | Project state into entities, relations, and attributes. |
 | Audit | Preserve policy decisions for inspection and regression tests. |
 
@@ -42,6 +44,40 @@ Approval creates a new `team` memory that keeps:
 - reviewer attribution;
 - promotion audit records.
 
+`mneme team promotion report <promotion-id>` gives reviewers a small risk report
+before approval. It flags missing source memory, unsafe source text, already
+team-visible memory, and duplicate team memory.
+
+## Task Runs
+
+Runs make v2 useful for actual team/agent work rather than only loose memory
+records.
+
+```sh
+mneme team run begin "Atlas deploy handoff" --actor bob --agent codex-bob \
+  --query "rollback notes" --scope project:atlas --json
+mneme team run note team-run-001 "remember: Atlas deploy uses smoke test" \
+  --actor bob --agent codex-bob --scope project:atlas --json
+mneme team run end team-run-001 --actor bob --agent codex-bob \
+  --summary "Deploy checklist reviewed" --next "Run smoke test" --json
+mneme team run handoff team-run-001 --actor bob --agent codex-bob --json
+```
+
+The run handoff package includes the run record, actor-scoped context,
+connector-safe sync envelope, firewall report, quality report, and ontology
+projection.
+
+## Quality Rule
+
+`mneme team quality` is the local release/handoff guard for team memory. It
+reports:
+
+- duplicate active memory by normalized text and scope;
+- conflicting active memory using deterministic polarity heuristics;
+- source memories that have already produced team memory;
+- pending promotions awaiting review;
+- open and closed run counts.
+
 ## Evaluation Contract
 
 The committed v2 suite checks:
@@ -55,6 +91,10 @@ The committed v2 suite checks:
 - connector sync excludes private/quarantined memory and scans full JSON output
   for privacy leaks;
 - handoff packages include only cited, policy-allowed memory;
+- run lifecycle opens context, records notes, closes with next steps, and
+  builds run-anchored handoff;
+- quality checks catch duplicate/conflicting active memory;
+- sync checksums are verified during dry-run/apply inspection;
 - ontology projection exposes actor-readable team entities, relations, and
   attributes.
 
@@ -74,7 +114,9 @@ The committed v2 suite checks:
 `mneme team sync export` writes a `mneme.team_sync.v1` envelope. It includes
 active team memory and actor-readable project memory, sanitized supporting
 events, and only the minimal user, agent, project, and promotion metadata needed
-to resolve exported records. Raw audit trails are not exported.
+to resolve exported records. Raw audit trails are not exported. Each envelope
+also carries an ID and checksum so imports can expose a deterministic dry-run
+diff and reject tampered payloads.
 
 The envelope deliberately excludes:
 
@@ -95,6 +137,7 @@ validation all pass.
 - the actor-scoped context pack;
 - a connector-safe sync envelope for downstream tools;
 - the current firewall report;
+- the current quality report;
 - the actor-scoped ontology projection.
 
 This is the intended boundary for coding agents that hand work from one agent

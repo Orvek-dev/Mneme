@@ -816,6 +816,30 @@ fn check_team(expected: &TeamExpected, actual: &ActualState) -> Vec<CheckReport>
             "actual.team",
         ));
     }
+    if let Some(count) = expected.run_count {
+        checks.push(check_quality_count(
+            "team.run_count",
+            count,
+            team.run_count,
+            "actual.team",
+        ));
+    }
+    if let Some(count) = expected.open_run_count {
+        checks.push(check_quality_count(
+            "team.open_run_count",
+            count,
+            team.open_run_count,
+            "actual.team",
+        ));
+    }
+    if let Some(count) = expected.closed_run_count {
+        checks.push(check_quality_count(
+            "team.closed_run_count",
+            count,
+            team.closed_run_count,
+            "actual.team",
+        ));
+    }
     if let Some(count) = expected.pending_promotion_count {
         checks.push(check_quality_count(
             "team.pending_promotion_count",
@@ -880,6 +904,14 @@ fn check_team(expected: &TeamExpected, actual: &ActualState) -> Vec<CheckReport>
             "actual.team",
         ));
     }
+    if let Some(expected_value) = expected.sync_checksum_verified {
+        checks.push(check_bool(
+            "team.sync_checksum_verified",
+            expected_value,
+            team.sync_checksum_verified,
+            "actual.team",
+        ));
+    }
     if let Some(count) = expected.handoff_context_item_count {
         checks.push(check_quality_count(
             "team.handoff_context_item_count",
@@ -925,6 +957,30 @@ fn check_team(expected: &TeamExpected, actual: &ActualState) -> Vec<CheckReport>
             "team.ontology_attribute_count",
             count,
             team.ontology_attribute_count,
+            "actual.team",
+        ));
+    }
+    if let Some(expected_value) = expected.quality_ok {
+        checks.push(check_bool(
+            "team.quality_ok",
+            expected_value,
+            team.quality_ok,
+            "actual.team",
+        ));
+    }
+    if let Some(count) = expected.quality_duplicate_group_count {
+        checks.push(check_quality_count(
+            "team.quality_duplicate_group_count",
+            count,
+            team.quality_duplicate_group_count,
+            "actual.team",
+        ));
+    }
+    if let Some(count) = expected.quality_conflict_group_count {
+        checks.push(check_quality_count(
+            "team.quality_conflict_group_count",
+            count,
+            team.quality_conflict_group_count,
             "actual.team",
         ));
     }

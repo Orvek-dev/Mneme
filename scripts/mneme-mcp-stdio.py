@@ -60,6 +60,69 @@ TOOLS = [
         },
     },
     {
+        "name": "mneme_team_run_begin",
+        "description": "Open a Mneme v2 team task run with actor-scoped context.",
+        "inputSchema": {
+            "type": "object",
+            "required": ["task", "actor"],
+            "properties": {
+                "task": {"type": "string"},
+                "query": {"type": "string"},
+                "scope": {"type": "string"},
+                "actor": {"type": "string"},
+                "agent": {"type": "string"},
+                "max_items": {"type": "integer"},
+            },
+        },
+    },
+    {
+        "name": "mneme_team_run_note",
+        "description": "Attach scoped memory to an open Mneme v2 team task run.",
+        "inputSchema": {
+            "type": "object",
+            "required": ["run_id", "text", "actor", "scope"],
+            "properties": {
+                "run_id": {"type": "string"},
+                "text": {"type": "string"},
+                "actor": {"type": "string"},
+                "agent": {"type": "string"},
+                "scope": {"type": "string"},
+            },
+        },
+    },
+    {
+        "name": "mneme_team_run_end",
+        "description": "Close a Mneme v2 team task run with summary and next steps.",
+        "inputSchema": {
+            "type": "object",
+            "required": ["run_id", "summary", "actor"],
+            "properties": {
+                "run_id": {"type": "string"},
+                "summary": {"type": "string"},
+                "actor": {"type": "string"},
+                "agent": {"type": "string"},
+                "next": {"type": "array", "items": {"type": "string"}},
+                "remember": {"type": "array", "items": {"type": "string"}},
+                "scope": {"type": "string"},
+            },
+        },
+    },
+    {
+        "name": "mneme_team_run_handoff",
+        "description": "Build a policy-filtered handoff package for a Mneme v2 team task run.",
+        "inputSchema": {
+            "type": "object",
+            "required": ["run_id", "actor"],
+            "properties": {
+                "run_id": {"type": "string"},
+                "query": {"type": "string"},
+                "actor": {"type": "string"},
+                "agent": {"type": "string"},
+                "max_items": {"type": "integer"},
+            },
+        },
+    },
+    {
         "name": "mneme_team_promote",
         "description": "Create a reviewable team-memory promotion candidate.",
         "inputSchema": {
@@ -71,6 +134,15 @@ TOOLS = [
                 "agent": {"type": "string"},
                 "note": {"type": "string"},
             },
+        },
+    },
+    {
+        "name": "mneme_team_promotion_report",
+        "description": "Inspect promotion quality and reviewer risk.",
+        "inputSchema": {
+            "type": "object",
+            "required": ["promotion_id"],
+            "properties": {"promotion_id": {"type": "string"}},
         },
     },
     {
@@ -90,6 +162,11 @@ TOOLS = [
     {
         "name": "mneme_team_firewall",
         "description": "Scan active team memory for leakage or poisoning risk.",
+        "inputSchema": {"type": "object", "properties": {}},
+    },
+    {
+        "name": "mneme_team_quality",
+        "description": "Analyze duplicates, conflicts, stale sources, pending review, and run state.",
         "inputSchema": {"type": "object", "properties": {}},
     },
     {
@@ -138,7 +215,7 @@ def handle_request(request: dict[str, Any]) -> dict[str, Any]:
             {
                 "protocolVersion": "2024-11-05",
                 "capabilities": {"tools": {}},
-                "serverInfo": {"name": "mneme-team-memory", "version": "0.62.0"},
+                "serverInfo": {"name": "mneme-team-memory", "version": "0.63.0"},
             },
         )
     if method == "tools/list":
@@ -160,17 +237,44 @@ def call_tool(name: str, arguments: dict[str, Any]) -> dict[str, Any]:
         output = run_mneme(["team", "remember", require(arguments, "text"), *actor_args(arguments), "--scope", require(arguments, "scope")])
     elif name == "mneme_team_handoff":
         output = run_mneme(["team", "handoff", require(arguments, "query"), *actor_args(arguments), *max_args(arguments)])
+    elif name == "mneme_team_run_begin":
+        command = ["team", "run", "begin", require(arguments, "task"), *actor_args(arguments), *max_args(arguments)]
+        if arguments.get("query"):
+            command.extend(["--query", str(arguments["query"])])
+        if arguments.get("scope"):
+            command.extend(["--scope", str(arguments["scope"])])
+        output = run_mneme(command)
+    elif name == "mneme_team_run_note":
+        output = run_mneme(["team", "run", "note", require(arguments, "run_id"), require(arguments, "text"), *actor_args(arguments), "--scope", require(arguments, "scope")])
+    elif name == "mneme_team_run_end":
+        command = ["team", "run", "end", require(arguments, "run_id"), *actor_args(arguments), "--summary", require(arguments, "summary")]
+        for value in arguments.get("next") or []:
+            command.extend(["--next", str(value)])
+        for value in arguments.get("remember") or []:
+            command.extend(["--remember", str(value)])
+        if arguments.get("scope"):
+            command.extend(["--scope", str(arguments["scope"])])
+        output = run_mneme(command)
+    elif name == "mneme_team_run_handoff":
+        command = ["team", "run", "handoff", require(arguments, "run_id"), *actor_args(arguments), *max_args(arguments)]
+        if arguments.get("query"):
+            command.extend(["--query", str(arguments["query"])])
+        output = run_mneme(command)
     elif name == "mneme_team_promote":
         command = ["team", "promote", require(arguments, "memory_id"), *actor_args(arguments)]
         if arguments.get("note"):
             command.extend(["--note", str(arguments["note"])])
         output = run_mneme(command)
+    elif name == "mneme_team_promotion_report":
+        output = run_mneme(["team", "promotion", "report", require(arguments, "promotion_id")])
     elif name == "mneme_team_review":
         command = ["team", "review", require(arguments, "promotion_id"), *actor_args(arguments)]
         command.append("--approve" if bool(arguments.get("approve")) else "--reject")
         output = run_mneme(command)
     elif name == "mneme_team_firewall":
         output = run_mneme(["team", "firewall"])
+    elif name == "mneme_team_quality":
+        output = run_mneme(["team", "quality"])
     elif name == "mneme_team_ontology":
         output = run_mneme(["team", "ontology", *actor_args(arguments)])
     else:

@@ -68,9 +68,9 @@ privacy, provenance, scope discipline, and repeatable agent-memory evaluation.
 | Ontology readiness | 13 golden ontology cases | `1.00` entity/relation/attribute F1, `v1_ontology_ready` |
 | Hard dogfood | 100 normal records, 150 adversarial records, 30 agent handoffs | `30/30` workflows passed |
 | Safety guardrails | scope leak and secret leak checks | `0` scope leaks, `0` secret leaks |
-| Public eval surface | core, runtime, agent, dogfood, model, and team suites | `45` public scenarios |
+| Public eval surface | core, runtime, agent, dogfood, model, and team suites | `46` public scenarios |
 | Regression detection | seeded dropped-citation, scope, secret, stale, handoff, and quarantine faults | `6/6` v2 faults detected |
-| Team v2 readiness | ACL, promotion, revoke, secret, citation, sync, firewall, handoff, and ontology checks | `9/9` team scenarios passed, `6/6` v2 seeded faults detected |
+| Team v2 readiness | ACL, promotion, revoke, secret, citation, sync, firewall, handoff, run, quality, checksum, and ontology checks | `10/10` team scenarios passed, `6/6` v2 seeded faults detected |
 
 For a GitHub-native scorecard with metric bars and reproducibility notes, see
 [Mneme v1 Evidence Scorecard](docs/v1/evidence-scorecard.md).
@@ -136,9 +136,14 @@ Mneme is pre-1.0. The useful surface today is local development and evaluation:
 - v2 team memory supports local users, agents, projects, scoped memory,
   reviewed promotion into team memory, admin revoke, audit records, secret
   blocking, memory-poisoning quarantine, and team context packs;
+- v2 task runs can open scoped work with context, attach run notes, close with
+  summaries and next steps, and produce run-anchored handoff packages;
+- v2 quality reports identify duplicate active memory, conflicting active
+  memory, pending promotions, promoted-source cleanup, and open/closed run
+  state before handoff;
 - v2 connector workflows can export/import public-safe sync envelopes, build
-  handoff packages, scan the memory firewall, project an ontology, and expose
-  a CLI adapter manifest;
+  handoff packages, scan the memory firewall, project an ontology, inspect
+  sync diffs and checksums, and expose a CLI adapter manifest;
 - `scripts/mneme-mcp-stdio.py` exposes a thin MCP-style stdio bridge over the
   same v2 team CLI surface for agent runtimes;
 - v2 readiness can be checked through the public `team` suite, `mneme-v2`
@@ -217,10 +222,14 @@ Useful v2 connector commands:
 
 ```sh
 mneme team handoff "handoff query" --actor bob --agent codex-bob --json
+mneme team run begin "handoff task" --actor bob --agent codex-bob --query "handoff query" --scope project:atlas --json
+mneme team run end team-run-001 --actor bob --agent codex-bob --summary "Done" --next "Verify smoke test" --json
+mneme team run handoff team-run-001 --actor bob --agent codex-bob --json
 mneme team sync export /tmp/mneme-team-sync.json --actor bob --agent codex-bob --include-projects --json
 mneme team sync import /tmp/mneme-team-sync.json --json
 mneme team sync import /tmp/mneme-team-sync.json --apply --actor alice --json
 mneme team firewall --json
+mneme team quality --json
 mneme team ontology --actor bob --agent codex-bob --json
 scripts/mneme-mcp-stdio.py --self-test
 ```
@@ -317,7 +326,7 @@ cargo run -p mneme-eval -- dogfood-summary --help
 
 ## Evaluation Evidence
 
-The latest public-safe local evidence snapshot was measured for `v0.62.0` on
+The latest public-safe local evidence snapshot was measured for `v0.63.0` on
 2026-05-25. These numbers are reproducible development evidence for Mneme,
 not claims against external production workloads. Full run bundles are ignored
 by git; the committed fixtures and scripts are safe to inspect and rerun.
@@ -327,13 +336,13 @@ The same evidence is summarized in the GitHub-native
 
 | Surface | Public-safe data | Latest result |
 | --- | --- | --- |
-| Scenario suites | 45 public scenarios across `core`, `runtime`, `agent`, `dogfood`, `model`, and `team` | validation, replay, acceptance, baseline, regression, and candidate gates passed in `quality-gate` |
+| Scenario suites | 46 public scenarios across `core`, `runtime`, `agent`, `dogfood`, `model`, and `team` | validation, replay, acceptance, baseline, regression, and candidate gates passed in `quality-gate` |
 | Manual dogfood | 100 synthetic records and 25 workflow checks | fixture shape verified in CI; full evidence remains local-only |
 | Hard dogfood | 100 normal records, 150 adversarial records, 30 agent handoff workflows | `30/30` workflows passed; `Recall@K=1.0`, `Precision@K=1.0`, `citation_coverage=1.0`, `handoff_success=1.0`, `scope_leak=0`, `secret_leak=0` |
 | Seeded faults | dropped citation, scope leak, secret leak, stale reuse, handoff miss | `5/5` detected |
 | Candidate bridge | hard-mode findings mirrored into official candidate YAML | `5/5` candidates valid with `mneme-eval candidate-check` |
 | Ontology benchmark | 13 golden ontology cases: 10 natural-language, 3 explicit-marker anchors | current v1 reports `ontology_benchmark_passed` and `v1_ontology_ready`: `entity_f1=1.0`, `relation_f1=1.0`, `attribute_f1=1.0`, `scope_accuracy=1.0`, `temporal_correctness=1.0`, `provenance_coverage=1.0`, `context_recall_at_k=1.0`, `scope_leak=0`, `secret_leak=0` |
-| v2 team readiness | 9 public team scenarios for ACL, project access, promotion, secret blocking, revoked agents, sync privacy, firewall quarantine, handoff, and ontology | `ready_for_team_v2_dogfood`; `9/9` scenarios passed; full-output privacy checks passed; `6/6` seeded faults detected |
+| v2 team readiness | 10 public team scenarios for ACL, project access, promotion, secret blocking, revoked agents, sync privacy, firewall quarantine, handoff, run lifecycle, quality, sync checksum, and ontology | `ready_for_team_v2_dogfood`; `10/10` scenarios passed; full-output privacy checks passed; `6/6` seeded faults detected |
 | v2 team dogfood shape | 120 synthetic team records, 80 adversarial records, 25 handoff workflows | fixture shape verified; generated bundles are public-safe and ignored by git |
 
 The ontology benchmark remains the public regression gate for natural-language
