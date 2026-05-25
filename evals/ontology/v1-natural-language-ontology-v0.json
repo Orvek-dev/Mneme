@@ -1,0 +1,1074 @@
+{
+  "benchmark_id": "v1-natural-language-ontology-v0",
+  "description": "Public-safe natural-language and complex-ontology benchmark for measuring Mneme v1 before ontology implementation changes.",
+  "schema_version": 1,
+  "cases": [
+    {
+      "category": "entity_relation",
+      "events": [
+        {
+          "actor_agent_id": "codex",
+          "id": "e1",
+          "scope": "private",
+          "speaker_id": "user",
+          "text": "Ari prefers short launch briefs, and she wants Mneme notes in Korean when the update is user-facing.",
+          "trust_level": "trusted_user"
+        }
+      ],
+      "expected": {
+        "attributes": [
+          {
+            "entity": "artifact_launch_briefs",
+            "id": "attr_launch_briefs_length",
+            "key": "length",
+            "scope": "private",
+            "source_event_ids": [
+              "e1"
+            ],
+            "status": "active",
+            "value": "short"
+          },
+          {
+            "entity": "artifact_mneme_notes",
+            "id": "attr_mneme_notes_language",
+            "key": "language",
+            "scope": "private",
+            "source_event_ids": [
+              "e1"
+            ],
+            "status": "active",
+            "value": "Korean"
+          }
+        ],
+        "context_checks": [
+          {
+            "allowed_scopes": [
+              "private"
+            ],
+            "id": "ctx_launch_briefs",
+            "must_include_relation_ids": [
+              "rel_ari_prefers_launch_briefs"
+            ],
+            "must_not_include_relation_ids": [],
+            "query": "Ari launch briefs"
+          }
+        ],
+        "entities": [
+          {
+            "aliases": [
+              "she"
+            ],
+            "id": "person_ari",
+            "name": "Ari",
+            "type": "person"
+          },
+          {
+            "id": "artifact_launch_briefs",
+            "name": "launch briefs",
+            "type": "artifact"
+          },
+          {
+            "id": "artifact_mneme_notes",
+            "name": "Mneme notes",
+            "type": "artifact"
+          }
+        ],
+        "must_not_relations": [],
+        "relations": [
+          {
+            "id": "rel_ari_prefers_launch_briefs",
+            "object": "artifact_launch_briefs",
+            "predicate": "prefers",
+            "scope": "private",
+            "source_event_ids": [
+              "e1"
+            ],
+            "status": "active",
+            "subject": "person_ari"
+          },
+          {
+            "id": "rel_ari_prefers_korean_notes",
+            "object": "artifact_mneme_notes",
+            "predicate": "prefers",
+            "scope": "private",
+            "source_event_ids": [
+              "e1"
+            ],
+            "status": "active",
+            "subject": "person_ari"
+          }
+        ],
+        "temporal_checks": []
+      },
+      "id": "natural-pronoun-preference",
+      "input_style": "natural_language",
+      "title": "Pronoun-linked personal preferences"
+    },
+    {
+      "category": "project_scope",
+      "events": [
+        {
+          "actor_agent_id": "codex",
+          "id": "e1",
+          "scope": "project-atlas",
+          "speaker_id": "user",
+          "text": "For Project Atlas, Ari decided that the release checklist must include local hard-dogfood evidence before any tag.",
+          "trust_level": "trusted_user"
+        }
+      ],
+      "expected": {
+        "attributes": [
+          {
+            "entity": "artifact_release_checklist",
+            "id": "attr_release_checklist_gate",
+            "key": "required_evidence",
+            "scope": "project-atlas",
+            "source_event_ids": [
+              "e1"
+            ],
+            "status": "active",
+            "value": "local hard-dogfood evidence"
+          }
+        ],
+        "context_checks": [
+          {
+            "allowed_scopes": [
+              "project-atlas"
+            ],
+            "id": "ctx_atlas_release_gate",
+            "must_include_relation_ids": [
+              "rel_atlas_requires_hard_dogfood"
+            ],
+            "must_not_include_relation_ids": [],
+            "query": "Atlas release checklist evidence"
+          },
+          {
+            "allowed_scopes": [
+              "private"
+            ],
+            "id": "ctx_atlas_private_denied",
+            "must_include_relation_ids": [],
+            "must_not_include_relation_ids": [
+              "rel_atlas_requires_hard_dogfood"
+            ],
+            "query": "Atlas release checklist evidence"
+          }
+        ],
+        "entities": [
+          {
+            "aliases": [
+              "Project Atlas",
+              "Atlas"
+            ],
+            "id": "project_atlas",
+            "name": "Project Atlas",
+            "type": "project"
+          },
+          {
+            "id": "artifact_release_checklist",
+            "name": "release checklist",
+            "type": "artifact"
+          },
+          {
+            "id": "evidence_hard_dogfood",
+            "name": "local hard-dogfood evidence",
+            "type": "evidence"
+          }
+        ],
+        "must_not_relations": [],
+        "relations": [
+          {
+            "id": "rel_atlas_requires_hard_dogfood",
+            "object": "evidence_hard_dogfood",
+            "predicate": "requires",
+            "scope": "project-atlas",
+            "source_event_ids": [
+              "e1"
+            ],
+            "status": "active",
+            "subject": "project_atlas"
+          }
+        ],
+        "temporal_checks": []
+      },
+      "id": "natural-project-scope-decision",
+      "input_style": "natural_language",
+      "title": "Scoped project release decision"
+    },
+    {
+      "category": "attribution",
+      "events": [
+        {
+          "actor_agent_id": "codex",
+          "id": "e1",
+          "scope": "private",
+          "speaker_id": "agent",
+          "text": "Codex guessed that Mina likes dumping private notes into handoff summaries, but Ari said not to remember that as Mina's preference.",
+          "trust_level": "agent_summary"
+        }
+      ],
+      "expected": {
+        "attributes": [],
+        "context_checks": [
+          {
+            "allowed_scopes": [
+              "private"
+            ],
+            "id": "ctx_attribution_trap",
+            "must_include_relation_ids": [],
+            "must_not_include_relation_ids": [
+              "rel_mina_prefers_private_dump"
+            ],
+            "query": "Mina handoff summaries"
+          }
+        ],
+        "entities": [
+          {
+            "id": "person_mina",
+            "name": "Mina",
+            "type": "person"
+          },
+          {
+            "id": "artifact_handoff_summaries",
+            "name": "handoff summaries",
+            "type": "artifact"
+          }
+        ],
+        "must_not_relations": [
+          {
+            "id": "rel_mina_prefers_private_dump",
+            "object_text": "dumping private notes into handoff summaries",
+            "predicate": "prefers",
+            "scope": "private",
+            "subject": "person_mina"
+          }
+        ],
+        "relations": [],
+        "temporal_checks": []
+      },
+      "id": "natural-agent-attribution-trap",
+      "input_style": "natural_language",
+      "title": "Agent attribution should not become user memory"
+    },
+    {
+      "category": "temporal",
+      "events": [
+        {
+          "actor_agent_id": "codex",
+          "id": "e1",
+          "scope": "private",
+          "speaker_id": "user",
+          "text": "Earlier Ari wanted weekly eval reports on Friday.",
+          "trust_level": "trusted_user"
+        },
+        {
+          "actor_agent_id": "codex",
+          "id": "e2",
+          "scope": "private",
+          "speaker_id": "user",
+          "text": "Today she changed that schedule to Monday mornings.",
+          "trust_level": "trusted_user"
+        }
+      ],
+      "expected": {
+        "attributes": [
+          {
+            "entity": "artifact_weekly_eval_reports",
+            "id": "attr_eval_report_schedule_current",
+            "key": "schedule",
+            "scope": "private",
+            "source_event_ids": [
+              "e2"
+            ],
+            "status": "active",
+            "value": "Monday mornings"
+          }
+        ],
+        "context_checks": [
+          {
+            "allowed_scopes": [
+              "private"
+            ],
+            "id": "ctx_temporal_current_schedule",
+            "must_include_relation_ids": [
+              "rel_ari_prefers_eval_reports_monday"
+            ],
+            "must_not_include_relation_ids": [
+              "rel_ari_prefers_eval_reports_friday"
+            ],
+            "query": "Ari weekly eval report schedule"
+          }
+        ],
+        "entities": [
+          {
+            "id": "person_ari",
+            "name": "Ari",
+            "type": "person"
+          },
+          {
+            "id": "artifact_weekly_eval_reports",
+            "name": "weekly eval reports",
+            "type": "artifact"
+          }
+        ],
+        "must_not_relations": [],
+        "relations": [
+          {
+            "id": "rel_ari_prefers_eval_reports_friday",
+            "object_text": "weekly eval reports on Friday",
+            "predicate": "prefers",
+            "scope": "private",
+            "source_event_ids": [
+              "e1"
+            ],
+            "status": "superseded",
+            "subject": "person_ari"
+          },
+          {
+            "id": "rel_ari_prefers_eval_reports_monday",
+            "object_text": "weekly eval reports on Monday mornings",
+            "predicate": "prefers",
+            "scope": "private",
+            "source_event_ids": [
+              "e2"
+            ],
+            "status": "active",
+            "subject": "person_ari"
+          }
+        ],
+        "temporal_checks": [
+          {
+            "active_object_text": "weekly eval reports on Monday mornings",
+            "entity": "person_ari",
+            "id": "temp_eval_report_schedule",
+            "inactive_object_texts": [
+              "weekly eval reports on Friday"
+            ],
+            "predicate": "prefers"
+          }
+        ]
+      },
+      "id": "natural-temporal-correction",
+      "input_style": "natural_language",
+      "title": "Natural correction should supersede stale preference"
+    },
+    {
+      "category": "multi_hop",
+      "events": [
+        {
+          "actor_agent_id": "codex",
+          "id": "e1",
+          "scope": "project-atlas",
+          "speaker_id": "user",
+          "text": "The next agent for Atlas should read the release-risk memo before editing the changelog. That memo lives in the eval-harness docs.",
+          "trust_level": "trusted_user"
+        }
+      ],
+      "expected": {
+        "attributes": [
+          {
+            "entity": "artifact_release_risk_memo",
+            "id": "attr_release_risk_memo_location",
+            "key": "location",
+            "scope": "project-atlas",
+            "source_event_ids": [
+              "e1"
+            ],
+            "status": "active",
+            "value": "eval-harness docs"
+          }
+        ],
+        "context_checks": [
+          {
+            "allowed_scopes": [
+              "project-atlas"
+            ],
+            "id": "ctx_multi_hop_handoff",
+            "must_include_relation_ids": [
+              "rel_next_agent_reads_release_risk_memo",
+              "rel_memo_lives_in_eval_docs"
+            ],
+            "must_not_include_relation_ids": [],
+            "query": "what should the next Atlas agent read before changelog work"
+          }
+        ],
+        "entities": [
+          {
+            "aliases": [
+              "Atlas"
+            ],
+            "id": "project_atlas",
+            "name": "Project Atlas",
+            "type": "project"
+          },
+          {
+            "id": "role_next_agent",
+            "name": "next agent",
+            "type": "agent_role"
+          },
+          {
+            "id": "artifact_release_risk_memo",
+            "name": "release-risk memo",
+            "type": "artifact"
+          },
+          {
+            "id": "artifact_eval_harness_docs",
+            "name": "eval-harness docs",
+            "type": "artifact"
+          }
+        ],
+        "must_not_relations": [],
+        "relations": [
+          {
+            "id": "rel_next_agent_reads_release_risk_memo",
+            "object": "artifact_release_risk_memo",
+            "predicate": "should_read",
+            "scope": "project-atlas",
+            "source_event_ids": [
+              "e1"
+            ],
+            "status": "active",
+            "subject": "role_next_agent"
+          },
+          {
+            "id": "rel_memo_lives_in_eval_docs",
+            "object": "artifact_eval_harness_docs",
+            "predicate": "lives_in",
+            "scope": "project-atlas",
+            "source_event_ids": [
+              "e1"
+            ],
+            "status": "active",
+            "subject": "artifact_release_risk_memo"
+          }
+        ],
+        "temporal_checks": []
+      },
+      "id": "natural-multi-hop-handoff",
+      "input_style": "natural_language",
+      "title": "Multi-hop agent handoff context"
+    },
+    {
+      "category": "scope_collision",
+      "events": [
+        {
+          "actor_agent_id": "codex",
+          "id": "e1",
+          "scope": "private",
+          "speaker_id": "user",
+          "text": "For personal notes, Ari likes compact todo summaries.",
+          "trust_level": "trusted_user"
+        },
+        {
+          "actor_agent_id": "codex",
+          "id": "e2",
+          "scope": "project-atlas",
+          "speaker_id": "user",
+          "text": "For Atlas, Ari wants expanded release evidence.",
+          "trust_level": "trusted_user"
+        }
+      ],
+      "expected": {
+        "attributes": [
+          {
+            "entity": "artifact_todo_summaries",
+            "id": "attr_todo_summaries_style",
+            "key": "style",
+            "scope": "private",
+            "source_event_ids": [
+              "e1"
+            ],
+            "status": "active",
+            "value": "compact"
+          },
+          {
+            "entity": "artifact_release_evidence",
+            "id": "attr_release_evidence_style",
+            "key": "style",
+            "scope": "project-atlas",
+            "source_event_ids": [
+              "e2"
+            ],
+            "status": "active",
+            "value": "expanded"
+          }
+        ],
+        "context_checks": [
+          {
+            "allowed_scopes": [
+              "private"
+            ],
+            "id": "ctx_private_todo",
+            "must_include_relation_ids": [
+              "rel_ari_prefers_compact_todo"
+            ],
+            "must_not_include_relation_ids": [
+              "rel_atlas_prefers_expanded_evidence"
+            ],
+            "query": "Ari personal todo summary style"
+          },
+          {
+            "allowed_scopes": [
+              "project-atlas"
+            ],
+            "id": "ctx_atlas_evidence",
+            "must_include_relation_ids": [
+              "rel_atlas_prefers_expanded_evidence"
+            ],
+            "must_not_include_relation_ids": [
+              "rel_ari_prefers_compact_todo"
+            ],
+            "query": "Atlas release evidence style"
+          }
+        ],
+        "entities": [
+          {
+            "id": "person_ari",
+            "name": "Ari",
+            "type": "person"
+          },
+          {
+            "aliases": [
+              "Atlas"
+            ],
+            "id": "project_atlas",
+            "name": "Project Atlas",
+            "type": "project"
+          },
+          {
+            "id": "artifact_todo_summaries",
+            "name": "todo summaries",
+            "type": "artifact"
+          },
+          {
+            "id": "artifact_release_evidence",
+            "name": "release evidence",
+            "type": "artifact"
+          }
+        ],
+        "must_not_relations": [],
+        "relations": [
+          {
+            "id": "rel_ari_prefers_compact_todo",
+            "object": "artifact_todo_summaries",
+            "predicate": "prefers",
+            "scope": "private",
+            "source_event_ids": [
+              "e1"
+            ],
+            "status": "active",
+            "subject": "person_ari"
+          },
+          {
+            "id": "rel_atlas_prefers_expanded_evidence",
+            "object": "artifact_release_evidence",
+            "predicate": "prefers",
+            "scope": "project-atlas",
+            "source_event_ids": [
+              "e2"
+            ],
+            "status": "active",
+            "subject": "project_atlas"
+          }
+        ],
+        "temporal_checks": []
+      },
+      "id": "natural-scope-collision",
+      "input_style": "natural_language",
+      "title": "Private and project scope collision"
+    },
+    {
+      "category": "explicit_anchor",
+      "events": [
+        {
+          "actor_agent_id": "codex",
+          "id": "e1",
+          "scope": "private",
+          "speaker_id": "user",
+          "text": "remember: user prefers local ontology benchmarks",
+          "trust_level": "trusted_user"
+        }
+      ],
+      "expected": {
+        "attributes": [],
+        "context_checks": [
+          {
+            "allowed_scopes": [
+              "private"
+            ],
+            "id": "ctx_explicit_local_benchmark",
+            "must_include_relation_ids": [
+              "rel_user_prefers_local_ontology_benchmarks"
+            ],
+            "must_not_include_relation_ids": [],
+            "query": "local ontology benchmarks"
+          }
+        ],
+        "entities": [
+          {
+            "id": "person_user",
+            "name": "user",
+            "type": "person"
+          },
+          {
+            "id": "artifact_local_ontology_benchmarks",
+            "name": "local ontology benchmarks",
+            "type": "artifact"
+          }
+        ],
+        "must_not_relations": [],
+        "relations": [
+          {
+            "id": "rel_user_prefers_local_ontology_benchmarks",
+            "object": "artifact_local_ontology_benchmarks",
+            "predicate": "prefers",
+            "scope": "private",
+            "source_event_ids": [
+              "e1"
+            ],
+            "status": "active",
+            "subject": "person_user"
+          }
+        ],
+        "temporal_checks": []
+      },
+      "id": "explicit-simple-triple-anchor",
+      "input_style": "explicit_marker",
+      "title": "Current v1 explicit marker anchor"
+    },
+    {
+      "category": "explicit_anchor",
+      "events": [
+        {
+          "actor_agent_id": "codex",
+          "id": "e1",
+          "scope": "project-atlas",
+          "speaker_id": "user",
+          "text": "remember: project-atlas requires public-safe candidate reports",
+          "trust_level": "trusted_user"
+        }
+      ],
+      "expected": {
+        "attributes": [],
+        "context_checks": [
+          {
+            "allowed_scopes": [
+              "project-atlas"
+            ],
+            "id": "ctx_explicit_project_candidate",
+            "must_include_relation_ids": [
+              "rel_project_atlas_requires_candidate_reports"
+            ],
+            "must_not_include_relation_ids": [],
+            "query": "candidate reports"
+          },
+          {
+            "allowed_scopes": [
+              "private"
+            ],
+            "id": "ctx_explicit_project_candidate_denied",
+            "must_include_relation_ids": [],
+            "must_not_include_relation_ids": [
+              "rel_project_atlas_requires_candidate_reports"
+            ],
+            "query": "candidate reports"
+          }
+        ],
+        "entities": [
+          {
+            "id": "project_atlas_slug",
+            "name": "project-atlas",
+            "type": "project"
+          },
+          {
+            "id": "artifact_candidate_reports",
+            "name": "public-safe candidate reports",
+            "type": "artifact"
+          }
+        ],
+        "must_not_relations": [],
+        "relations": [
+          {
+            "id": "rel_project_atlas_requires_candidate_reports",
+            "object": "artifact_candidate_reports",
+            "predicate": "requires",
+            "scope": "project-atlas",
+            "source_event_ids": [
+              "e1"
+            ],
+            "status": "active",
+            "subject": "project_atlas_slug"
+          }
+        ],
+        "temporal_checks": []
+      },
+      "id": "explicit-project-scope-anchor",
+      "input_style": "explicit_marker",
+      "title": "Current v1 scoped explicit marker anchor"
+    },
+    {
+      "category": "privacy",
+      "events": [
+        {
+          "actor_agent_id": "codex",
+          "id": "e1",
+          "scope": "private",
+          "speaker_id": "user",
+          "text": "Do not save this fake setup value: API_KEY=FAKE_ONTOLOGY_VALUE_01.",
+          "trust_level": "trusted_user"
+        }
+      ],
+      "expected": {
+        "attributes": [],
+        "context_checks": [
+          {
+            "allowed_scopes": [
+              "private"
+            ],
+            "id": "ctx_secret_block",
+            "must_include_relation_ids": [],
+            "must_not_include_relation_ids": [
+              "rel_secret_must_not_exist"
+            ],
+            "query": "fake setup value"
+          }
+        ],
+        "entities": [],
+        "must_not_relations": [
+          {
+            "id": "rel_secret_must_not_exist",
+            "object_text": "API_KEY=FAKE_ONTOLOGY_VALUE_01",
+            "predicate": "contains",
+            "scope": "private",
+            "subject_text": "fake setup value"
+          }
+        ],
+        "relations": [],
+        "temporal_checks": []
+      },
+      "id": "natural-secret-exclusion",
+      "input_style": "natural_language",
+      "title": "Natural secret-like text must not leak"
+    },
+    {
+      "category": "alias_resolution",
+      "events": [
+        {
+          "actor_agent_id": "codex",
+          "id": "e1",
+          "scope": "project-atlas",
+          "speaker_id": "user",
+          "text": "Hermes and the handoff runner are the same internal tool in this conversation; Ari wants that runner checked before release.",
+          "trust_level": "trusted_user"
+        }
+      ],
+      "expected": {
+        "attributes": [],
+        "context_checks": [
+          {
+            "allowed_scopes": [
+              "project-atlas"
+            ],
+            "id": "ctx_alias_runner",
+            "must_include_relation_ids": [
+              "rel_handoff_runner_same_as_hermes",
+              "rel_ari_requires_runner_check"
+            ],
+            "must_not_include_relation_ids": [],
+            "query": "Hermes runner release check"
+          }
+        ],
+        "entities": [
+          {
+            "aliases": [
+              "handoff runner",
+              "that runner"
+            ],
+            "id": "tool_hermes",
+            "name": "Hermes",
+            "type": "tool"
+          },
+          {
+            "id": "person_ari",
+            "name": "Ari",
+            "type": "person"
+          }
+        ],
+        "must_not_relations": [],
+        "relations": [
+          {
+            "id": "rel_handoff_runner_same_as_hermes",
+            "object": "tool_hermes",
+            "predicate": "same_as",
+            "scope": "project-atlas",
+            "source_event_ids": [
+              "e1"
+            ],
+            "status": "active",
+            "subject_text": "handoff runner"
+          },
+          {
+            "id": "rel_ari_requires_runner_check",
+            "object": "tool_hermes",
+            "predicate": "requires_check_before_release",
+            "scope": "project-atlas",
+            "source_event_ids": [
+              "e1"
+            ],
+            "status": "active",
+            "subject": "person_ari"
+          }
+        ],
+        "temporal_checks": []
+      },
+      "id": "natural-alias-resolution",
+      "input_style": "natural_language",
+      "title": "Alias resolution across tool names"
+    },
+    {
+      "category": "contradiction",
+      "events": [
+        {
+          "actor_agent_id": "codex",
+          "id": "e1",
+          "scope": "team",
+          "speaker_id": "teammate",
+          "text": "Mina first suggested storing every transcript for team memory.",
+          "trust_level": "trusted_user"
+        },
+        {
+          "actor_agent_id": "codex",
+          "id": "e2",
+          "scope": "team",
+          "speaker_id": "user",
+          "text": "Ari rejected storing full transcripts and approved only sanitized summaries.",
+          "trust_level": "trusted_user"
+        }
+      ],
+      "expected": {
+        "attributes": [],
+        "context_checks": [
+          {
+            "allowed_scopes": [
+              "team"
+            ],
+            "id": "ctx_contradiction_team_memory",
+            "must_include_relation_ids": [
+              "rel_ari_approves_sanitized_summaries"
+            ],
+            "must_not_include_relation_ids": [
+              "rel_mina_suggests_full_transcripts"
+            ],
+            "query": "team memory transcript policy"
+          }
+        ],
+        "entities": [
+          {
+            "id": "person_mina",
+            "name": "Mina",
+            "type": "person"
+          },
+          {
+            "id": "person_ari",
+            "name": "Ari",
+            "type": "person"
+          },
+          {
+            "id": "artifact_full_transcripts",
+            "name": "full transcripts",
+            "type": "artifact"
+          },
+          {
+            "id": "artifact_sanitized_summaries",
+            "name": "sanitized summaries",
+            "type": "artifact"
+          }
+        ],
+        "must_not_relations": [],
+        "relations": [
+          {
+            "id": "rel_mina_suggests_full_transcripts",
+            "object": "artifact_full_transcripts",
+            "predicate": "suggested",
+            "scope": "team",
+            "source_event_ids": [
+              "e1"
+            ],
+            "status": "superseded",
+            "subject": "person_mina"
+          },
+          {
+            "id": "rel_ari_approves_sanitized_summaries",
+            "object": "artifact_sanitized_summaries",
+            "predicate": "approved",
+            "scope": "team",
+            "source_event_ids": [
+              "e2"
+            ],
+            "status": "active",
+            "subject": "person_ari"
+          }
+        ],
+        "temporal_checks": [
+          {
+            "active_object_text": "sanitized summaries",
+            "entity": "person_ari",
+            "id": "temp_team_memory_policy",
+            "inactive_object_texts": [
+              "full transcripts"
+            ],
+            "predicate": "approved"
+          }
+        ]
+      },
+      "id": "natural-contradiction-resolution",
+      "input_style": "natural_language",
+      "title": "Contradictory team memory decision"
+    },
+    {
+      "category": "team_handoff",
+      "events": [
+        {
+          "actor_agent_id": "codex",
+          "id": "e1",
+          "scope": "team",
+          "speaker_id": "user",
+          "text": "For the team workspace, reviewers must see memory diffs, but Ari's private preferences should stay out of team handoff.",
+          "trust_level": "trusted_user"
+        }
+      ],
+      "expected": {
+        "attributes": [
+          {
+            "entity": "role_reviewers",
+            "id": "attr_reviewers_visibility",
+            "key": "visibility",
+            "scope": "team",
+            "source_event_ids": [
+              "e1"
+            ],
+            "status": "active",
+            "value": "memory diffs"
+          }
+        ],
+        "context_checks": [
+          {
+            "allowed_scopes": [
+              "team"
+            ],
+            "id": "ctx_team_handoff",
+            "must_include_relation_ids": [
+              "rel_team_reviewers_see_memory_diffs"
+            ],
+            "must_not_include_relation_ids": [
+              "rel_private_preferences_team_handoff"
+            ],
+            "query": "team handoff reviewer memory diffs"
+          }
+        ],
+        "entities": [
+          {
+            "id": "workspace_team",
+            "name": "team workspace",
+            "type": "workspace"
+          },
+          {
+            "id": "role_reviewers",
+            "name": "reviewers",
+            "type": "role"
+          },
+          {
+            "id": "artifact_memory_diffs",
+            "name": "memory diffs",
+            "type": "artifact"
+          }
+        ],
+        "must_not_relations": [
+          {
+            "id": "rel_private_preferences_team_handoff",
+            "object_text": "team handoff",
+            "predicate": "include_in",
+            "scope": "team",
+            "subject_text": "private preferences"
+          }
+        ],
+        "relations": [
+          {
+            "id": "rel_team_reviewers_see_memory_diffs",
+            "object": "artifact_memory_diffs",
+            "predicate": "must_see",
+            "scope": "team",
+            "source_event_ids": [
+              "e1"
+            ],
+            "status": "active",
+            "subject": "role_reviewers"
+          }
+        ],
+        "temporal_checks": []
+      },
+      "id": "natural-team-handoff-visibility",
+      "input_style": "natural_language",
+      "title": "Team handoff visibility and private exclusion"
+    },
+    {
+      "category": "explicit_anchor",
+      "events": [
+        {
+          "actor_agent_id": "codex",
+          "id": "e1",
+          "scope": "team",
+          "speaker_id": "user",
+          "text": "remember: reviewers must_see memory diffs",
+          "trust_level": "trusted_user"
+        }
+      ],
+      "expected": {
+        "attributes": [],
+        "context_checks": [
+          {
+            "allowed_scopes": [
+              "team"
+            ],
+            "id": "ctx_explicit_team_reviewers",
+            "must_include_relation_ids": [
+              "rel_reviewers_must_see_memory_diffs"
+            ],
+            "must_not_include_relation_ids": [],
+            "query": "reviewers memory diffs"
+          }
+        ],
+        "entities": [
+          {
+            "id": "role_reviewers",
+            "name": "reviewers",
+            "type": "role"
+          },
+          {
+            "id": "artifact_memory_diffs",
+            "name": "memory diffs",
+            "type": "artifact"
+          }
+        ],
+        "must_not_relations": [],
+        "relations": [
+          {
+            "id": "rel_reviewers_must_see_memory_diffs",
+            "object": "artifact_memory_diffs",
+            "predicate": "must_see",
+            "scope": "team",
+            "source_event_ids": [
+              "e1"
+            ],
+            "status": "active",
+            "subject": "role_reviewers"
+          }
+        ],
+        "temporal_checks": []
+      },
+      "id": "explicit-team-relation-anchor",
+      "input_style": "explicit_marker",
+      "title": "Current v1 explicit team relation anchor"
+    }
+  ]
+}

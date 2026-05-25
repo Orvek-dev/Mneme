@@ -81,6 +81,9 @@ eval update land in the same PR.
 - `scripts/v1-real-use-pilot.py` prepares an ignored local pilot workspace and
   sanitizes structured pilot feedback before any public issue or eval candidate
   is created.
+- `scripts/v1-ontology-benchmark.py` measures current v1 against a public-safe
+  natural-language ontology fixture and reports `ontology_design_needed` when
+  the baseline exposes expected ontology gaps.
 - The opt-in `model` suite covers command-backed extraction quality for durable
   preferences, no-claim cases, secret blocking, and lifecycle correction.
 - The `core`, `runtime`, `agent`, and `dogfood` suites must pass for `fake`
@@ -131,6 +134,8 @@ eval update land in the same PR.
   script syntax to avoid unnecessary GitHub Actions cost.
 - Full real-use pilot evidence is local-only; CI checks the feedback contract,
   example feedback, and script syntax.
+- Full ontology benchmark evidence is local-only; CI checks the benchmark
+  contract, fixture validation, scorer fault detection, and script syntax.
 - `RUSTDOCFLAGS="-D warnings" cargo doc --workspace --no-deps` must pass before
   release.
 - `scripts/public-safety-check.sh` guards against known private/public-safety
