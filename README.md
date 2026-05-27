@@ -9,6 +9,7 @@
   <img alt="Local first" src="https://img.shields.io/badge/local--first-JSON%20stores-6f42c1">
   <img alt="Eval scenarios" src="https://img.shields.io/badge/eval-50%20public%20scenarios-1f883d">
   <img alt="Team suite" src="https://img.shields.io/badge/v2%20team-10%2F10%20scenarios-8250df">
+  <img alt="Codex MCP" src="https://img.shields.io/badge/Codex%20MCP-smoke%20passed-0969da">
 </p>
 
 <p align="center">
@@ -42,7 +43,7 @@ commercial track.
 | --- | --- | --- |
 | `mneme-core` | v1 personal-memory engine and v2 team-memory policy core | [API contract](docs/project/api-contract.md) |
 | `mneme-cli` | Local CLI over v1 and v2 JSON stores | [Local CLI](docs/v1/local-cli.md) |
-| `mneme-mcp` | Local stdio MCP server for V1 personal memory and V2 team handoff tools | [MCP](docs/mcp.md) |
+| `mneme-mcp` | Local stdio MCP server for V1 personal memory and V2 team handoff tools | [MCP](docs/mcp.md), [crate README](crates/mneme-mcp/README.md) |
 | `mneme-eval` | Scenario-based eval harness with acceptance gates | [Eval Harness](docs/eval-harness/README.md) |
 | V1 | Personal agent memory with citations, scope checks, review, curation, and repair | [V1 docs](docs/v1/README.md) |
 | V2 | Team agent handoff with private/project/team scopes, firewall, quality, sync, and MCP server | [V2 docs](docs/v2/README.md) |
@@ -138,6 +139,7 @@ claims against external production workloads.
 | MCP readiness | V1/V2 tools through the local stdio server | `4/4` MCP scenarios passed |
 | MCP hard dogfood | V1 hard corpus, V1 ontology, V2 team corpus, team suite via MCP | passed locally |
 | MCP seeded faults | V1 skip/leak/citation faults plus V2 policy/leak faults through MCP | `9/9` detected |
+| Codex MCP smoke | Actual Codex CLI calling Mneme MCP with isolated temporary stores | V1 write/read, V2 handoff, wrong-owner denial passed |
 | V2 seeded faults | ACL bypass, secret leak, dropped citations, unapproved promotion, ignored revocation, quarantined leak | `6/6` detected |
 | V2 dogfood shape | 120 synthetic team records, 80 adversarial records, 25 handoff workflows | fixture shape verified |
 
@@ -182,11 +184,13 @@ Without `--store`, V1 writes to `.mneme/mneme-v1.json` and V2 writes to
 crates/mneme-core       shared v1 personal-memory and v2 team-memory core
 crates/mneme-cli        local v1/v2 CLI
 crates/mneme-mcp        local stdio MCP server for V1 and V2 tools
+crates/mneme-mcp/README.md  MCP server package guide
 crates/mneme-eval       reusable eval harness CLI
 docs/mcp.md             MCP server, client config, and eval quickstart
 docs/v1/                personal-memory docs
 docs/v2/                team-memory, handoff, security, and eval docs
 docs/eval-harness/      scenario, baseline, candidate, and provider eval docs
+examples/codex/         Codex MCP config and smoke-test notes
 examples/v2-team-agent-ops/  public-safe v2 handoff demo
 evals/                  public scenario fixtures
 scripts/                quality, safety, legacy bridge, dogfood, and install helpers
@@ -199,6 +203,8 @@ spec/                   feature specs and verification maps
 - [Mneme v1](docs/v1/README.md)
 - [Mneme v2](docs/v2/README.md)
 - [MCP](docs/mcp.md)
+- [mneme-mcp crate README](crates/mneme-mcp/README.md)
+- [Codex MCP Example](examples/codex/README.md)
 - [V2 Quickstart](docs/v2/quickstart.md)
 - [V2 Team Agent Workflow](docs/v2/team-agent-workflow.md)
 - [V2 Security Model](docs/v2/security-model.md)

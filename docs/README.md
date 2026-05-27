@@ -9,6 +9,8 @@ docs/v2/             team/shared-memory policy core, connector boundary, and loc
 docs/mcp.md          local stdio MCP server, client config, and MCP eval workflow
 docs/eval-harness/   scenario, baseline, dogfood, candidate, and provider eval workflow
 docs/project/        roadmap, release, packaging, and policy material
+crates/mneme-mcp/    package-level MCP server README
+examples/codex/      Codex MCP config and smoke-test notes
 ```
 
 Start here:
@@ -18,6 +20,10 @@ Start here:
   connector-ready workflow.
 - [Mneme MCP](mcp.md) for connecting V1/V2 memory tools to MCP-capable coding
   agents.
+- [mneme-mcp crate README](../crates/mneme-mcp/README.md) for the MCP server
+  package surface.
+- [Codex MCP Example](../examples/codex/README.md) for Codex client config and
+  public-safe smoke-test notes.
 - [V2 Team Agent Ops Example](../examples/v2-team-agent-ops/README.md) for a
   public-safe end-to-end handoff demo.
 - [Eval Harness](eval-harness/README.md) for deterministic and provider evals.

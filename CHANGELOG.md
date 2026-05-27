@@ -18,6 +18,8 @@ This project follows the spirit of Keep a Changelog.
   V2 team corpus, suite parity, and 9 seeded fault checks.
 - Added public MCP documentation and release quality-gate coverage for
   `mneme-mcp --self-test` and MCP eval readiness.
+- Added a package-level `mneme-mcp` README and Codex MCP example documenting
+  the public-safe real-client smoke-test shape.
 
 ### Changed
 

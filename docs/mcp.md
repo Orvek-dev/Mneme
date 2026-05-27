@@ -5,6 +5,10 @@ MCP-capable clients. It exposes the same local-first memory behavior as the CLI:
 V1 personal memory, V2 team handoff memory, JSON stores, citations, scope
 checks, secret blocking, firewall reports, and validation.
 
+For the package-level server guide, see
+[`crates/mneme-mcp/README.md`](../crates/mneme-mcp/README.md). For a Codex
+client example, see [`examples/codex`](../examples/codex/README.md).
+
 It does not require a hosted service. By default it reads and writes:
 
 ```text
@@ -127,6 +131,23 @@ It covers:
 
 Full run outputs are local evidence bundles. Keep them out of git unless a
 reduced public-safe finding is promoted into `evals/scenarios/`.
+
+## Real Client Smoke
+
+The MCP server has also been checked through actual Codex CLI execution using
+isolated temporary stores. This is a client integration smoke test: it proves
+that Codex can see Mneme MCP tools, call them, and leave observable state in
+the Mneme stores.
+
+| Client | Check | Result |
+| --- | --- | --- |
+| Codex CLI | V1 MCP write/read | Passed |
+| Codex CLI | V2 team handoff | Passed |
+| Codex CLI | V2 wrong agent-owner denial | Passed |
+
+Raw logs are intentionally not committed because client logs can include local
+paths, installed MCP server lists, or environment details. Public evidence
+should stay at the reduced summary level above.
 
 ## Environment
 
