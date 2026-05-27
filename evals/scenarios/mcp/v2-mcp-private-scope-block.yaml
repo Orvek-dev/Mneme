@@ -1,0 +1,42 @@
+id: mcp-v2-private-scope-block
+tags:
+  - mcp
+  - v2
+  - scope
+team_flow:
+  workspace_id: engineering
+  users:
+    - id: alice
+      role: admin
+    - id: bob
+      role: member
+  memories:
+    - actor:
+        user_id: alice
+      scope: private:alice
+      text: "Alice private memory should not be visible to Bob"
+    - actor:
+        user_id: alice
+      scope: team
+      text: "Team memory says release notes need reviewer signoff"
+  contexts:
+    - actor:
+        user_id: bob
+      query: "memory release notes reviewer"
+expected:
+  team:
+    validation_ok: true
+    memory_count: 2
+    active_memory_count: 2
+    denied_count: 0
+    scope_leak_count: 0
+    secret_leak_count: 0
+    context_item_count: 1
+    context_must_include:
+      - release notes
+    context_must_not_include:
+      - Alice private
+    omitted_reason_contains:
+      - private scope denied
+    full_output_must_not_include:
+      - Alice private memory should not be visible to Bob

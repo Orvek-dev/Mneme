@@ -31,7 +31,7 @@ still future work.
   promoted-source cleanup, and run state.
 - Sync envelope IDs, stable checksums, and import diff summaries.
 - Entity/relation/attribute ontology reports for team state.
-- A thin stdio bridge for MCP-style agent runtime integration.
+- A local Rust stdio MCP server for agent runtime integration.
 - A v2 eval suite and readiness gate for ACL leaks, secret leaks, promotion
   review, citation coverage, revoked-agent denial, sync privacy, handoff, run
   lifecycle, quality checks, checksum verification, and quarantine behavior.
@@ -46,8 +46,9 @@ Start with the focused docs:
 - [Security Model](security-model.md): the boundary rules and non-claims.
 - [Evaluation](evaluation.md): the suite, dogfood contract, and scorecard
   signals.
+- [MCP](../mcp.md): local stdio server, client config, and MCP eval gate.
 - [Team Agent Ops Example](../../examples/v2-team-agent-ops/README.md): a
-  public-safe runnable demo with sample reports and MCP-style config.
+  public-safe runnable demo with sample reports and MCP config.
 
 ## CLI Quick Start
 
@@ -88,6 +89,8 @@ cargo run -p mneme-cli -- team sync export /tmp/mneme-team-sync.json \
 cargo run -p mneme-cli -- team firewall --json
 cargo run -p mneme-cli -- team quality --json
 cargo run -p mneme-cli -- team ontology --actor bob --agent codex-bob --json
+cargo run -p mneme-mcp -- --self-test
+cargo run -p mneme-cli -- mcp config --client all
 ```
 
 Without `--store`, v2 writes to `.mneme/mneme-team-v2.json` in the current
@@ -99,6 +102,8 @@ directory. `.mneme/` is ignored by git.
 cargo run -p mneme-eval -- validate --suite team
 cargo run -p mneme-eval -- run --suite team --target mneme-v2
 cargo run -p mneme-eval -- acceptance --suite team --target mneme-v2
+cargo run -p mneme-eval -- validate --suite mcp
+cargo run -p mneme-eval -- run --suite mcp --target mneme-mcp
 cargo run -p mneme-eval -- v2-readiness --json --report evals/reports/v2-readiness.json
 scripts/v2-team-dogfood.py --check-contract
 scripts/v2-team-dogfood.py --check-dataset
@@ -123,11 +128,13 @@ Implemented:
 - team memory quality and promotion review reports;
 - sync checksums and import diff summaries;
 - firewall and ontology reports;
-- CLI adapter manifest and `scripts/mneme-mcp-stdio.py`;
+- CLI adapter manifest, `mneme-mcp`, and the legacy `scripts/mneme-mcp-stdio.py`
+  bridge;
 - `mneme-v2` eval target;
+- `mneme-mcp` eval target and MCP scenario suite;
 - team scenario suite and v2 readiness gate;
 - v2 team dogfood evidence script.
-- public-safe v2 team-agent ops demo and MCP-style config example.
+- public-safe v2 team-agent ops demo and MCP config example.
 
 Not implemented yet:
 

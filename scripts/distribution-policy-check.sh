@@ -27,7 +27,7 @@ grep -q '^license = "MIT"$' Cargo.toml || {
   exit 1
 }
 
-for manifest in crates/mneme-core/Cargo.toml crates/mneme-cli/Cargo.toml crates/mneme-eval/Cargo.toml; do
+for manifest in crates/mneme-core/Cargo.toml crates/mneme-cli/Cargo.toml crates/mneme-mcp/Cargo.toml crates/mneme-eval/Cargo.toml; do
   if ! grep -q '^publish = false$' "$manifest"; then
     echo "distribution-policy: $manifest must keep publish = false until registry publication is intentionally enabled" >&2
     exit 1

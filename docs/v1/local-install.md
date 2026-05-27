@@ -1,7 +1,7 @@
 # Local Install
 
-Mneme can be installed locally as the `mneme` CLI binary from the repository
-root:
+Mneme can be installed locally as the `mneme` CLI binary and `mneme-mcp` MCP
+server binary from the repository root:
 
 ```sh
 ./scripts/install-local.sh
@@ -11,10 +11,11 @@ The installer wraps:
 
 ```sh
 cargo install --path crates/mneme-cli --locked --root "$HOME/.cargo" --force
+cargo install --path crates/mneme-mcp --locked --root "$HOME/.cargo" --force
 ```
 
-By default, the binary is written to `$HOME/.cargo/bin/mneme`. Ensure that
-directory is on `PATH`:
+By default, binaries are written to `$HOME/.cargo/bin`. Ensure that directory
+is on `PATH`:
 
 ```sh
 export PATH="$HOME/.cargo/bin:$PATH"
@@ -29,6 +30,8 @@ mneme init
 mneme doctor --json
 mneme help
 mneme review --help
+mneme mcp config --client all --json
+mneme-mcp --self-test
 ```
 
 ## Options

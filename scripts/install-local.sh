@@ -13,10 +13,10 @@ usage() {
   cat <<'EOF'
 Usage: scripts/install-local.sh [--root <path>] [--debug] [--no-force] [--skip-smoke]
 
-Install the local mneme CLI binary with cargo install.
+Install the local mneme CLI and mneme-mcp binaries with cargo install.
 
 Options:
-  --root <path>    Cargo install root. Binary is written to <path>/bin/mneme.
+  --root <path>    Cargo install root. Binaries are written to <path>/bin.
   --debug          Use cargo install --debug for faster local smoke installs.
   --no-force       Do not pass --force to cargo install.
   --skip-smoke     Skip doctor/help/review command smoke checks.
@@ -67,20 +67,31 @@ fi
 
 mkdir -p "$INSTALL_ROOT"
 
-set -- install --path crates/mneme-cli --locked --root "$INSTALL_ROOT"
-if [ "$FORCE" -eq 1 ]; then
-  set -- "$@" --force
-fi
-if [ "$BUILD_MODE" = "debug" ]; then
-  set -- "$@" --debug
-fi
+install_crate() {
+  crate_path="$1"
+  binary_name="$2"
+  set -- install --path "$crate_path" --locked --root "$INSTALL_ROOT"
+  if [ "$FORCE" -eq 1 ]; then
+    set -- "$@" --force
+  fi
+  if [ "$BUILD_MODE" = "debug" ]; then
+    set -- "$@" --debug
+  fi
+  echo "mneme-install: installing ${binary_name} to ${INSTALL_ROOT}/bin"
+  cargo "$@"
+}
 
-echo "mneme-install: installing mneme to ${INSTALL_ROOT}/bin"
-cargo "$@"
+install_crate crates/mneme-cli mneme
+install_crate crates/mneme-mcp mneme-mcp
 
 BIN="${INSTALL_ROOT}/bin/mneme"
+MCP_BIN="${INSTALL_ROOT}/bin/mneme-mcp"
 if [ ! -x "$BIN" ]; then
   echo "mneme-install: expected executable not found: $BIN" >&2
+  exit 1
+fi
+if [ ! -x "$MCP_BIN" ]; then
+  echo "mneme-install: expected executable not found: $MCP_BIN" >&2
   exit 1
 fi
 
@@ -89,8 +100,11 @@ if [ "$SMOKE" -eq 1 ]; then
   "$BIN" doctor >/dev/null
   "$BIN" help >/dev/null
   "$BIN" review --help >/dev/null
+  "$BIN" mcp config --client all --json >/dev/null
+  "$MCP_BIN" --self-test >/dev/null
 fi
 
 echo "mneme-install: binary=${BIN}"
+echo "mneme-install: mcp_binary=${MCP_BIN}"
 echo "mneme-install: add to PATH with: export PATH=\"${INSTALL_ROOT}/bin:\$PATH\""
 echo "mneme-install: ok"

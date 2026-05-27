@@ -1,0 +1,77 @@
+id: mcp-v2-team-handoff
+tags:
+  - mcp
+  - v2
+  - handoff
+team_flow:
+  workspace_id: engineering
+  users:
+    - id: alice
+      role: admin
+    - id: bob
+      role: member
+  agents:
+    - id: codex-bob
+      owner_user_id: bob
+  projects:
+    - id: atlas
+      members:
+        - bob
+  memories:
+    - actor:
+        user_id: alice
+      scope: team
+      text: "Atlas deploys require rollback notes"
+    - actor:
+        user_id: bob
+        agent_id: codex-bob
+      scope: project:atlas
+      text: "Atlas handoff should include smoke test evidence"
+  runs:
+    - actor:
+        user_id: bob
+        agent_id: codex-bob
+      task: "Atlas deploy handoff"
+      query: "Atlas deploy smoke test"
+      scope: project:atlas
+      notes:
+        - scope: project:atlas
+          text: "Atlas run needs post-deploy smoke test"
+      end:
+        summary: "Atlas deploy handoff prepared"
+        next:
+          - "Run post-deploy smoke test"
+        remember:
+          - "Atlas next agent should verify rollback notes"
+        scope: project:atlas
+      handoff: true
+  contexts:
+    - actor:
+        user_id: bob
+        agent_id: codex-bob
+      query: "Atlas deploy smoke rollback"
+expected:
+  team:
+    validation_ok: true
+    memory_count: 4
+    active_memory_count: 4
+    run_count: 1
+    closed_run_count: 1
+    denied_count: 0
+    scope_leak_count: 0
+    secret_leak_count: 0
+    sync_memory_count: 4
+    sync_checksum_verified: true
+    handoff_context_item_count: 4
+    firewall_ok: true
+    quality_ok: true
+    context_item_count: 4
+    context_must_include:
+      - rollback notes
+      - smoke test
+    citation_required: true
+    audit_kinds:
+      - team.run.begin
+      - team.run.note
+      - team.run.end
+      - team.run.handoff

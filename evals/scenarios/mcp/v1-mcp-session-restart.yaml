@@ -1,0 +1,49 @@
+id: mcp-v1-session-restart
+tags:
+  - mcp
+  - v1
+  - session
+  - persistence
+persistence:
+  restart_after_event: 1
+events:
+  - speaker_id: user
+    actor_agent_id: codex
+    scope: private
+    trust_level: trusted_user
+    text: "remember: user prefers compact implementation briefings"
+agent_flow:
+  begin:
+    task: "Prepare implementation briefing"
+    actor_agent_id: codex
+    query: "implementation briefing"
+  end:
+    summary: "Prepared the MCP implementation plan"
+    remember:
+      - "user wants MCP work verified through eval harness"
+expected:
+  event_append:
+    count: 2
+  claims:
+    - subject: user
+      predicate: prefers
+      object: compact implementation briefings
+      status: active
+      scope: private
+    - subject: user
+      predicate: wants
+      object: MCP work verified through eval harness
+      status: active
+      scope: private
+  session:
+    status: closed
+    task: "Prepare implementation briefing"
+    actor_agent_id: codex
+    context_must_include:
+      - compact implementation
+    memory_event_count: 1
+    summary_contains: MCP implementation
+  store:
+    schema_version: 2
+    valid: true
+    backup_required: true

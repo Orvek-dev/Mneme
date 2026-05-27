@@ -128,9 +128,9 @@ eval update land in the same PR.
 - `mneme init --extractor-command <program>` writes an active
   `MNEME_EXTRACTOR_COMMAND` into the generated hook profile.
 - `mneme-cli --store <path>` isolates local state.
-- `scripts/install-local.sh` installs the local `mneme` CLI with
-  `cargo install --path crates/mneme-cli --locked` and smokes doctor/help/review
-  commands plus installed first-workspace bootstrap.
+- `scripts/install-local.sh` installs the local `mneme` CLI and `mneme-mcp`
+  server with `cargo install --path ... --locked`, then smokes
+  doctor/help/review/MCP commands plus installed first-workspace bootstrap.
 - `scripts/quality-gate.sh` is the local and release verification entry point.
 - Full manual dogfood evidence is local-only; CI checks the dataset shape and
   script syntax to avoid unnecessary GitHub Actions cost.

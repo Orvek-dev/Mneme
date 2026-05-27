@@ -3,6 +3,7 @@ members = [
     "crates/mneme-cli",
     "crates/mneme-core",
     "crates/mneme-eval",
+    "crates/mneme-mcp",
 ]
 resolver = "2"
 

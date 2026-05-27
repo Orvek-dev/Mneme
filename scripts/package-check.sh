@@ -14,7 +14,7 @@ echo "package-check: verifying package assembly and package file lists"
 
 cargo package -p mneme-core --allow-dirty --no-verify --locked
 
-for package in mneme-core mneme-cli mneme-eval; do
+for package in mneme-core mneme-cli mneme-mcp mneme-eval; do
   list_file="${LIST_DIR}/${package}.txt"
   cargo package -p "$package" --allow-dirty --list --locked > "$list_file"
   if grep -E '(^|/)(\.env($|/)|\.mneme($|/)|evals/reports/|evals/candidates/|benchmarks/results/|target/|Mneme_|AGENTS\.md$|CLAUDE\.md$|harness/|templates/|99_.*_template)' "$list_file"; then

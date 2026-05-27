@@ -1,20 +1,22 @@
 [package]
-name = "mneme-eval"
+name = "mneme-mcp"
 version.workspace = true
 edition.workspace = true
 rust-version.workspace = true
 license.workspace = true
-description = "Scenario eval harness and quality gates for Mneme."
+description = "Local MCP stdio server for Mneme personal and team-memory tools."
 repository = "https://github.com/Orvek-dev/Mneme"
 readme = "../../README.md"
 publish = false
 
+[[bin]]
+name = "mneme-mcp"
+path = "src/main.rs"
+
 [dependencies]
 mneme-core.workspace = true
-mneme-mcp = { path = "../mneme-mcp", version = "0.64.0" }
 serde = { version = "1.0", features = ["derive"] }
 serde_json = "1.0"
-serde_yaml = "0.9"
 
 [lints]
 workspace = true

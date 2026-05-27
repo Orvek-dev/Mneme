@@ -132,9 +132,9 @@ Goal: safe team memory control plane with personal/project/team boundaries.
 Status: active local preview. The current implementation includes the v2 local
 team-memory policy core, connector-safe sync envelopes, handoff packages,
 task-run lifecycle, quality reports, promotion review reports, sync checksums,
-firewall and ontology reports, CLI workflow, team eval suite, v2 readiness gate,
-and team dogfood evidence script. Hosted sync/server deployment is still
-planned.
+firewall and ontology reports, CLI workflow, local stdio MCP server, team eval
+suite, MCP eval suite, v2 readiness gate, and team dogfood evidence script.
+Hosted sync/server deployment is still planned.
 
 Suggested slices:
 
@@ -240,6 +240,7 @@ The current public documentation tree follows that positioning:
 ```text
 docs/v1/             personal-memory runtime and local CLI
 docs/v2/             team/shared-memory policy core and local CLI
+docs/mcp.md          local stdio MCP server, client config, and MCP eval workflow
 docs/eval-harness/   scenario, baseline, candidate, and provider eval workflow
 docs/project/        roadmap, release, packaging, and policy material
 ```

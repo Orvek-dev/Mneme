@@ -58,8 +58,8 @@ Before pushing a release tag, confirm:
   release is intentionally being prepared;
 - MIT license metadata still matches the committed `LICENSE` file and
   distribution policy;
-- `scripts/install-local.sh` still installs and smokes the local `mneme`
-  binary;
+- `scripts/install-local.sh` still installs and smokes the local `mneme` and
+  `mneme-mcp` binaries;
 - `CHANGELOG.md` describes the release-relevant changes;
 - README commands still match the actual CLI and eval behavior.
 - Rustdoc builds cleanly when public API docs or examples changed.

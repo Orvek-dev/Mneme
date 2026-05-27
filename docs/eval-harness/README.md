@@ -10,6 +10,11 @@ scenario fixtures under `evals/scenarios/`.
 - [Eval Acceptance Gate](eval-harness-acceptance.md)
 - [Eval Target Adapter Contract](eval-target-adapter-contract.md)
 
+Useful commands:
+
+- `mneme-eval validate --suite mcp`
+- `mneme-eval run --suite mcp --target mneme-mcp`
+
 ## Provider and Baseline Workflow
 
 - [Model Extraction Adapter](model-extraction-adapter.md)
@@ -45,3 +50,17 @@ Useful commands:
 - `scripts/v1-hard-dogfood.py`
 - `scripts/v1-real-use-pilot.py`
 - `scripts/v1-ontology-benchmark.py`
+
+## MCP Workflow
+
+The MCP suite verifies the local `mneme-mcp` stdio server through the eval
+harness. It covers initialization, tool listing, V1 personal-memory writes and
+retrieval, V1 session restart persistence, V2 team handoff, sync checksum,
+firewall access, citation coverage, and private-scope denial.
+
+Useful commands:
+
+- `mneme-mcp --self-test`
+- `mneme mcp config --client all`
+- `mneme-eval validate --suite mcp`
+- `mneme-eval run --suite mcp --target mneme-mcp --json`

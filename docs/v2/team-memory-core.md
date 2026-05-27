@@ -146,5 +146,6 @@ or developer to another.
 ## Adapter Surface
 
 `mneme team adapter manifest --json` exposes stable tool names for integrations.
-`scripts/mneme-mcp-stdio.py` is a thin stdio bridge over the same CLI surface for
-MCP-style runtimes. It does not implement separate policy logic.
+`mneme-mcp` exposes V1 and V2 tools over a local stdio MCP boundary and keeps
+policy in `mneme-core`. `scripts/mneme-mcp-stdio.py` remains as a legacy thin
+bridge over the same CLI surface.

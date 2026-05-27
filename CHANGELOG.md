@@ -4,6 +4,18 @@ This project follows the spirit of Keep a Changelog.
 
 ## Unreleased
 
+### Added
+
+- Added `mneme-mcp`, a local Rust stdio MCP server exposing V1 personal-memory
+  tools and V2 team-handoff tools over the same `mneme-core` policy engine.
+- Added `mneme mcp config` for Codex, Claude Code, and Cursor configuration
+  snippets without mutating local client config files.
+- Added the `mcp` eval suite and `mneme-mcp` eval target for MCP handshake,
+  tool listing, V1 persistence, V2 handoff, citation, checksum, scope-leak,
+  and secret-leak verification.
+- Added public MCP documentation and release quality-gate coverage for
+  `mneme-mcp --self-test` and MCP eval readiness.
+
 ## [0.64.0] - 2026-05-25
 
 ### Added

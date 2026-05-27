@@ -9,6 +9,7 @@ for the current local-first MVP and the verification required before releases.
 - `mneme-core` is the product runtime API.
 - `mneme-cli` exposes the `mneme` binary and `run_cli` for CLI-bound local
   tooling.
+- `mneme-mcp` exposes the local stdio MCP server for MCP-capable coding agents.
 - `mneme-eval` exposes the `mneme-eval` binary and `run_cli` for harness-bound
   local tooling.
 - `mneme hook doctor/begin/end` expose the `mneme.agent_hook.v1` JSON contract
@@ -74,9 +75,12 @@ Direct integrations can use `TeamMemoryEngine`, `TeamMemoryStore`,
 task-run inputs, sync-envelope inputs, handoff packages, firewall reports,
 quality reports, ontology reports, and `validate_team_state`.
 
-MCP-style integrations can use `scripts/mneme-mcp-stdio.py`. The script is a
-thin stdio bridge over the same `mneme team ... --json` commands; it does not
-reimplement policy.
+MCP integrations should use `mneme-mcp`. The server exposes V1 personal-memory
+tools and V2 team-memory tools over a local stdio JSON-RPC boundary while
+delegating policy to `mneme-core`. CLI-bound integrations can use
+`mneme mcp config` to print Codex, Claude Code, and Cursor snippets without
+mutating local client config files. `scripts/mneme-mcp-stdio.py` remains as a
+legacy thin bridge over `mneme team ... --json`.
 
 Agent runtimes can use `scripts/mneme-agent-hook.sh` as the repository-local
 installation wrapper. It delegates to an installed `MNEME_BIN`, otherwise runs
@@ -87,13 +91,15 @@ Wrapper doctor diagnostics are no-cost by default for configured command
 extractors; `doctor --check-extractor` is the explicit command-extractor smoke
 path.
 
-Local users can install the CLI with `scripts/install-local.sh`. It installs
-the repository-local `mneme-cli` package as the `mneme` binary and runs a small
-doctor/help/review smoke check.
+Local users can install the CLI and MCP server with `scripts/install-local.sh`.
+It installs the repository-local `mneme-cli` package as the `mneme` binary, the
+`mneme-mcp` package as the `mneme-mcp` binary, and runs small
+doctor/help/review/MCP smoke checks.
 
 Stable behavior remains defined by `docs/v1/v1-stability.md`, `docs/v2/`,
 public feature specs, eval scenarios, `mneme-eval v1-readiness`,
-`mneme-eval v2-readiness`, and the release quality gate.
+`mneme-eval v2-readiness`, the `mcp` eval suite against `mneme-mcp`, and the
+release quality gate.
 
 ## Example
 

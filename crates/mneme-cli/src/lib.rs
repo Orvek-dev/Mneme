@@ -239,6 +239,7 @@ fn run_cli_with_writer(
         "begin" => run_command_or_help("begin", raw_args, writer, run_begin),
         "end" => run_command_or_help("end", raw_args, writer, run_end),
         "hook" => run_command_or_help("hook", raw_args, writer, run_agent_hook),
+        "mcp" => run_command_or_help("mcp", raw_args, writer, run_mcp),
         "team" => run_command_or_help("team", raw_args, writer, run_team),
         "validate" => run_command_or_help("validate", raw_args, writer, run_validate_store),
         "export" => run_command_or_help("export", raw_args, writer, run_export),
@@ -248,7 +249,7 @@ fn run_cli_with_writer(
         "repair" => run_command_or_help("repair", raw_args, writer, run_repair),
         "restore" => run_command_or_help("restore", raw_args, writer, run_restore),
         _ => Err(CliError::invalid_cli(format!(
-            "unknown mneme command: {command}\navailable commands: init, doctor, version, ingest, remember, correct, forget, claims, quality, curate, context, snapshot, begin, end, hook, team, validate, export, review, import, compact, repair, restore"
+            "unknown mneme command: {command}\navailable commands: init, doctor, version, ingest, remember, correct, forget, claims, quality, curate, context, snapshot, begin, end, hook, mcp, team, validate, export, review, import, compact, repair, restore"
         ))),
     }
 }
@@ -297,7 +298,7 @@ fn print_help(command: Option<&str>, writer: &mut impl Write) -> Result<(), CliE
         None => MNEME_HELP,
         Some(command) => command_help(command).ok_or_else(|| {
             CliError::invalid_cli(format!(
-                "unknown mneme help topic: {command}\navailable help topics: init, doctor, version, ingest, remember, correct, forget, claims, quality, curate, context, snapshot, begin, end, hook, team, validate, export, review, import, compact, repair, restore"
+                "unknown mneme help topic: {command}\navailable help topics: init, doctor, version, ingest, remember, correct, forget, claims, quality, curate, context, snapshot, begin, end, hook, mcp, team, validate, export, review, import, compact, repair, restore"
             ))
         })?,
     };
@@ -322,6 +323,7 @@ fn command_help(command: &str) -> Option<&'static str> {
         "begin" => Some(MNEME_BEGIN_HELP),
         "end" => Some(MNEME_END_HELP),
         "hook" => Some(MNEME_HOOK_HELP),
+        "mcp" => Some(MNEME_MCP_HELP),
         "team" => Some(MNEME_TEAM_HELP),
         "validate" => Some(MNEME_VALIDATE_HELP),
         "export" => Some(MNEME_EXPORT_HELP),
@@ -356,6 +358,7 @@ Commands:
   begin       Start an agent task session and retrieve context.
   end         Close an agent task session and optionally remember claims.
   hook        Agent hook JSON contract for begin/end automation.
+  mcp         Generate MCP client configuration snippets.
   team        Manage v2 team memory, policy, promotion, and audit.
   validate    Inspect the current store and backup.
   export      Export the current store state to JSON.
@@ -377,6 +380,7 @@ Examples:
   mneme curate --store /tmp/mneme.json --json
   mneme context "local-first" --store /tmp/mneme.json --json
   mneme team init --store /tmp/mneme-team.json --json
+  mneme mcp config --client all --json
   mneme team remember "Atlas deploys require rollback notes" --actor alice --scope team --store /tmp/mneme-team.json
   mneme hook begin "Draft setup plan" --query "local-first" --store /tmp/mneme.json
   mneme restore --check --store /tmp/mneme.json --json
@@ -519,6 +523,18 @@ Examples:
   mneme hook begin "Draft setup plan" --query "local-first" --agent codex --store /tmp/mneme.json
   mneme hook end session-001 --summary "Prepared a concise setup plan" --remember "user prefers concise setup plans" --store /tmp/mneme.json"#;
 
+const MNEME_MCP_HELP: &str = r#"Usage:
+  mneme mcp config [--client codex|claude-code|cursor|all] [--mcp-bin <path>] [--mode personal|team|all] [--v1-store <path>] [--team-store <path>] [--json]
+
+Generate local stdio MCP client configuration snippets for Mneme. The command
+does not mutate client config files; it prints the exact command/snippet to
+review and apply.
+
+Examples:
+  mneme mcp config --client all
+  mneme mcp config --client codex --mode personal --json
+  mneme mcp config --client cursor --mcp-bin /usr/local/bin/mneme-mcp --team-store .mneme/mneme-team-v2.json"#;
+
 const MNEME_TEAM_HELP: &str = r#"Usage:
   mneme team init [--workspace <id>] [--admin <user>] [--store <path>] [--json]
   mneme team user add <user> [--role admin|maintainer|member] [--store <path>] [--json]
@@ -623,6 +639,60 @@ Example:
 struct CommonOptions {
     json: bool,
     store_path: Option<PathBuf>,
+}
+
+#[derive(Debug, Clone, Copy, Eq, PartialEq)]
+enum McpClient {
+    Codex,
+    ClaudeCode,
+    Cursor,
+    All,
+}
+
+impl McpClient {
+    fn parse(value: String) -> Result<Self, CliError> {
+        match value.as_str() {
+            "codex" => Ok(Self::Codex),
+            "claude-code" | "claude" => Ok(Self::ClaudeCode),
+            "cursor" => Ok(Self::Cursor),
+            "all" => Ok(Self::All),
+            _ => Err(CliError::invalid_cli(format!(
+                "unknown MCP client: {value}\navailable clients: codex, claude-code, cursor, all"
+            ))),
+        }
+    }
+
+    const fn selected(self) -> &'static [Self] {
+        match self {
+            Self::Codex => &[Self::Codex],
+            Self::ClaudeCode => &[Self::ClaudeCode],
+            Self::Cursor => &[Self::Cursor],
+            Self::All => &[Self::Codex, Self::ClaudeCode, Self::Cursor],
+        }
+    }
+}
+
+#[derive(Debug, Clone)]
+struct McpConfigOptions {
+    client: McpClient,
+    mcp_bin: String,
+    mode: String,
+    v1_store: Option<PathBuf>,
+    team_store: Option<PathBuf>,
+    json: bool,
+}
+
+impl Default for McpConfigOptions {
+    fn default() -> Self {
+        Self {
+            client: McpClient::All,
+            mcp_bin: "mneme-mcp".to_owned(),
+            mode: "all".to_owned(),
+            v1_store: None,
+            team_store: None,
+            json: false,
+        }
+    }
 }
 
 #[derive(Debug, Clone, Default)]
@@ -1303,6 +1373,25 @@ struct AgentHookErrorBody {
     kind: &'static str,
     message: String,
     exit_code: i32,
+}
+
+#[derive(Debug, Serialize)]
+struct McpConfigReport {
+    command: &'static str,
+    mode: String,
+    mcp_bin: String,
+    v1_store: String,
+    team_store: String,
+    snippets: Vec<McpClientSnippet>,
+    next_commands: Vec<String>,
+}
+
+#[derive(Debug, Serialize)]
+struct McpClientSnippet {
+    client: &'static str,
+    description: &'static str,
+    format: &'static str,
+    snippet: String,
 }
 
 #[derive(Debug, Serialize)]
@@ -2114,6 +2203,47 @@ fn run_agent_hook_end(raw_args: Vec<String>, writer: &mut impl Write) -> Result<
         report,
     };
     write_json(writer, &hook_report)
+}
+
+fn run_mcp(mut raw_args: Vec<String>, writer: &mut impl Write) -> Result<(), CliError> {
+    let Some(subcommand) = raw_args.first().cloned() else {
+        return Err(CliError::invalid_cli(
+            "usage: mneme mcp config [--client codex|claude-code|cursor|all] [options]",
+        ));
+    };
+    raw_args.remove(0);
+    match subcommand.as_str() {
+        "config" => run_mcp_config(raw_args, writer),
+        value => Err(CliError::invalid_cli(format!(
+            "unknown mcp operation: {value}\navailable mcp operations: config"
+        ))),
+    }
+}
+
+fn run_mcp_config(raw_args: Vec<String>, writer: &mut impl Write) -> Result<(), CliError> {
+    if wants_command_help(&raw_args) {
+        return print_help(Some("mcp"), writer);
+    }
+    let options = parse_mcp_config_args(raw_args)?;
+    let v1_store = options.v1_store.clone().unwrap_or(default_store_path()?);
+    let team_store = options
+        .team_store
+        .clone()
+        .unwrap_or(default_team_store_path()?);
+    let snippets = build_mcp_snippets(&options, &v1_store, &team_store)?;
+    let report = McpConfigReport {
+        command: "mcp.config",
+        mode: options.mode,
+        mcp_bin: options.mcp_bin,
+        v1_store: v1_store.display().to_string(),
+        team_store: team_store.display().to_string(),
+        snippets,
+        next_commands: vec![
+            "mneme-mcp --self-test".to_owned(),
+            "mneme-eval run --suite mcp --target mneme-mcp".to_owned(),
+        ],
+    };
+    emit_mcp_config_report(&report, options.json, writer)
 }
 
 fn run_team(raw_args: Vec<String>, writer: &mut impl Write) -> Result<(), CliError> {
@@ -3121,6 +3251,61 @@ fn parse_curate_args(raw_args: Vec<String>) -> Result<CurateOptions, CliError> {
         idx += 1;
     }
     Ok(options)
+}
+
+fn parse_mcp_config_args(raw_args: Vec<String>) -> Result<McpConfigOptions, CliError> {
+    let mut options = McpConfigOptions::default();
+    let mut idx = 0;
+    while idx < raw_args.len() {
+        match raw_args[idx].as_str() {
+            "--client" => {
+                idx += 1;
+                options.client = McpClient::parse(required_arg(&raw_args, idx, "--client")?)?;
+            }
+            "--mcp-bin" => {
+                idx += 1;
+                options.mcp_bin =
+                    require_nonempty(required_arg(&raw_args, idx, "--mcp-bin")?, "mcp binary")?;
+            }
+            "--mode" => {
+                idx += 1;
+                options.mode = parse_mcp_mode(required_arg(&raw_args, idx, "--mode")?)?;
+            }
+            "--v1-store" => {
+                idx += 1;
+                options.v1_store = Some(PathBuf::from(required_arg(&raw_args, idx, "--v1-store")?));
+            }
+            "--team-store" => {
+                idx += 1;
+                options.team_store =
+                    Some(PathBuf::from(required_arg(&raw_args, idx, "--team-store")?));
+            }
+            "--json" => {
+                options.json = true;
+            }
+            value if value.starts_with('-') => {
+                return Err(CliError::invalid_cli(format!(
+                    "unknown mcp config option: {value}"
+                )));
+            }
+            value => {
+                return Err(CliError::invalid_cli(format!(
+                    "unexpected mcp config argument: {value}"
+                )));
+            }
+        }
+        idx += 1;
+    }
+    Ok(options)
+}
+
+fn parse_mcp_mode(value: String) -> Result<String, CliError> {
+    match value.as_str() {
+        "personal" | "team" | "all" => Ok(value),
+        _ => Err(CliError::invalid_cli(format!(
+            "unknown MCP mode: {value}\navailable modes: personal, team, all"
+        ))),
+    }
 }
 
 fn parse_team_init_args(raw_args: Vec<String>) -> Result<TeamInitOptions, CliError> {
@@ -4607,6 +4792,120 @@ fn default_team_store_path() -> Result<PathBuf, CliError> {
     env::current_dir()
         .map(|dir| dir.join(".mneme").join("mneme-team-v2.json"))
         .map_err(|source| CliError::io("read current dir", Path::new("."), source))
+}
+
+fn build_mcp_snippets(
+    options: &McpConfigOptions,
+    v1_store: &Path,
+    team_store: &Path,
+) -> Result<Vec<McpClientSnippet>, CliError> {
+    let mut snippets = Vec::new();
+    for client in options.client.selected() {
+        snippets.push(match client {
+            McpClient::Codex => build_codex_mcp_snippet(options, v1_store, team_store)?,
+            McpClient::ClaudeCode => build_claude_code_mcp_snippet(options, v1_store, team_store),
+            McpClient::Cursor => build_cursor_mcp_snippet(options, v1_store, team_store)?,
+            McpClient::All => unreachable!("selected() never returns All"),
+        });
+    }
+    Ok(snippets)
+}
+
+fn build_codex_mcp_snippet(
+    options: &McpConfigOptions,
+    v1_store: &Path,
+    team_store: &Path,
+) -> Result<McpClientSnippet, CliError> {
+    let args = mcp_server_args(options, v1_store, team_store);
+    let args_literal = args
+        .iter()
+        .map(|arg| quoted_string(arg))
+        .collect::<Result<Vec<_>, _>>()?
+        .join(", ");
+    let snippet = format!(
+        "[mcp_servers.mneme]\ncommand = {}\nargs = [{}]\n",
+        quoted_string(&options.mcp_bin)?,
+        args_literal
+    );
+    Ok(McpClientSnippet {
+        client: "codex",
+        description: "Add this table to the Codex MCP config file.",
+        format: "toml",
+        snippet,
+    })
+}
+
+fn build_claude_code_mcp_snippet(
+    options: &McpConfigOptions,
+    v1_store: &Path,
+    team_store: &Path,
+) -> McpClientSnippet {
+    let command = mcp_server_command(options, v1_store, team_store);
+    McpClientSnippet {
+        client: "claude-code",
+        description: "Run this command to register Mneme as a user-scoped stdio MCP server.",
+        format: "shell",
+        snippet: format!("claude mcp add --transport stdio --scope user mneme -- {command}"),
+    }
+}
+
+fn build_cursor_mcp_snippet(
+    options: &McpConfigOptions,
+    v1_store: &Path,
+    team_store: &Path,
+) -> Result<McpClientSnippet, CliError> {
+    let args = mcp_server_args(options, v1_store, team_store);
+    let config = serde_json::json!({
+        "mcpServers": {
+            "mneme": {
+                "command": options.mcp_bin,
+                "args": args,
+            }
+        }
+    });
+    Ok(McpClientSnippet {
+        client: "cursor",
+        description: "Add this object to Cursor MCP configuration.",
+        format: "json",
+        snippet: serde_json::to_string_pretty(&config).map_err(CliError::json)?,
+    })
+}
+
+fn mcp_server_args(options: &McpConfigOptions, v1_store: &Path, team_store: &Path) -> Vec<String> {
+    vec![
+        "--mode".to_owned(),
+        options.mode.clone(),
+        "--v1-store".to_owned(),
+        v1_store.display().to_string(),
+        "--team-store".to_owned(),
+        team_store.display().to_string(),
+    ]
+}
+
+fn mcp_server_command(options: &McpConfigOptions, v1_store: &Path, team_store: &Path) -> String {
+    let mut parts = vec![options.mcp_bin.clone()];
+    parts.extend(mcp_server_args(options, v1_store, team_store));
+    parts
+        .iter()
+        .map(|part| shell_quote(part))
+        .collect::<Vec<_>>()
+        .join(" ")
+}
+
+fn quoted_string(value: &str) -> Result<String, CliError> {
+    serde_json::to_string(value).map_err(CliError::json)
+}
+
+fn shell_quote(value: &str) -> String {
+    if !value.is_empty()
+        && value
+            .chars()
+            .all(|ch| ch.is_ascii_alphanumeric() || matches!(ch, '/' | '.' | '_' | '-' | ':' | '='))
+    {
+        value.to_owned()
+    } else {
+        format!("'{}'", value.replace('\'', "'\"'\"'"))
+    }
 }
 
 fn default_init_config_path(store_path: &Path) -> PathBuf {
@@ -6349,6 +6648,37 @@ fn emit_agent_hook_error(
     write_json(writer, &report)
 }
 
+fn emit_mcp_config_report(
+    report: &McpConfigReport,
+    json: bool,
+    writer: &mut impl Write,
+) -> Result<(), CliError> {
+    if json {
+        return write_json(writer, report);
+    }
+    writeln!(
+        writer,
+        "mneme: MCP config (mode={}, v1_store={}, team_store={})",
+        report.mode, report.v1_store, report.team_store
+    )
+    .map_err(|source| CliError::io("write", Path::new("<stdout>"), source))?;
+    for snippet in &report.snippets {
+        writeln!(
+            writer,
+            "\n## {}\n{}\n\n```{}\n{}```",
+            snippet.client, snippet.description, snippet.format, snippet.snippet
+        )
+        .map_err(|source| CliError::io("write", Path::new("<stdout>"), source))?;
+    }
+    writeln!(writer, "\nNext checks:")
+        .map_err(|source| CliError::io("write", Path::new("<stdout>"), source))?;
+    for command in &report.next_commands {
+        writeln!(writer, "- {command}")
+            .map_err(|source| CliError::io("write", Path::new("<stdout>"), source))?;
+    }
+    Ok(())
+}
+
 fn emit_store_validation_report(
     report: &StoreValidationCliReport,
     json: bool,
@@ -6969,6 +7299,16 @@ mod tests {
         assert!(hook_text.contains("mneme hook begin"));
         assert!(hook_text.contains("mneme.agent_hook.v1"));
 
+        let mut mcp_output = Vec::new();
+        run_cli_with_writer(
+            vec!["mneme".to_owned(), "mcp".to_owned(), "--help".to_owned()],
+            &mut mcp_output,
+        )?;
+        let mcp_text = String::from_utf8(mcp_output)?;
+        assert!(mcp_text.contains("mneme mcp config"));
+        assert!(mcp_text.contains("codex|claude-code|cursor|all"));
+        assert!(mcp_text.contains("local stdio MCP"));
+
         let mut review_output = Vec::new();
         run_cli_with_writer(
             vec!["mneme".to_owned(), "review".to_owned(), "--help".to_owned()],
@@ -7036,6 +7376,44 @@ mod tests {
         let error = result.expect_err("unknown command should fail");
         assert_eq!(error.exit_code(), 2);
         assert!(error.to_string().contains("mneme help"));
+    }
+
+    #[test]
+    fn mcp_config_json_lists_supported_client_snippets() -> Result<(), Box<dyn std::error::Error>> {
+        let mut output = Vec::new();
+        run_cli_with_writer(
+            vec![
+                "mneme".to_owned(),
+                "mcp".to_owned(),
+                "config".to_owned(),
+                "--client".to_owned(),
+                "all".to_owned(),
+                "--mcp-bin".to_owned(),
+                "/tmp/mneme-mcp".to_owned(),
+                "--mode".to_owned(),
+                "all".to_owned(),
+                "--v1-store".to_owned(),
+                "/tmp/mneme-v1.json".to_owned(),
+                "--team-store".to_owned(),
+                "/tmp/mneme-team-v2.json".to_owned(),
+                "--json".to_owned(),
+            ],
+            &mut output,
+        )?;
+        let value: serde_json::Value = serde_json::from_slice(&output)?;
+        assert_eq!(value["command"], "mcp.config");
+        assert_eq!(value["mode"], "all");
+        assert_eq!(value["snippets"].as_array().map(Vec::len), Some(3));
+        assert!(value["snippets"][0]["snippet"]
+            .as_str()
+            .is_some_and(|snippet| snippet.contains("[mcp_servers.mneme]")));
+        assert!(value["snippets"][1]["snippet"]
+            .as_str()
+            .is_some_and(|snippet| snippet.contains("claude mcp add")));
+        assert!(value["snippets"][2]["snippet"]
+            .as_str()
+            .is_some_and(|snippet| snippet.contains("\"mcpServers\"")));
+        Ok(())
     }
 
     #[test]

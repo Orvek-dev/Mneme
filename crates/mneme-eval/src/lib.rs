@@ -12,6 +12,7 @@ mod cli;
 mod dogfood;
 mod error;
 mod fake;
+mod mneme_mcp;
 mod mneme_v1;
 mod mneme_v2;
 mod redaction;

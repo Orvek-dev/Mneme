@@ -7,7 +7,7 @@
   <a href="./LICENSE"><img alt="License" src="https://img.shields.io/badge/license-MIT-0969da"></a>
   <img alt="Rust" src="https://img.shields.io/badge/Rust-CLI-b7410e">
   <img alt="Local first" src="https://img.shields.io/badge/local--first-JSON%20stores-6f42c1">
-  <img alt="Eval scenarios" src="https://img.shields.io/badge/eval-46%20public%20scenarios-1f883d">
+  <img alt="Eval scenarios" src="https://img.shields.io/badge/eval-50%20public%20scenarios-1f883d">
   <img alt="Team suite" src="https://img.shields.io/badge/v2%20team-10%2F10%20scenarios-8250df">
 </p>
 
@@ -31,7 +31,7 @@ V2 = team memory handoff with policy, firewall, quality, sync, and eval checks
 ```
 
 Mneme is not a hosted vector database. The public repository focuses on
-deterministic local behavior: JSON stores, CLI workflows, MCP-style adapters,
+deterministic local behavior: JSON stores, CLI workflows, a local MCP server,
 agent hooks, review tools, team handoff packages, and public-safe eval suites.
 Hosted sync, dashboard, billing, and production storage belong to a separate
 commercial track.
@@ -42,9 +42,10 @@ commercial track.
 | --- | --- | --- |
 | `mneme-core` | v1 personal-memory engine and v2 team-memory policy core | [API contract](docs/project/api-contract.md) |
 | `mneme-cli` | Local CLI over v1 and v2 JSON stores | [Local CLI](docs/v1/local-cli.md) |
+| `mneme-mcp` | Local stdio MCP server for V1 personal memory and V2 team handoff tools | [MCP](docs/mcp.md) |
 | `mneme-eval` | Scenario-based eval harness with acceptance gates | [Eval Harness](docs/eval-harness/README.md) |
 | V1 | Personal agent memory with citations, scope checks, review, curation, and repair | [V1 docs](docs/v1/README.md) |
-| V2 | Team agent handoff with private/project/team scopes, firewall, quality, sync, and MCP bridge | [V2 docs](docs/v2/README.md) |
+| V2 | Team agent handoff with private/project/team scopes, firewall, quality, sync, and MCP server | [V2 docs](docs/v2/README.md) |
 | Demo | Public-safe v2 team-agent workflow | [Team Agent Ops Example](examples/v2-team-agent-ops/README.md) |
 
 ## Quickstart
@@ -60,6 +61,14 @@ That smoke test creates a temporary local store, initializes Mneme, records a
 preference, retrieves cited context, opens and closes an agent session, exports
 a review artifact, and validates the store. It does not write private data to
 the repository.
+
+Generate MCP config snippets for Codex, Claude Code, and Cursor:
+
+```sh
+cargo run -p mneme-mcp -- --self-test
+cargo run -p mneme-cli -- mcp config --client all
+cargo run -p mneme-eval -- run --suite mcp --target mneme-mcp
+```
 
 Run the complete V2 team-agent demo:
 
@@ -121,11 +130,12 @@ claims against external production workloads.
 
 | Evidence surface | Public-safe signal | Current result |
 | --- | --- | --- |
-| Public eval surface | Core, runtime, agent, dogfood, model, and team suites | `46` public scenarios |
+| Public eval surface | Core, runtime, agent, dogfood, model, team, and MCP suites | `50` public scenarios |
 | V1 ontology readiness | 13 golden ontology cases | `1.00` entity/relation/attribute F1 |
 | V1 hard dogfood | 100 normal records, 150 adversarial records, 30 handoff workflows | `30/30` workflows passed |
 | Safety guardrails | Scope leak and secret leak checks | `0` scope leaks, `0` secret leaks |
 | V2 team readiness | ACL, promotion, revoke, secret, sync, firewall, handoff, run, quality, checksum, ontology | `10/10` team scenarios passed |
+| MCP readiness | V1/V2 tools through the local stdio server | `4/4` MCP scenarios passed |
 | V2 seeded faults | ACL bypass, secret leak, dropped citations, unapproved promotion, ignored revocation, quarantined leak | `6/6` detected |
 | V2 dogfood shape | 120 synthetic team records, 80 adversarial records, 25 handoff workflows | fixture shape verified |
 
@@ -156,6 +166,9 @@ mneme team run end team-run-001 \
 mneme team run handoff team-run-001 --actor bob --agent codex-bob --json
 mneme team quality --json
 mneme team firewall --json
+
+# MCP config for agent clients
+mneme mcp config --client all
 ```
 
 Without `--store`, V1 writes to `.mneme/mneme-v1.json` and V2 writes to
@@ -166,13 +179,15 @@ Without `--store`, V1 writes to `.mneme/mneme-v1.json` and V2 writes to
 ```text
 crates/mneme-core       shared v1 personal-memory and v2 team-memory core
 crates/mneme-cli        local v1/v2 CLI
+crates/mneme-mcp        local stdio MCP server for V1 and V2 tools
 crates/mneme-eval       reusable eval harness CLI
+docs/mcp.md             MCP server, client config, and eval quickstart
 docs/v1/                personal-memory docs
 docs/v2/                team-memory, handoff, security, and eval docs
 docs/eval-harness/      scenario, baseline, candidate, and provider eval docs
 examples/v2-team-agent-ops/  public-safe v2 handoff demo
 evals/                  public scenario fixtures
-scripts/                quality, safety, MCP bridge, dogfood, and install helpers
+scripts/                quality, safety, legacy bridge, dogfood, and install helpers
 spec/                   feature specs and verification maps
 ```
 
@@ -181,6 +196,7 @@ spec/                   feature specs and verification maps
 - [Documentation Map](docs/README.md)
 - [Mneme v1](docs/v1/README.md)
 - [Mneme v2](docs/v2/README.md)
+- [MCP](docs/mcp.md)
 - [V2 Quickstart](docs/v2/quickstart.md)
 - [V2 Team Agent Workflow](docs/v2/team-agent-workflow.md)
 - [V2 Security Model](docs/v2/security-model.md)
@@ -207,6 +223,16 @@ cargo run -p mneme-eval -- run --suite team --target mneme-v2
 cargo run -p mneme-eval -- acceptance --suite team --target mneme-v2
 cargo run -p mneme-eval -- v2-readiness --json --report evals/reports/v2-readiness.json
 scripts/v2-team-dogfood.py
+```
+
+Run the MCP readiness gate:
+
+```sh
+cargo run -p mneme-mcp -- --self-test
+cargo run -p mneme-eval -- validate --suite mcp
+cargo run -p mneme-eval -- run --suite mcp --target mneme-mcp \
+  --json \
+  --report evals/reports/mcp-readiness.json
 ```
 
 Run model extraction in deterministic dry-run mode:
@@ -247,7 +273,7 @@ Mneme is pre-1.0. The useful surface today is local development and evaluation:
 - provider-neutral command extractor boundary;
 - V2 users, agents, projects, scoped memory, promotion review, revoke, audit,
   quarantine, context packs, run handoff, sync, firewall, quality, ontology,
-  and MCP-style stdio bridge;
+  MCP server, and legacy MCP-style stdio bridge;
 - public-safe eval suites, dogfood scripts, candidate promotion, baseline
   comparison, seeded faults, and release quality gate.
 

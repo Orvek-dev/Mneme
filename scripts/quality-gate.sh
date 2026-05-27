@@ -21,6 +21,12 @@ python3 -m py_compile scripts/mneme-mcp-stdio.py
 python3 -m py_compile scripts/v1-real-use-pilot.py
 python3 -m py_compile scripts/v1-ontology-benchmark.py
 scripts/mneme-mcp-stdio.py --self-test | grep -q '"tool_count": 13'
+cargo run -q -p mneme-mcp -- --self-test | grep -q '"tool_count":34'
+MCP_READINESS_REPORT="${TMP_ROOT}/mneme-quality-gate-mcp-readiness.json"
+cargo run -q -p mneme-eval -- validate --suite mcp >/dev/null
+cargo run -q -p mneme-eval -- run --suite mcp --target mneme-mcp --json --report "$MCP_READINESS_REPORT" >/dev/null
+grep -q '"ok": true' "$MCP_READINESS_REPORT"
+grep -q '"target": "mneme-mcp"' "$MCP_READINESS_REPORT"
 MANUAL_DOGFOOD_DATASET="${TMP_ROOT}/mneme-quality-gate-manual-dogfood-dataset.json"
 scripts/v1-manual-dogfood.py --check-dataset > "$MANUAL_DOGFOOD_DATASET"
 grep -q '"mock_record_count": 100' "$MANUAL_DOGFOOD_DATASET"
@@ -118,6 +124,7 @@ INSTALL_DOCTOR_BAD_STORE="${TMP_ROOT}/mneme-quality-gate-installed-doctor-bad-st
 INSTALL_REPAIR_CHECK_VALID="${TMP_ROOT}/mneme-quality-gate-installed-repair-check-valid.json"
 INSTALL_REPAIR_CHECK_BAD="${TMP_ROOT}/mneme-quality-gate-installed-repair-check-bad.json"
 INSTALL_HELP="${TMP_ROOT}/mneme-quality-gate-installed-help.txt"
+INSTALL_MCP_SELF_TEST="${TMP_ROOT}/mneme-quality-gate-installed-mcp-self-test.json"
 INSTALL_CONTEXT="${TMP_ROOT}/mneme-quality-gate-installed-context.json"
 INSTALL_STORE="${TMP_ROOT}/mneme-quality-gate-installed-cli.json"
 INSTALL_REVIEW="${TMP_ROOT}/mneme-quality-gate-installed-review.md"
@@ -133,10 +140,14 @@ rm -rf "$INSTALL_ROOT" "$INSTALL_WORKSPACE"
 rm -f "$INSTALL_STDOUT" "$INSTALL_DOCTOR" "$INSTALL_HELP" "$INSTALL_CONTEXT" "$INSTALL_STORE" "$INSTALL_REVIEW" \
   "$INSTALL_INIT" "$INSTALL_DOCTOR_PRE" "$INSTALL_DOCTOR_POST" "$INSTALL_DOCTOR_BAD_PROFILE" \
   "$INSTALL_DOCTOR_BAD_STORE" "$INSTALL_REPAIR_CHECK_VALID" "$INSTALL_REPAIR_CHECK_BAD" \
-  "$INSTALL_WRAPPER_DOCTOR" "$INSTALL_WRAPPER_BEGIN" "$INSTALL_WRAPPER_END" "$QUICKSTART_SMOKE"
+  "$INSTALL_MCP_SELF_TEST" "$INSTALL_WRAPPER_DOCTOR" "$INSTALL_WRAPPER_BEGIN" "$INSTALL_WRAPPER_END" "$QUICKSTART_SMOKE"
 ./scripts/install-local.sh --root "$INSTALL_ROOT" --debug > "$INSTALL_STDOUT"
 grep -q 'mneme-install: ok' "$INSTALL_STDOUT"
 INSTALL_BIN="${INSTALL_ROOT}/bin/mneme"
+INSTALL_MCP_BIN="${INSTALL_ROOT}/bin/mneme-mcp"
+test -x "$INSTALL_MCP_BIN"
+"$INSTALL_MCP_BIN" --self-test > "$INSTALL_MCP_SELF_TEST"
+grep -q '"tool_count":34' "$INSTALL_MCP_SELF_TEST"
 "$INSTALL_BIN" doctor > "$INSTALL_DOCTOR"
 grep -q 'Mneme local CLI' "$INSTALL_DOCTOR"
 "$INSTALL_BIN" help > "$INSTALL_HELP"
@@ -223,6 +234,13 @@ grep -q "Usage: mneme begin" "$MNEME_HELP"
 cargo run -p mneme-cli -- hook --help > "$MNEME_HELP"
 grep -q "mneme.agent_hook.v1" "$MNEME_HELP"
 grep -q "mneme hook doctor" "$MNEME_HELP"
+cargo run -p mneme-cli -- mcp --help > "$MNEME_HELP"
+grep -q "mneme mcp config" "$MNEME_HELP"
+cargo run -p mneme-cli -- mcp config --client all --json > "$MNEME_HELP"
+grep -q '"command": "mcp.config"' "$MNEME_HELP"
+grep -q '"client": "codex"' "$MNEME_HELP"
+grep -q '"client": "claude-code"' "$MNEME_HELP"
+grep -q '"client": "cursor"' "$MNEME_HELP"
 cargo run -p mneme-cli -- review --help > "$MNEME_HELP"
 grep -q "Usage: mneme review" "$MNEME_HELP"
 grep -q -- "--format markdown|json" "$MNEME_HELP"

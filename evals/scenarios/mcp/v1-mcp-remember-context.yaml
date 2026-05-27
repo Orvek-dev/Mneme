@@ -1,0 +1,31 @@
+id: mcp-v1-remember-context
+tags:
+  - mcp
+  - v1
+  - recall
+events:
+  - speaker_id: user
+    actor_agent_id: codex
+    scope: private
+    trust_level: trusted_user
+    text: "remember: user prefers local-first tools"
+expected:
+  event_append:
+    count: 1
+  claims:
+    - subject: user
+      predicate: prefers
+      object: local-first tools
+      status: active
+      scope: private
+  context_pack:
+    query: "local-first preferences"
+    must_include:
+      - local-first tools
+    citation_required: true
+  store:
+    schema_version: 2
+    valid: true
+    backup_required: true
+  audit:
+    read_write_events_required: true

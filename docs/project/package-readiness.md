@@ -10,6 +10,7 @@ The current distribution policy is documented in `docs/project/distribution-poli
 
 - `mneme-core`: personal-memory engine and local JSON store abstractions.
 - `mneme-cli`: local CLI binary exposed as `mneme`.
+- `mneme-mcp`: local stdio MCP server exposed as `mneme-mcp`.
 - `mneme-eval`: scenario replay harness and quality gates.
 
 All package manifests include a public repository URL, a description, a README
@@ -34,10 +35,10 @@ Run:
 The distribution policy check verifies that crates remain unpublished while the
 MIT-licensed source distribution stays separate from registry publication. The
 package check runs that guard before assembling
-`mneme-core` and listing each workspace package's included files. `mneme-cli`
-and `mneme-eval` depend on the unpublished workspace-local `mneme-core` crate,
-so their file-list checks are the useful pre-publication signal until registry
-publication is explicitly enabled.
+`mneme-core` and listing each workspace package's included files. `mneme-cli`,
+`mneme-mcp`, and `mneme-eval` depend on the unpublished workspace-local
+`mneme-core` crate, so their file-list checks are the useful pre-publication
+signal until registry publication is explicitly enabled.
 
 The script blocks known private or generated paths such as local stores, eval
 reports, eval candidates, private planning files, and local harness/template
@@ -55,8 +56,8 @@ The full quality gate also runs this check:
 
 ## Local Install Check
 
-The local CLI installer is intentionally separate from registry publication.
-It builds from this repository and installs only the `mneme` binary:
+The local installer is intentionally separate from registry publication. It
+builds from this repository and installs the `mneme` and `mneme-mcp` binaries:
 
 ```sh
 ./scripts/install-local.sh
@@ -66,16 +67,18 @@ mneme doctor --json
 mneme quality --json
 mneme curate --json
 mneme restore --check --json
+mneme mcp config --client all --json
+mneme-mcp --self-test
 ```
 
 The full quality gate installs into a temporary root with `--debug` and smokes
-the installed binary before release. It also checks `mneme doctor --json`
+the installed binaries before release. It also checks `mneme doctor --json`
 before and after workspace initialization, validates invalid-profile and
 invalid-store doctor reports, checks `mneme repair --check` for valid and
 repairable stores, checks `mneme quality` review queue output, checks
 `mneme curate` dry-run/apply cleanup, checks `mneme restore` rollback after
-applied curation, and verifies the generated agent hook profile through
-`scripts/mneme-agent-hook.sh`.
+applied curation, checks MCP config/self-test output, and verifies the generated
+agent hook profile through `scripts/mneme-agent-hook.sh`.
 
 ## Publication Policy
 

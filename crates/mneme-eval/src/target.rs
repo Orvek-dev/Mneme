@@ -2,6 +2,7 @@ use std::collections::BTreeMap;
 
 use crate::error::EvalError;
 use crate::fake::FakeEvalTarget;
+use crate::mneme_mcp::MnemeMcpEvalTarget;
 use crate::mneme_v1::{MnemeV1CommandEvalTarget, MnemeV1EvalTarget};
 use crate::mneme_v2::MnemeV2EvalTarget;
 use crate::scenario::Scenario;
@@ -22,6 +23,7 @@ pub(crate) enum TargetKind {
     MnemeV1,
     MnemeV1Command,
     MnemeV2,
+    MnemeMcp,
 }
 
 impl TargetKind {
@@ -31,12 +33,13 @@ impl TargetKind {
             "mneme-v1" => Some(Self::MnemeV1),
             "mneme-v1-command" => Some(Self::MnemeV1Command),
             "mneme-v2" => Some(Self::MnemeV2),
+            "mneme-mcp" => Some(Self::MnemeMcp),
             _ => None,
         }
     }
 
     pub(crate) fn available() -> &'static str {
-        "fake, mneme-v1, mneme-v1-command, mneme-v2"
+        "fake, mneme-v1, mneme-v1-command, mneme-v2, mneme-mcp"
     }
 
     pub(crate) fn as_str(self) -> &'static str {
@@ -45,6 +48,7 @@ impl TargetKind {
             Self::MnemeV1 => "mneme-v1",
             Self::MnemeV1Command => "mneme-v1-command",
             Self::MnemeV2 => "mneme-v2",
+            Self::MnemeMcp => "mneme-mcp",
         }
     }
 }
@@ -155,6 +159,7 @@ pub(crate) fn build_target(kind: TargetKind) -> Box<dyn EvalTarget> {
         TargetKind::MnemeV1 => Box::new(MnemeV1EvalTarget),
         TargetKind::MnemeV1Command => Box::new(MnemeV1CommandEvalTarget),
         TargetKind::MnemeV2 => Box::new(MnemeV2EvalTarget),
+        TargetKind::MnemeMcp => Box::new(MnemeMcpEvalTarget),
     }
 }
 

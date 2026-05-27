@@ -196,7 +196,7 @@ Commands:
                  Summarize a v1 dogfood evidence bundle.
 
 Targets:
-  fake, mneme-v1, mneme-v1-command, mneme-v2
+  fake, mneme-v1, mneme-v1-command, mneme-v2, mneme-mcp
 
 Examples:
   mneme-eval validate --suite core
@@ -226,7 +226,7 @@ Validate scenario files without running a target.
 Example:
   mneme-eval validate --suite core"#;
 
-const MNEME_EVAL_RUN_HELP: &str = r#"Usage: mneme-eval run [--suite <name>] [--target fake|mneme-v1|mneme-v1-command|mneme-v2] [--extractor-command <program>] [--extractor-arg <arg>]... [--seeded-fault <name>] [--json] [--report <path>]
+const MNEME_EVAL_RUN_HELP: &str = r#"Usage: mneme-eval run [--suite <name>] [--target fake|mneme-v1|mneme-v1-command|mneme-v2|mneme-mcp] [--extractor-command <program>] [--extractor-arg <arg>]... [--seeded-fault <name>] [--json] [--report <path>]
 
 Replay a scenario suite against a target. Defaults are --suite core and
 --target fake.
@@ -234,21 +234,21 @@ Replay a scenario suite against a target. Defaults are --suite core and
 Example:
   mneme-eval run --suite core --target mneme-v1"#;
 
-const MNEME_EVAL_REPLAY_HELP: &str = r#"Usage: mneme-eval replay <scenario.yaml> [--target fake|mneme-v1|mneme-v1-command|mneme-v2] [--extractor-command <program>] [--extractor-arg <arg>]... [--seeded-fault <name>] [--json] [--report <path>]
+const MNEME_EVAL_REPLAY_HELP: &str = r#"Usage: mneme-eval replay <scenario.yaml> [--target fake|mneme-v1|mneme-v1-command|mneme-v2|mneme-mcp] [--extractor-command <program>] [--extractor-arg <arg>]... [--seeded-fault <name>] [--json] [--report <path>]
 
 Replay one scenario against a target.
 
 Example:
   mneme-eval replay evals/scenarios/core/same-turn-explicit-remember.yaml --target mneme-v1"#;
 
-const MNEME_EVAL_ACCEPTANCE_HELP: &str = r#"Usage: mneme-eval acceptance [--suite <name>] [--target fake|mneme-v1|mneme-v1-command|mneme-v2] [--extractor-command <program>] [--extractor-arg <arg>]... [--json] [--report <path>]
+const MNEME_EVAL_ACCEPTANCE_HELP: &str = r#"Usage: mneme-eval acceptance [--suite <name>] [--target fake|mneme-v1|mneme-v1-command|mneme-v2|mneme-mcp] [--extractor-command <program>] [--extractor-arg <arg>]... [--json] [--report <path>]
 
 Run acceptance gates for a suite and target.
 
 Example:
   mneme-eval acceptance --suite core --target mneme-v1"#;
 
-const MNEME_EVAL_BASELINE_HELP: &str = r#"Usage: mneme-eval baseline [--suite <name>] [--target fake|mneme-v1|mneme-v1-command|mneme-v2] [--extractor-command <program>] [--extractor-arg <arg>]... [--seeded-fault <name>] [--iterations <n>] [--provider-label <label>] [--model-label <label>] [--run-label <label>] [--live-provider] [--json] [--report <path>]
+const MNEME_EVAL_BASELINE_HELP: &str = r#"Usage: mneme-eval baseline [--suite <name>] [--target fake|mneme-v1|mneme-v1-command|mneme-v2|mneme-mcp] [--extractor-command <program>] [--extractor-arg <arg>]... [--seeded-fault <name>] [--iterations <n>] [--provider-label <label>] [--model-label <label>] [--run-label <label>] [--live-provider] [--json] [--report <path>]
 
 Repeat a suite and summarize aggregate, category, and per-scenario pass rates.
 
@@ -743,6 +743,7 @@ fn build_acceptance_report(suite: &str, options: &CommandOptions) -> AcceptanceR
 fn seeded_faults_for_target(target_kind: TargetKind) -> &'static [FaultMode] {
     match target_kind {
         TargetKind::MnemeV2 => V2_READINESS_FAULTS,
+        TargetKind::MnemeMcp => &[],
         TargetKind::Fake | TargetKind::MnemeV1 | TargetKind::MnemeV1Command => &[
             FaultMode::SkipClaims,
             FaultMode::LeakSecrets,
@@ -2100,7 +2101,7 @@ fn parse_replay_args(raw_args: Vec<String>) -> Result<(PathBuf, CommandOptions),
     }
     let Some(path) = path else {
         return Err(EvalError::invalid_cli(
-            "usage: mneme-eval replay <scenario.yaml> [--target fake|mneme-v1|mneme-v1-command|mneme-v2] [--extractor-command <program>] [--extractor-arg <arg>]... [--json] [--report <path>]",
+            "usage: mneme-eval replay <scenario.yaml> [--target fake|mneme-v1|mneme-v1-command|mneme-v2|mneme-mcp] [--extractor-command <program>] [--extractor-arg <arg>]... [--json] [--report <path>]",
         ));
     };
     Ok((path, options))
