@@ -124,8 +124,8 @@ Agent B receives only allowed context
 
 ## Evidence
 
-The latest public-safe local evidence snapshot was measured for `v0.64.0` on
-2026-05-25. These numbers are reproducible development evidence for Mneme, not
+The latest public-safe local evidence snapshot was measured on 2026-05-27.
+These numbers are reproducible development evidence for Mneme, not
 claims against external production workloads.
 
 | Evidence surface | Public-safe signal | Current result |
@@ -136,6 +136,8 @@ claims against external production workloads.
 | Safety guardrails | Scope leak and secret leak checks | `0` scope leaks, `0` secret leaks |
 | V2 team readiness | ACL, promotion, revoke, secret, sync, firewall, handoff, run, quality, checksum, ontology | `10/10` team scenarios passed |
 | MCP readiness | V1/V2 tools through the local stdio server | `4/4` MCP scenarios passed |
+| MCP hard dogfood | V1 hard corpus, V1 ontology, V2 team corpus, team suite via MCP | passed locally |
+| MCP seeded faults | V1 skip/leak/citation faults plus V2 policy/leak faults through MCP | `9/9` detected |
 | V2 seeded faults | ACL bypass, secret leak, dropped citations, unapproved promotion, ignored revocation, quarantined leak | `6/6` detected |
 | V2 dogfood shape | 120 synthetic team records, 80 adversarial records, 25 handoff workflows | fixture shape verified |
 
@@ -233,6 +235,10 @@ cargo run -p mneme-eval -- validate --suite mcp
 cargo run -p mneme-eval -- run --suite mcp --target mneme-mcp \
   --json \
   --report evals/reports/mcp-readiness.json
+scripts/mcp-hard-dogfood.py --check-contract
+scripts/mcp-hard-dogfood.py --check-dataset
+scripts/mcp-hard-dogfood.py --check-seeded-faults
+scripts/mcp-hard-dogfood.py --out-dir /tmp/mneme-mcp-hard-dogfood --force
 ```
 
 Run model extraction in deterministic dry-run mode:

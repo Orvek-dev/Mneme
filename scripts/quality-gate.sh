@@ -17,6 +17,7 @@ python3 -m py_compile wrappers/openai_extractor.py
 python3 -m py_compile scripts/v1-manual-dogfood.py
 python3 -m py_compile scripts/v1-hard-dogfood.py
 python3 -m py_compile scripts/v2-team-dogfood.py
+python3 -m py_compile scripts/mcp-hard-dogfood.py
 python3 -m py_compile scripts/mneme-mcp-stdio.py
 python3 -m py_compile scripts/v1-real-use-pilot.py
 python3 -m py_compile scripts/v1-ontology-benchmark.py
@@ -27,6 +28,19 @@ cargo run -q -p mneme-eval -- validate --suite mcp >/dev/null
 cargo run -q -p mneme-eval -- run --suite mcp --target mneme-mcp --json --report "$MCP_READINESS_REPORT" >/dev/null
 grep -q '"ok": true' "$MCP_READINESS_REPORT"
 grep -q '"target": "mneme-mcp"' "$MCP_READINESS_REPORT"
+MCP_HARD_CONTRACT="${TMP_ROOT}/mneme-quality-gate-mcp-hard-contract.json"
+MCP_HARD_DATASET="${TMP_ROOT}/mneme-quality-gate-mcp-hard-dataset.json"
+MCP_HARD_FAULTS="${TMP_ROOT}/mneme-quality-gate-mcp-hard-seeded-faults.json"
+scripts/mcp-hard-dogfood.py --check-contract > "$MCP_HARD_CONTRACT"
+grep -q '"command": "mcp-hard-dogfood-contract"' "$MCP_HARD_CONTRACT"
+grep -q '"v1_normal_record_count": 100' "$MCP_HARD_CONTRACT"
+grep -q '"v2_team_record_count": 120' "$MCP_HARD_CONTRACT"
+scripts/mcp-hard-dogfood.py --check-dataset > "$MCP_HARD_DATASET"
+grep -q '"normal_record_count": 100' "$MCP_HARD_DATASET"
+grep -q '"adversarial_record_count": 150' "$MCP_HARD_DATASET"
+grep -q '"team_record_count": 120' "$MCP_HARD_DATASET"
+scripts/mcp-hard-dogfood.py --check-seeded-faults > "$MCP_HARD_FAULTS"
+grep -q '"detection_rate": 1.0' "$MCP_HARD_FAULTS"
 MANUAL_DOGFOOD_DATASET="${TMP_ROOT}/mneme-quality-gate-manual-dogfood-dataset.json"
 scripts/v1-manual-dogfood.py --check-dataset > "$MANUAL_DOGFOOD_DATASET"
 grep -q '"mock_record_count": 100' "$MANUAL_DOGFOOD_DATASET"

@@ -102,6 +102,32 @@ Run the full release gate before publishing changes:
 ./scripts/quality-gate.sh full
 ```
 
+## MCP Hard Dogfood
+
+For release-level confidence, run the hard MCP dogfood bundle. This drives the
+actual `mneme-mcp` stdio process over JSON-RPC and reuses the same pressure
+surfaces as V1 and V2:
+
+```sh
+scripts/mcp-hard-dogfood.py --check-contract
+scripts/mcp-hard-dogfood.py --check-dataset
+scripts/mcp-hard-dogfood.py --check-seeded-faults
+scripts/mcp-hard-dogfood.py --out-dir /tmp/mneme-mcp-hard-dogfood --force
+```
+
+It covers:
+
+| Surface | Coverage |
+| --- | --- |
+| V1 MCP hard corpus | 100 normal records, 150 adversarial records, 30 handoff workflows |
+| V1 MCP ontology | 13 natural-language ontology cases |
+| V2 MCP hard corpus | 120 team records, 80 adversarial records, 25 handoff workflows |
+| Suite parity | `mcp` and `team` suites run against `mneme-mcp` |
+| Fault detection | 9 seeded V1/V2 faults detected through the MCP eval target |
+
+Full run outputs are local evidence bundles. Keep them out of git unless a
+reduced public-safe finding is promoted into `evals/scenarios/`.
+
 ## Environment
 
 `mneme-mcp` also accepts environment configuration:

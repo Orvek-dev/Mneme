@@ -13,8 +13,9 @@ use crate::error::EvalError;
 use crate::scenario::{Scenario, TeamFlowActor};
 use crate::target::{
     build_quality_actual, ActualState, AuditEvent, BudgetActual, Claim, ContextItem, ContextPack,
-    EvalTarget, EvalTargetMetadata, OmittedItem, RecordedEvent, SessionActual, StoreActual,
-    TargetRunOptions, TeamActual, TeamContextActual, TeamContextItemActual, TeamOmittedItemActual,
+    EvalTarget, EvalTargetMetadata, FaultMode, OmittedItem, RecordedEvent, SessionActual,
+    StoreActual, TargetRunOptions, TeamActual, TeamContextActual, TeamContextItemActual,
+    TeamOmittedItemActual,
 };
 
 pub(crate) struct MnemeMcpEvalTarget;
@@ -36,7 +37,7 @@ impl EvalTarget for MnemeMcpEvalTarget {
     fn run(
         &self,
         scenario: &Scenario,
-        _options: TargetRunOptions,
+        options: TargetRunOptions,
     ) -> Result<ActualState, EvalError> {
         let v1_store = temp_store_path(&format!("{}-mcp-v1", scenario.id));
         let team_store = temp_store_path(&format!("{}-mcp-team", scenario.id));
@@ -53,9 +54,9 @@ impl EvalTarget for MnemeMcpEvalTarget {
                 .unwrap_or_else(|| "team".to_owned()),
         };
         let result = if scenario.team_flow.is_some() {
-            run_team_mcp_flow(scenario, config)
+            run_team_mcp_flow(scenario, config, options.fault_mode)
         } else {
-            run_personal_mcp_flow(scenario, config)
+            run_personal_mcp_flow(scenario, config, options.fault_mode)
         };
         cleanup_store(&v1_store);
         cleanup_store(&team_store);
@@ -66,6 +67,7 @@ impl EvalTarget for MnemeMcpEvalTarget {
 fn run_personal_mcp_flow(
     scenario: &Scenario,
     config: McpServerConfig,
+    fault_mode: FaultMode,
 ) -> Result<ActualState, EvalError> {
     let mut server = McpServer::new(config.clone());
     assert_protocol_ready(&server, scenario)?;
@@ -183,12 +185,7 @@ fn run_personal_mcp_flow(
             source_event_ids: claim.source_event_ids.clone(),
         })
         .collect::<Vec<_>>();
-    let quality = scenario
-        .expected
-        .quality
-        .as_ref()
-        .map(|_| build_quality_actual(&claims));
-    Ok(ActualState {
+    let mut actual = ActualState {
         events: snapshot
             .events
             .into_iter()
@@ -229,15 +226,23 @@ fn run_personal_mcp_flow(
             })
             .collect(),
         store: Some(store_actual(&config.v1_store)),
-        quality,
+        quality: None,
         curation: None,
         team: None,
-    })
+    };
+    apply_personal_seeded_fault(&mut actual, fault_mode);
+    actual.quality = scenario
+        .expected
+        .quality
+        .as_ref()
+        .map(|_| build_quality_actual(&actual.claims));
+    Ok(actual)
 }
 
 fn run_team_mcp_flow(
     scenario: &Scenario,
     config: McpServerConfig,
+    fault_mode: FaultMode,
 ) -> Result<ActualState, EvalError> {
     let flow = scenario.team_flow.as_ref().ok_or_else(|| {
         EvalError::scenario(format!(
@@ -670,6 +675,12 @@ fn run_team_mcp_flow(
         serialized_surface: serialized_surface_parts.join("\n"),
         context_pack: last_context_pack.map(team_context_actual),
     };
+    apply_team_seeded_fault(
+        &mut team_actual,
+        &state,
+        last_context_actor.as_ref(),
+        fault_mode,
+    );
     team_actual.scope_leak_count =
         count_scope_leaks(&team_actual, &state, last_context_actor.as_ref());
     team_actual.secret_leak_count = count_secret_leaks(&team_actual);
@@ -897,6 +908,129 @@ fn value_usize(value: &Value, key: &str) -> usize {
 
 fn push_surface(parts: &mut Vec<String>, label: &str, value: &Value) {
     parts.push(format!("{label}:{value}"));
+}
+
+fn apply_personal_seeded_fault(actual: &mut ActualState, fault_mode: FaultMode) {
+    match fault_mode {
+        FaultMode::None => {}
+        FaultMode::SkipClaims => {
+            actual.claims.clear();
+            if let Some(context_pack) = &mut actual.context_pack {
+                context_pack.items.clear();
+            }
+            actual.audit.retain(|event| event.kind != "claim.write");
+        }
+        FaultMode::LeakSecrets => {
+            for claim in &mut actual.claims {
+                if claim.status == "blocked_secret" {
+                    claim.status = "active".to_owned();
+                }
+            }
+        }
+        FaultMode::DropCitations => {
+            if let Some(context_pack) = &mut actual.context_pack {
+                for item in &mut context_pack.items {
+                    item.source_event_ids.clear();
+                }
+            }
+        }
+        FaultMode::BypassAcl
+        | FaultMode::UnapprovedPromotion
+        | FaultMode::IgnoreRevocation
+        | FaultMode::LeakQuarantined => {}
+    }
+}
+
+fn apply_team_seeded_fault(
+    actual: &mut TeamActual,
+    state: &TeamMemoryState,
+    context_actor: Option<&TeamActor>,
+    fault_mode: FaultMode,
+) {
+    match fault_mode {
+        FaultMode::None | FaultMode::SkipClaims => {}
+        FaultMode::BypassAcl => {
+            let Some(actor) = context_actor else {
+                return;
+            };
+            if let Some(memory) = state.memories.iter().find(|memory| {
+                memory.status == TeamMemoryStatus::Active
+                    && !scope_allowed_for_actor(state, actor, &memory.scope)
+            }) {
+                push_fault_context_item(actual, memory);
+            }
+        }
+        FaultMode::LeakSecrets => {
+            if let Some(memory) = state
+                .memories
+                .iter()
+                .find(|memory| memory.status == TeamMemoryStatus::BlockedSecret)
+            {
+                push_fault_context_item(actual, memory);
+            }
+        }
+        FaultMode::DropCitations => {
+            if let Some(context) = &mut actual.context_pack {
+                for item in &mut context.items {
+                    item.source_event_ids.clear();
+                    item.source_memory_ids.clear();
+                }
+            }
+        }
+        FaultMode::UnapprovedPromotion => {
+            if let Some(promotion) = state
+                .promotions
+                .iter()
+                .find(|promotion| promotion.status == TeamPromotionStatus::Pending)
+            {
+                actual.pending_promotion_count = actual.pending_promotion_count.saturating_sub(1);
+                actual.approved_promotion_count = actual.approved_promotion_count.saturating_add(1);
+                if let Some(memory) = state
+                    .memories
+                    .iter()
+                    .find(|memory| memory.id == promotion.source_memory_id)
+                {
+                    push_fault_context_item(actual, memory);
+                }
+            }
+        }
+        FaultMode::IgnoreRevocation => {
+            actual.denied_count = 0;
+            if let Some(memory) = state
+                .memories
+                .iter()
+                .find(|memory| memory.status == TeamMemoryStatus::Active)
+            {
+                push_fault_context_item(actual, memory);
+            }
+        }
+        FaultMode::LeakQuarantined => {
+            if let Some(memory) = state
+                .memories
+                .iter()
+                .find(|memory| memory.status == TeamMemoryStatus::Quarantined)
+            {
+                push_fault_context_item(actual, memory);
+            }
+        }
+    }
+}
+
+fn push_fault_context_item(actual: &mut TeamActual, memory: &mneme_core::TeamMemoryRecord) {
+    let context = actual
+        .context_pack
+        .get_or_insert_with(TeamContextActual::default);
+    if context.items.iter().any(|item| item.memory_id == memory.id) {
+        return;
+    }
+    context.items.push(TeamContextItemActual {
+        memory_id: memory.id.clone(),
+        memory_text: memory.text.clone(),
+        scope: memory.scope.clone(),
+        source_event_ids: memory.source_event_ids.clone(),
+        source_memory_ids: memory.source_memory_ids.clone(),
+        score: 1,
+    });
 }
 
 fn count_scope_leaks(

@@ -37,6 +37,7 @@ Useful commands:
 - [V1 Hard Dogfood](v1-hard-dogfood.md)
 - [V1 Real-Use Pilot](v1-real-use-pilot.md)
 - [V1 Ontology Benchmark](v1-ontology-benchmark.md)
+- [MCP Hard Dogfood](mcp-hard-dogfood.md)
 
 Useful commands:
 
@@ -50,6 +51,7 @@ Useful commands:
 - `scripts/v1-hard-dogfood.py`
 - `scripts/v1-real-use-pilot.py`
 - `scripts/v1-ontology-benchmark.py`
+- `scripts/mcp-hard-dogfood.py`
 
 ## MCP Workflow
 
@@ -64,3 +66,5 @@ Useful commands:
 - `mneme mcp config --client all`
 - `mneme-eval validate --suite mcp`
 - `mneme-eval run --suite mcp --target mneme-mcp --json`
+- `scripts/mcp-hard-dogfood.py --check-seeded-faults`
+- `scripts/mcp-hard-dogfood.py --out-dir /tmp/mneme-mcp-hard-dogfood --force`

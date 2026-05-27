@@ -13,8 +13,18 @@ This project follows the spirit of Keep a Changelog.
 - Added the `mcp` eval suite and `mneme-mcp` eval target for MCP handshake,
   tool listing, V1 persistence, V2 handoff, citation, checksum, scope-leak,
   and secret-leak verification.
+- Added `scripts/mcp-hard-dogfood.py`, a public-safe MCP hard dogfood runner
+  that drives the actual stdio server through V1 hard corpus, V1 ontology,
+  V2 team corpus, suite parity, and 9 seeded fault checks.
 - Added public MCP documentation and release quality-gate coverage for
   `mneme-mcp --self-test` and MCP eval readiness.
+
+### Changed
+
+- Extended the MCP eval target to support seeded-fault injection so MCP
+  regressions can be caught with the same failure modes as native V1/V2 evals.
+- Extended the release quality gate with MCP hard dogfood contract, dataset, and
+  seeded-fault checks.
 
 ## [0.64.0] - 2026-05-25
 
