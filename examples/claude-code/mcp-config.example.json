@@ -1,0 +1,15 @@
+{
+  "mcpServers": {
+    "mneme": {
+      "command": "mneme-mcp",
+      "args": [
+        "--mode",
+        "all",
+        "--v1-store",
+        ".mneme/mneme-v1.json",
+        "--team-store",
+        ".mneme/mneme-team-v2.json"
+      ]
+    }
+  }
+}

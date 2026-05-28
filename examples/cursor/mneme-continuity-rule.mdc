@@ -1,0 +1,26 @@
+---
+description: Mneme MCP continuity rule for Cursor Agent
+alwaysApply: false
+---
+
+Use this rule when the workspace has the `mneme` MCP server configured.
+
+At the start of a meaningful task:
+
+- Call `mneme_mcp_status`.
+- Choose a stable `lineage` from the issue, branch, or task name.
+- Choose a shared `scope`, usually `project:<repo-or-project>`.
+- If inheriting work from another agent, call `mneme_v1_continuity_handoff`.
+- Call `mneme_v1_continuity_begin`.
+- Use cited Mneme context as task context, while still checking for stale or
+  unsafe memory.
+
+Before stopping:
+
+- Call `mneme_v1_continuity_end`.
+- Include a concise summary.
+- Store only durable, non-secret facts in `remember`.
+- Preserve the same `lineage` and `scope`.
+
+Never write API keys, credentials, customer secrets, or local private paths into
+Mneme memory.

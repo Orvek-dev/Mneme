@@ -1,0 +1,51 @@
+id: mcp-v1-cross-agent-continuity
+tags:
+  - mcp
+  - v1
+  - continuity
+  - cross-agent
+mcp_continuity_flow:
+  lineage: atlas-continuity
+  scope: project:atlas-continuity
+  writer_agent: codex
+  reader_agent: claude-code
+  writer_task: "Implement MCP continuity upgrade"
+  writer_query: "continuity upgrade"
+  writer_summary: "Codex implemented the MCP continuity contract"
+  remember:
+    - "agent should run continuity smoke before release"
+  handoff_query: "continuity smoke release"
+  reader_task: "Continue MCP continuity validation"
+  reader_query: "continuity smoke"
+  restart_before_reader: true
+expected:
+  event_append:
+    count: 1
+  claims:
+    - subject: agent
+      predicate: should
+      object: run continuity smoke before release
+      status: active
+      scope: project:atlas-continuity
+  context_pack:
+    query: "continuity smoke"
+    allowed_scopes:
+      - project:atlas-continuity
+    item_count: 1
+    must_include:
+      - continuity smoke
+    citation_required: true
+  audit:
+    read_write_events_required: true
+    session_events_required: true
+  session:
+    status: closed
+    task: "Implement MCP continuity upgrade"
+    lineage_id: atlas-continuity
+    actor_agent_id: codex
+    memory_event_count: 1
+    summary_contains: continuity
+  store:
+    schema_version: 2
+    valid: true
+    backup_required: true

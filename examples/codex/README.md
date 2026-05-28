@@ -32,18 +32,24 @@ args = [
 
 Use an absolute `command` path if `mneme-mcp` is not on your `PATH`.
 
+For task-start/task-end continuity instructions, see
+[`AGENTS.example.md`](AGENTS.example.md).
+
 ## Smoke Test Shape
 
-The public smoke test used for Codex verifies:
+The public Codex smoke test verifies registration in an isolated `CODEX_HOME`.
+Protocol tool calls are covered by the shared MCP client smoke and eval suite.
 
 | Check | Expected behavior |
 | --- | --- |
-| V1 write/read | Codex calls Mneme MCP, stores one memory, and retrieves cited context. |
-| V2 handoff | Codex calls Mneme MCP, writes project-scoped team memory, and retrieves a handoff package. |
-| V2 wrong owner denial | A user cannot operate another user's owned agent. |
+| `codex mcp add` | Mneme can be registered without mutating the user's real Codex config. |
+| `codex mcp list` | The isolated server appears as enabled. |
+| `codex mcp get mneme` | The server uses stdio with the expected command and args. |
+| V1 continuity protocol | Writer memory survives server restart and is read by a reader agent. |
+| Guardrails | Missing end, wrong scope, and secret-like memory are blocked from handoff context. |
 
-The latest local run used isolated temporary stores and passed all three
-checks. The public-safe summary shape is captured in
-[`smoke-summary.example.json`](smoke-summary.example.json). Raw logs are not
-committed because MCP client logs can include local paths or environment
-details.
+The latest local run used isolated temporary stores and passed. The
+public-safe summary shape is captured in
+[`../mcp-client-smoke/summary.example.json`](../mcp-client-smoke/summary.example.json).
+Raw logs are not committed because MCP client logs can include local paths or
+environment details.

@@ -1282,6 +1282,7 @@ struct SessionSummary {
     id: String,
     status: String,
     task: String,
+    lineage_id: Option<String>,
     actor_agent_id: Option<String>,
     context_query: String,
     context_claim_ids: Vec<String>,
@@ -1294,6 +1295,7 @@ impl From<&SessionRecord> for SessionSummary {
             id: session.id.clone(),
             status: session.status.as_str().to_owned(),
             task: session.task.clone(),
+            lineage_id: session.lineage_id.clone(),
             actor_agent_id: session.actor_agent_id.clone(),
             context_query: session.context_query.clone(),
             context_claim_ids: session.context_claim_ids.clone(),
@@ -2029,6 +2031,7 @@ fn run_begin(raw_args: Vec<String>, writer: &mut impl Write) -> Result<(), CliEr
     let mut engine = load_engine(&store_path)?;
     let report = engine.begin_session(SessionBeginInput {
         task,
+        lineage_id: None,
         actor_agent_id: options.actor_agent_id,
         query: options.query,
         allowed_scopes: effective_allowed_scopes(options.allowed_scopes),
@@ -2052,6 +2055,7 @@ fn run_end(raw_args: Vec<String>, writer: &mut impl Write) -> Result<(), CliErro
         SessionEndInput {
             session_id,
             actor_agent_id: options.actor_agent_id,
+            scope: None,
             summary: options.summary,
             remember: options.remember,
         },
@@ -2151,6 +2155,7 @@ fn run_agent_hook_begin(raw_args: Vec<String>, writer: &mut impl Write) -> Resul
     let mut engine = load_engine(&store_path)?;
     let report = engine.begin_session(SessionBeginInput {
         task,
+        lineage_id: None,
         actor_agent_id: options.actor_agent_id,
         query: options.query,
         allowed_scopes: effective_allowed_scopes(options.allowed_scopes),
@@ -2182,6 +2187,7 @@ fn run_agent_hook_end(raw_args: Vec<String>, writer: &mut impl Write) -> Result<
         SessionEndInput {
             session_id,
             actor_agent_id: options.actor_agent_id,
+            scope: None,
             summary: options.summary,
             remember: options.remember,
         },

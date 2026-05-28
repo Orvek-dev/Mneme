@@ -6,8 +6,10 @@ V1 personal memory, V2 team handoff memory, JSON stores, citations, scope
 checks, secret blocking, firewall reports, and validation.
 
 For the package-level server guide, see
-[`crates/mneme-mcp/README.md`](../crates/mneme-mcp/README.md). For a Codex
-client example, see [`examples/codex`](../examples/codex/README.md).
+[`crates/mneme-mcp/README.md`](../crates/mneme-mcp/README.md). Client examples
+are available for [Codex](../examples/codex/README.md), [Claude
+Code](../examples/claude-code/README.md), and
+[Cursor](../examples/cursor/README.md).
 
 It does not require a hosted service. By default it reads and writes:
 
@@ -62,9 +64,11 @@ files.
 
 V1 tools cover personal memory:
 
+- check MCP status and the continuity contract;
 - remember and ingest memory;
 - retrieve cited context;
 - begin and end task sessions;
+- begin, end, and hand off continuity sessions with explicit lineage/scope;
 - correct, forget, validate, quality-check, and snapshot the store.
 
 V2 tools cover team handoff memory:
@@ -94,8 +98,10 @@ Current MCP readiness checks include:
 | Gate | What it proves |
 | --- | --- |
 | initialize and tools/list | Client handshake and tool registry are usable. |
+| MCP status | A client can verify store paths, tool inventory, and continuity contract. |
 | V1 remember/context | Personal memory can be written and retrieved through MCP. |
 | V1 session restart | Stored personal memory survives a new server instance. |
+| V1 cross-agent continuity | Agent A writes back scoped memory, the MCP server restarts, and Agent B retrieves it through the same lineage/scope. |
 | V2 team handoff | Team context, handoff package, sync checksum, firewall, and audit are reachable. |
 | V2 private-scope block | A second actor cannot read private memory through context, handoff, ontology, or sync paths. |
 | citations and leaks | Context keeps citations while scope and secret leak counters remain zero. |
@@ -134,20 +140,67 @@ reduced public-safe finding is promoted into `evals/scenarios/`.
 
 ## Real Client Smoke
 
-The MCP server has also been checked through actual Codex CLI execution using
-isolated temporary stores. This is a client integration smoke test: it proves
-that Codex can see Mneme MCP tools, call them, and leave observable state in
-the Mneme stores.
+The MCP server has also been checked through actual installed client CLIs using
+isolated temporary homes, workspaces, and stores. This is a client integration
+smoke test: it proves client-side MCP registration and discovery work without
+mutating the user's real client config. Tool-call continuity is verified through
+the stdio protocol smoke and MCP eval target.
 
 | Client | Check | Result |
 | --- | --- | --- |
-| Codex CLI | V1 MCP write/read | Passed |
-| Codex CLI | V2 team handoff | Passed |
-| Codex CLI | V2 wrong agent-owner denial | Passed |
+| Direct MCP protocol | V1 cross-agent continuity after server restart | Passed |
+| Direct MCP protocol | Missing end write-back guard | Passed |
+| Direct MCP protocol | Wrong-scope and secret-context guards | Passed |
+| Codex CLI | Isolated `codex mcp add/list/get` | Passed |
+| Claude Code CLI | Isolated `claude mcp add/list/get`, health connected | Passed |
+| Cursor Agent CLI | Workspace `.cursor/mcp.json`, approval, `list-tools` | Passed |
 
 Raw logs are intentionally not committed because client logs can include local
 paths, installed MCP server lists, or environment details. Public evidence
-should stay at the reduced summary level above.
+should stay at the reduced summary level above. To reproduce locally:
+
+```sh
+scripts/mcp-client-continuity-smoke.py --require-clients
+```
+
+The release quality gate runs the protocol-only path so CI does not depend on
+which agent clients are installed:
+
+```sh
+scripts/mcp-client-continuity-smoke.py --protocol-only
+```
+
+## Continuity Contract
+
+MCP makes Mneme reachable, but continuity still depends on client behavior. The
+new V1 continuity tools make that behavior explicit:
+
+```text
+mneme_mcp_status
+  -> verify install, store paths, tool inventory, and continuity contract
+
+mneme_v1_continuity_begin
+  -> start a session, read scoped context, and record lineage_id
+
+mneme_v1_continuity_end
+  -> close the session and write memory into the shared scope
+
+mneme_v1_continuity_handoff
+  -> package cited context and closed source sessions for the next agent
+```
+
+For two sequential agents to inherit context, they must use the same store and
+the same `lineage` or `scope`. The committed MCP suite includes a cross-agent
+scenario where `codex` writes scoped memory, the server is restarted, and
+`claude-code` retrieves the remembered context with citations.
+
+Client-side rule examples are included for:
+
+- Codex: [`examples/codex/AGENTS.example.md`](../examples/codex/AGENTS.example.md)
+- Claude Code:
+  [`examples/claude-code/CLAUDE.example.md`](../examples/claude-code/CLAUDE.example.md)
+- Cursor:
+  [`examples/cursor/mneme-continuity-rule.mdc`](../examples/cursor/mneme-continuity-rule.mdc)
 
 ## Environment
 

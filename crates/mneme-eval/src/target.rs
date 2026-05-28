@@ -298,6 +298,7 @@ pub(crate) struct TeamOmittedItemActual {
 pub(crate) struct SessionActual {
     pub(crate) id: String,
     pub(crate) task: String,
+    pub(crate) lineage_id: Option<String>,
     pub(crate) actor_agent_id: Option<String>,
     pub(crate) status: String,
     pub(crate) context_claim_ids: Vec<String>,

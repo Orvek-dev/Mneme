@@ -168,6 +168,7 @@ fn apply_agent_flow(actual: &mut ActualState, agent_flow: &AgentFlow, options: T
     let mut session = SessionActual {
         id: format!("session-{:03}", actual.sessions.len() + 1),
         task: agent_flow.begin.task.clone(),
+        lineage_id: None,
         actor_agent_id: agent_flow.begin.actor_agent_id.clone(),
         status: "active".to_owned(),
         context_claim_ids: context

@@ -1,11 +1,12 @@
 {
   "status": "passed",
   "client": "Codex CLI",
-  "store_mode": "isolated temporary stores",
+  "config_mode": "isolated CODEX_HOME",
   "checks": {
-    "v1_mcp_write_read": "passed",
-    "v2_team_handoff": "passed",
-    "v2_wrong_agent_owner_denial": "passed"
+    "codex_mcp_add": "passed",
+    "codex_mcp_list": "passed",
+    "codex_mcp_get": "passed",
+    "protocol_continuity_smoke": "passed"
   },
   "public_note": "Raw client logs are not committed because they may include local paths or environment details."
 }

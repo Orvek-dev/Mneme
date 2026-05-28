@@ -175,7 +175,7 @@ impl McpServer {
     /// Tool inventory for the configured mode.
     #[must_use]
     pub fn tools(&self) -> Vec<ToolDefinition> {
-        let mut tools = Vec::new();
+        let mut tools = global_tools();
         if self.config.mode.includes_personal() {
             tools.extend(personal_tools());
         }
@@ -198,11 +198,15 @@ impl McpServer {
             ));
         }
         match name {
+            "mneme_mcp_status" => Ok(self.mcp_status()),
             "mneme_v1_ingest" => self.v1_ingest(arguments, false, "ingest"),
             "mneme_v1_remember" => self.v1_ingest(arguments, true, "remember"),
             "mneme_v1_context" => self.v1_context(arguments),
             "mneme_v1_begin" => self.v1_begin(arguments),
             "mneme_v1_end" => self.v1_end(arguments),
+            "mneme_v1_continuity_begin" => self.v1_continuity_begin(arguments),
+            "mneme_v1_continuity_end" => self.v1_continuity_end(arguments),
+            "mneme_v1_continuity_handoff" => self.v1_continuity_handoff(arguments),
             "mneme_v1_forget" => self.v1_lifecycle(arguments, "forget"),
             "mneme_v1_correct" => self.v1_lifecycle(arguments, "correct"),
             "mneme_v1_quality" => self.v1_quality(),
@@ -234,6 +238,88 @@ impl McpServer {
             "mneme_v2_snapshot" => self.v2_snapshot(),
             _ => Err(McpError::method_not_found(format!("unknown tool: {name}"))),
         }
+    }
+
+    fn mcp_status(&self) -> Value {
+        let tools = self.tools();
+        let v1 = if self.config.mode.includes_personal() {
+            match self.load_v1_engine() {
+                Ok(engine) => {
+                    let validation = validate_state(&engine.state());
+                    let snapshot = engine.snapshot();
+                    json!({
+                        "enabled": true,
+                        "store": self.config.v1_store.display().to_string(),
+                        "exists": self.config.v1_store.exists(),
+                        "parent_exists": parent_exists(&self.config.v1_store),
+                        "validation": validation,
+                        "event_count": snapshot.events.len(),
+                        "claim_count": snapshot.claims.len(),
+                        "session_count": snapshot.sessions.len(),
+                    })
+                }
+                Err(error) => json!({
+                    "enabled": true,
+                    "store": self.config.v1_store.display().to_string(),
+                    "exists": self.config.v1_store.exists(),
+                    "parent_exists": parent_exists(&self.config.v1_store),
+                    "error": error.to_string(),
+                }),
+            }
+        } else {
+            json!({"enabled": false})
+        };
+        let v2 = if self.config.mode.includes_team() {
+            match self.load_v2_engine() {
+                Ok(engine) => {
+                    let state = engine.state();
+                    json!({
+                        "enabled": true,
+                        "store": self.config.team_store.display().to_string(),
+                        "exists": self.config.team_store.exists(),
+                        "parent_exists": parent_exists(&self.config.team_store),
+                        "workspace_id": state.workspace_id,
+                        "validation": validate_team_state(&state),
+                        "user_count": state.users.len(),
+                        "agent_count": state.agents.len(),
+                        "project_count": state.projects.len(),
+                        "memory_count": state.memories.len(),
+                        "run_count": state.runs.len(),
+                    })
+                }
+                Err(error) => json!({
+                    "enabled": true,
+                    "store": self.config.team_store.display().to_string(),
+                    "exists": self.config.team_store.exists(),
+                    "parent_exists": parent_exists(&self.config.team_store),
+                    "error": error.to_string(),
+                }),
+            }
+        } else {
+            json!({"enabled": false})
+        };
+        json!({
+            "command": "mcp.status",
+            "schema_version": "mneme.mcp_status.v1",
+            "server": {
+                "name": "mneme-mcp",
+                "version": env!("CARGO_PKG_VERSION"),
+                "protocol": MCP_PROTOCOL_VERSION,
+                "mode": self.config.mode.as_str(),
+            },
+            "tool_count": tools.len(),
+            "tools": tools.iter().map(|tool| tool.name).collect::<Vec<_>>(),
+            "v1": v1,
+            "v2": v2,
+            "continuity_contract": {
+                "mcp_accessible": true,
+                "begin_required": true,
+                "end_write_back_required": true,
+                "read_and_honor_required": true,
+                "shared_scope_or_lineage_required": true,
+                "sequential_handoff_required": true,
+            }
+        })
     }
 
     fn v1_ingest(
@@ -295,6 +381,7 @@ impl McpServer {
             optional_string_vec(arguments, "scopes").unwrap_or_else(|| vec!["private".to_owned()]);
         let report = engine.begin_session(SessionBeginInput {
             task,
+            lineage_id: optional_string(arguments, "lineage"),
             actor_agent_id: optional_string(arguments, "agent"),
             query: optional_string(arguments, "query"),
             allowed_scopes: scopes,
@@ -315,6 +402,7 @@ impl McpServer {
             .end_session(SessionEndInput {
                 session_id: required_string(arguments, "session_id")?,
                 actor_agent_id: optional_string(arguments, "agent"),
+                scope: optional_string(arguments, "scope"),
                 summary: optional_string(arguments, "summary"),
                 remember: optional_string_vec(arguments, "remember").unwrap_or_default(),
             })
@@ -324,6 +412,113 @@ impl McpServer {
             "command": "v1.end",
             "store": self.config.v1_store.display().to_string(),
             "report": report,
+        }))
+    }
+
+    fn v1_continuity_begin(&self, arguments: &Map<String, Value>) -> Result<Value, McpError> {
+        let mut engine = self.load_v1_engine()?;
+        let task = required_string(arguments, "task")?;
+        let lineage_id = optional_string(arguments, "lineage");
+        let continuity_scope = continuity_scope(arguments);
+        let scopes = optional_string_vec(arguments, "scopes")
+            .unwrap_or_else(|| continuity_allowed_scopes(&continuity_scope));
+        let query = optional_string(arguments, "query").unwrap_or_else(|| {
+            lineage_id
+                .as_ref()
+                .map_or_else(|| task.clone(), |lineage| format!("{task} {lineage}"))
+        });
+        let report = engine.begin_session(SessionBeginInput {
+            task,
+            lineage_id: lineage_id.clone(),
+            actor_agent_id: optional_string(arguments, "agent"),
+            query: Some(query.clone()),
+            allowed_scopes: scopes.clone(),
+            max_items: optional_usize(arguments, "max_items").unwrap_or(DEFAULT_CONTEXT_MAX_ITEMS),
+        });
+        self.persist_v1(&engine)?;
+        Ok(json!({
+            "command": "v1.continuity.begin",
+            "schema_version": "mneme.v1_continuity.v1",
+            "store": self.config.v1_store.display().to_string(),
+            "session_id": report.session.id,
+            "lineage_id": lineage_id,
+            "continuity_scope": continuity_scope,
+            "allowed_scopes": scopes,
+            "read_and_honor_required": true,
+            "context_item_count": report.context_pack.items.len(),
+            "omitted_count": report.context_pack.omitted.len(),
+            "report": report,
+        }))
+    }
+
+    fn v1_continuity_end(&self, arguments: &Map<String, Value>) -> Result<Value, McpError> {
+        let mut engine = self.load_v1_engine()?;
+        let continuity_scope = continuity_scope(arguments);
+        let remember = optional_string_vec(arguments, "remember").unwrap_or_default();
+        let report = engine
+            .end_session(SessionEndInput {
+                session_id: required_string(arguments, "session_id")?,
+                actor_agent_id: optional_string(arguments, "agent"),
+                scope: Some(continuity_scope.clone()),
+                summary: optional_string(arguments, "summary"),
+                remember,
+            })
+            .map_err(McpError::tool)?;
+        self.persist_v1(&engine)?;
+        Ok(json!({
+            "command": "v1.continuity.end",
+            "schema_version": "mneme.v1_continuity.v1",
+            "store": self.config.v1_store.display().to_string(),
+            "session_id": report.session.id,
+            "lineage_id": report.session.lineage_id,
+            "continuity_scope": continuity_scope,
+            "write_back_required": true,
+            "write_back_ok": !report.remembered_claim_ids.is_empty(),
+            "remembered_event_count": report.remembered_event_ids.len(),
+            "remembered_claim_count": report.remembered_claim_ids.len(),
+            "report": report,
+        }))
+    }
+
+    fn v1_continuity_handoff(&self, arguments: &Map<String, Value>) -> Result<Value, McpError> {
+        let mut engine = self.load_v1_engine()?;
+        let query = required_string(arguments, "query")?;
+        let lineage_id = optional_string(arguments, "lineage");
+        let continuity_scope = continuity_scope(arguments);
+        let scopes = optional_string_vec(arguments, "scopes")
+            .unwrap_or_else(|| continuity_allowed_scopes(&continuity_scope));
+        let context_pack = engine.build_context_pack_with(
+            ContextQuery::with_allowed_scopes(query.clone(), scopes.clone()).with_max_items(
+                optional_usize(arguments, "max_items").unwrap_or(DEFAULT_CONTEXT_MAX_ITEMS),
+            ),
+        );
+        self.persist_v1(&engine)?;
+        let snapshot = engine.snapshot();
+        let source_sessions = snapshot
+            .sessions
+            .iter()
+            .filter(|session| session.status.as_str() == "closed")
+            .filter(|session| match lineage_id.as_ref() {
+                Some(lineage) => session.lineage_id.as_ref() == Some(lineage),
+                None => true,
+            })
+            .cloned()
+            .collect::<Vec<_>>();
+        Ok(json!({
+            "command": "v1.continuity.handoff",
+            "schema_version": "mneme.v1_continuity.v1",
+            "store": self.config.v1_store.display().to_string(),
+            "lineage_id": lineage_id,
+            "continuity_scope": continuity_scope,
+            "allowed_scopes": scopes,
+            "query": query,
+            "sequential_handoff_required": true,
+            "read_and_honor_required": true,
+            "source_session_count": source_sessions.len(),
+            "context_item_count": context_pack.items.len(),
+            "omitted_count": context_pack.omitted.len(),
+            "source_sessions": source_sessions,
+            "context_pack": context_pack,
         }))
     }
 
@@ -939,6 +1134,38 @@ fn default_team_store_path() -> Result<PathBuf, McpError> {
         .map_err(|source| McpError::tool(format!("read current dir: {source}")))
 }
 
+fn parent_exists(path: &Path) -> bool {
+    path.parent().is_some_and(Path::exists)
+}
+
+fn continuity_scope(arguments: &Map<String, Value>) -> String {
+    optional_string(arguments, "scope")
+        .and_then(non_empty_string)
+        .or_else(|| {
+            optional_string(arguments, "lineage")
+                .and_then(non_empty_string)
+                .map(|lineage| format!("lineage:{lineage}"))
+        })
+        .unwrap_or_else(|| "private".to_owned())
+}
+
+fn continuity_allowed_scopes(scope: &str) -> Vec<String> {
+    let mut scopes = vec![scope.to_owned()];
+    if scope != "private" {
+        scopes.push("private".to_owned());
+    }
+    scopes
+}
+
+fn non_empty_string(value: String) -> Option<String> {
+    let trimmed = value.trim();
+    if trimmed.is_empty() {
+        None
+    } else {
+        Some(trimmed.to_owned())
+    }
+}
+
 fn result_response(request_id: Value, result: Value) -> Value {
     json!({"jsonrpc": "2.0", "id": request_id, "result": result})
 }
@@ -1050,6 +1277,15 @@ fn string_array_schema() -> Value {
     json!({"type": "array", "items": {"type": "string"}})
 }
 
+fn global_tools() -> Vec<ToolDefinition> {
+    vec![ToolDefinition {
+        name: "mneme_mcp_status",
+        description:
+            "Check Mneme MCP installation, store paths, tool inventory, and continuity contract.",
+        input_schema: object_schema(&[], Vec::new()),
+    }]
+}
+
 fn personal_tools() -> Vec<ToolDefinition> {
     vec![
         ToolDefinition {
@@ -1097,6 +1333,7 @@ fn personal_tools() -> Vec<ToolDefinition> {
                 &["task"],
                 vec![
                     ("task", string_schema()),
+                    ("lineage", string_schema()),
                     ("query", string_schema()),
                     ("scopes", string_array_schema()),
                     ("max_items", int_schema()),
@@ -1111,8 +1348,57 @@ fn personal_tools() -> Vec<ToolDefinition> {
                 &["session_id"],
                 vec![
                     ("session_id", string_schema()),
+                    ("scope", string_schema()),
                     ("summary", string_schema()),
                     ("remember", string_array_schema()),
+                    ("agent", string_schema()),
+                ],
+            ),
+        },
+        ToolDefinition {
+            name: "mneme_v1_continuity_begin",
+            description:
+                "Begin a v1 continuity session with explicit lineage/scope read discipline.",
+            input_schema: object_schema(
+                &["task"],
+                vec![
+                    ("task", string_schema()),
+                    ("lineage", string_schema()),
+                    ("scope", string_schema()),
+                    ("query", string_schema()),
+                    ("scopes", string_array_schema()),
+                    ("max_items", int_schema()),
+                    ("agent", string_schema()),
+                ],
+            ),
+        },
+        ToolDefinition {
+            name: "mneme_v1_continuity_end",
+            description:
+                "End a v1 continuity session and write back memory into the shared lineage/scope.",
+            input_schema: object_schema(
+                &["session_id"],
+                vec![
+                    ("session_id", string_schema()),
+                    ("lineage", string_schema()),
+                    ("scope", string_schema()),
+                    ("summary", string_schema()),
+                    ("remember", string_array_schema()),
+                    ("agent", string_schema()),
+                ],
+            ),
+        },
+        ToolDefinition {
+            name: "mneme_v1_continuity_handoff",
+            description: "Build a v1 continuity handoff package for another agent/session.",
+            input_schema: object_schema(
+                &["query"],
+                vec![
+                    ("query", string_schema()),
+                    ("lineage", string_schema()),
+                    ("scope", string_schema()),
+                    ("scopes", string_array_schema()),
+                    ("max_items", int_schema()),
                     ("agent", string_schema()),
                 ],
             ),
@@ -1446,13 +1732,13 @@ mod tests {
         assert!(personal
             .tools()
             .iter()
-            .all(|tool| tool.name.starts_with("mneme_v1_")));
+            .all(|tool| tool.name == "mneme_mcp_status" || tool.name.starts_with("mneme_v1_")));
         assert!(team
             .tools()
             .iter()
-            .all(|tool| tool.name.starts_with("mneme_v2_")));
+            .all(|tool| tool.name == "mneme_mcp_status" || tool.name.starts_with("mneme_v2_")));
         assert_eq!(
-            personal.tools().len() + team.tools().len(),
+            personal.tools().len() + team.tools().len() - global_tools().len(),
             all.tools().len()
         );
     }

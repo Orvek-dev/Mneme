@@ -1,0 +1,39 @@
+{
+  "schema_version": 1,
+  "command": "mcp-client-continuity-smoke",
+  "ok": true,
+  "public_safe": true,
+  "raw_logs_committed": false,
+  "protocol": {
+    "ok": true,
+    "tool_count": 38,
+    "required_tools_present": true,
+    "status_contract": "passed",
+    "cross_agent_continuity": "passed",
+    "server_restart_handoff": "passed",
+    "missing_end_write_back_guard": "passed",
+    "wrong_scope_guard": "passed",
+    "secret_context_guard": "passed"
+  },
+  "clients": [
+    {
+      "client": "codex",
+      "available": true,
+      "status": "passed",
+      "checks": ["mcp add", "mcp list", "mcp get"]
+    },
+    {
+      "client": "claude",
+      "available": true,
+      "status": "passed",
+      "checks": ["mcp add", "mcp list health", "mcp get connected"]
+    },
+    {
+      "client": "cursor",
+      "available": true,
+      "status": "passed",
+      "checks": ["workspace mcp.json", "mcp enable", "mcp list ready", "mcp list-tools"],
+      "tool_count": 38
+    }
+  ]
+}

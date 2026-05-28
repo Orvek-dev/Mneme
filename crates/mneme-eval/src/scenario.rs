@@ -20,6 +20,8 @@ pub(crate) struct Scenario {
     #[serde(default)]
     pub(crate) agent_flow: Option<AgentFlow>,
     #[serde(default)]
+    pub(crate) mcp_continuity_flow: Option<McpContinuityFlow>,
+    #[serde(default)]
     pub(crate) team_flow: Option<TeamFlow>,
     #[serde(default)]
     pub(crate) events: Vec<InputEvent>,
@@ -89,6 +91,27 @@ pub(crate) struct AgentEnd {
     pub(crate) summary: Option<String>,
     pub(crate) remember: Vec<String>,
     pub(crate) extractor: AgentEndExtractor,
+}
+
+#[derive(Debug, Clone, Deserialize, Serialize)]
+#[serde(deny_unknown_fields)]
+pub(crate) struct McpContinuityFlow {
+    pub(crate) lineage: String,
+    pub(crate) scope: String,
+    pub(crate) writer_agent: String,
+    pub(crate) reader_agent: String,
+    pub(crate) writer_task: String,
+    #[serde(default)]
+    pub(crate) writer_query: Option<String>,
+    pub(crate) writer_summary: String,
+    #[serde(default)]
+    pub(crate) remember: Vec<String>,
+    pub(crate) handoff_query: String,
+    pub(crate) reader_task: String,
+    #[serde(default)]
+    pub(crate) reader_query: Option<String>,
+    #[serde(default)]
+    pub(crate) restart_before_reader: bool,
 }
 
 #[derive(Debug, Clone, Copy, Default, Eq, PartialEq, Deserialize, Serialize)]
@@ -326,6 +349,7 @@ pub(crate) struct StoreExpected {
 pub(crate) struct SessionExpected {
     pub(crate) status: Option<String>,
     pub(crate) task: Option<String>,
+    pub(crate) lineage_id: Option<String>,
     pub(crate) actor_agent_id: Option<String>,
     pub(crate) context_must_include: Vec<String>,
     pub(crate) memory_event_count: Option<usize>,
@@ -426,9 +450,12 @@ pub(crate) fn validate_scenario(scenario: &Scenario, path: &Path) -> Result<(), 
             scenario.id
         )));
     }
-    if scenario.events.is_empty() && scenario.team_flow.is_none() {
+    if scenario.events.is_empty()
+        && scenario.team_flow.is_none()
+        && scenario.mcp_continuity_flow.is_none()
+    {
         return Err(EvalError::scenario(format!(
-            "scenario {} has no events or team_flow",
+            "scenario {} has no events, team_flow, or mcp_continuity_flow",
             scenario.id
         )));
     }
@@ -496,6 +523,9 @@ pub(crate) fn validate_scenario(scenario: &Scenario, path: &Path) -> Result<(), 
     }
     if let Some(team_flow) = &scenario.team_flow {
         validate_team_flow(team_flow, &scenario.id)?;
+    }
+    if let Some(flow) = &scenario.mcp_continuity_flow {
+        validate_mcp_continuity_flow(flow, &scenario.id)?;
     }
     for (idx, event) in scenario.events.iter().enumerate() {
         if event.speaker_id.trim().is_empty() {
@@ -629,6 +659,47 @@ pub(crate) fn validate_scenario(scenario: &Scenario, path: &Path) -> Result<(), 
     }
     if let Some(team) = &scenario.expected.team {
         validate_team_expected(team, &scenario.id)?;
+    }
+    Ok(())
+}
+
+fn validate_mcp_continuity_flow(
+    flow: &McpContinuityFlow,
+    scenario_id: &str,
+) -> Result<(), EvalError> {
+    for (label, value) in [
+        ("lineage", flow.lineage.as_str()),
+        ("scope", flow.scope.as_str()),
+        ("writer_agent", flow.writer_agent.as_str()),
+        ("reader_agent", flow.reader_agent.as_str()),
+        ("writer_task", flow.writer_task.as_str()),
+        ("writer_summary", flow.writer_summary.as_str()),
+        ("handoff_query", flow.handoff_query.as_str()),
+        ("reader_task", flow.reader_task.as_str()),
+    ] {
+        if value.trim().is_empty() {
+            return Err(EvalError::scenario(format!(
+                "scenario {scenario_id} mcp_continuity_flow {label} must not be empty"
+            )));
+        }
+    }
+    if flow
+        .writer_query
+        .as_ref()
+        .is_some_and(|query| query.trim().is_empty())
+        || flow
+            .reader_query
+            .as_ref()
+            .is_some_and(|query| query.trim().is_empty())
+    {
+        return Err(EvalError::scenario(format!(
+            "scenario {scenario_id} mcp_continuity_flow query values must not be empty"
+        )));
+    }
+    if flow.remember.is_empty() || flow.remember.iter().any(|value| value.trim().is_empty()) {
+        return Err(EvalError::scenario(format!(
+            "scenario {scenario_id} mcp_continuity_flow remember entries must not be empty"
+        )));
     }
     Ok(())
 }

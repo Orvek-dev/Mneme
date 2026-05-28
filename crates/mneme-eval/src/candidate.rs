@@ -1056,6 +1056,7 @@ mod tests {
                 persistence: None,
                 maintenance: Maintenance::default(),
                 agent_flow: None,
+                mcp_continuity_flow: None,
                 team_flow: None,
                 events: vec![InputEvent {
                     speaker_id: "user".to_owned(),

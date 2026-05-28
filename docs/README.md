@@ -11,6 +11,9 @@ docs/eval-harness/   scenario, baseline, dogfood, candidate, and provider eval w
 docs/project/        roadmap, release, packaging, and policy material
 crates/mneme-mcp/    package-level MCP server README
 examples/codex/      Codex MCP config and smoke-test notes
+examples/claude-code/ Claude Code MCP config and continuity notes
+examples/cursor/     Cursor MCP config and continuity notes
+examples/mcp-client-smoke/ public-safe client smoke summary shape
 ```
 
 Start here:
@@ -24,6 +27,11 @@ Start here:
   package surface.
 - [Codex MCP Example](../examples/codex/README.md) for Codex client config and
   public-safe smoke-test notes.
+- [Claude Code MCP Example](../examples/claude-code/README.md) and
+  [Cursor MCP Example](../examples/cursor/README.md) for additional client
+  config shapes.
+- [MCP Client Smoke Example](../examples/mcp-client-smoke/README.md) for the
+  reduced public-safe client smoke report shape.
 - [V2 Team Agent Ops Example](../examples/v2-team-agent-ops/README.md) for a
   public-safe end-to-end handoff demo.
 - [Eval Harness](eval-harness/README.md) for deterministic and provider evals.

@@ -10,7 +10,7 @@ use mneme_mcp::{McpServer, McpServerConfig, ServerMode};
 use serde_json::{json, Value};
 
 use crate::error::EvalError;
-use crate::scenario::{Scenario, TeamFlowActor};
+use crate::scenario::{McpContinuityFlow, Scenario, TeamFlowActor};
 use crate::target::{
     build_quality_actual, ActualState, AuditEvent, BudgetActual, Claim, ContextItem, ContextPack,
     EvalTarget, EvalTargetMetadata, FaultMode, OmittedItem, RecordedEvent, SessionActual,
@@ -131,7 +131,20 @@ fn run_personal_mcp_flow(
         }
     }
 
-    let context_pack = if let Some(expected) = &scenario.expected.context_pack {
+    let continuity_context_pack = if let Some(flow) = &scenario.mcp_continuity_flow {
+        Some(run_mcp_continuity_flow(
+            &mut server,
+            &config,
+            scenario,
+            flow,
+        )?)
+    } else {
+        None
+    };
+
+    let context_pack = if continuity_context_pack.is_some() {
+        continuity_context_pack
+    } else if let Some(expected) = &scenario.expected.context_pack {
         let value = call_tool(
             &server,
             "mneme_v1_context",
@@ -205,6 +218,7 @@ fn run_personal_mcp_flow(
             .map(|session| SessionActual {
                 id: session.id,
                 task: session.task,
+                lineage_id: session.lineage_id,
                 actor_agent_id: session.actor_agent_id,
                 status: session.status.as_str().to_owned(),
                 context_claim_ids: session.context_claim_ids,
@@ -237,6 +251,124 @@ fn run_personal_mcp_flow(
         .as_ref()
         .map(|_| build_quality_actual(&actual.claims));
     Ok(actual)
+}
+
+fn run_mcp_continuity_flow(
+    server: &mut McpServer,
+    config: &McpServerConfig,
+    scenario: &Scenario,
+    flow: &McpContinuityFlow,
+) -> Result<ContextPack, EvalError> {
+    let status = call_tool(server, "mneme_mcp_status", json!({}), scenario)?;
+    if status
+        .get("continuity_contract")
+        .and_then(|contract| contract.get("mcp_accessible"))
+        .and_then(Value::as_bool)
+        != Some(true)
+    {
+        return Err(EvalError::scenario(format!(
+            "scenario {} MCP status did not expose continuity contract",
+            scenario.id
+        )));
+    }
+
+    let begin = call_tool(
+        server,
+        "mneme_v1_continuity_begin",
+        json!({
+            "task": flow.writer_task,
+            "agent": flow.writer_agent,
+            "lineage": flow.lineage,
+            "scope": flow.scope,
+            "query": flow.writer_query,
+        }),
+        scenario,
+    )?;
+    let session_id = begin
+        .get("session_id")
+        .and_then(Value::as_str)
+        .ok_or_else(|| {
+            EvalError::scenario(format!(
+                "scenario {} MCP continuity begin returned no session_id",
+                scenario.id
+            ))
+        })?;
+    let end = call_tool(
+        server,
+        "mneme_v1_continuity_end",
+        json!({
+            "session_id": session_id,
+            "agent": flow.writer_agent,
+            "lineage": flow.lineage,
+            "scope": flow.scope,
+            "summary": flow.writer_summary,
+            "remember": flow.remember,
+        }),
+        scenario,
+    )?;
+    if end.get("write_back_ok").and_then(Value::as_bool) != Some(true) {
+        return Err(EvalError::scenario(format!(
+            "scenario {} MCP continuity end did not write memory",
+            scenario.id
+        )));
+    }
+
+    if flow.restart_before_reader {
+        *server = McpServer::new(config.clone());
+    }
+
+    let handoff = call_tool(
+        server,
+        "mneme_v1_continuity_handoff",
+        json!({
+            "agent": flow.reader_agent,
+            "lineage": flow.lineage,
+            "scope": flow.scope,
+            "query": flow.handoff_query,
+        }),
+        scenario,
+    )?;
+    if handoff
+        .get("source_session_count")
+        .and_then(Value::as_u64)
+        .unwrap_or_default()
+        == 0
+    {
+        return Err(EvalError::scenario(format!(
+            "scenario {} MCP continuity handoff found no source session",
+            scenario.id
+        )));
+    }
+
+    let reader_begin = call_tool(
+        server,
+        "mneme_v1_continuity_begin",
+        json!({
+            "task": flow.reader_task,
+            "agent": flow.reader_agent,
+            "lineage": flow.lineage,
+            "scope": flow.scope,
+            "query": flow.reader_query.as_ref().unwrap_or(&flow.handoff_query),
+        }),
+        scenario,
+    )?;
+    let pack = reader_begin
+        .get("report")
+        .and_then(|report| report.get("context_pack"))
+        .cloned()
+        .ok_or_else(|| {
+            EvalError::scenario(format!(
+                "scenario {} MCP continuity reader begin returned no context_pack",
+                scenario.id
+            ))
+        })?;
+    let pack = serde_json::from_value::<CoreContextPack>(pack).map_err(|source| {
+        EvalError::scenario(format!(
+            "scenario {} failed to parse MCP continuity reader context_pack: {source}",
+            scenario.id
+        ))
+    })?;
+    Ok(context_actual(pack))
 }
 
 fn run_team_mcp_flow(

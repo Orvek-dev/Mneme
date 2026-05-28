@@ -407,6 +407,7 @@ impl MnemeEngine {
         let session = SessionRecord {
             id: next_id("session", self.next_session_number()),
             task: input.task,
+            lineage_id: input.lineage_id.and_then(non_empty_string),
             actor_agent_id: input.actor_agent_id,
             status: SessionStatus::Active,
             started_at_unix_seconds: unix_timestamp(),
@@ -466,6 +467,11 @@ impl MnemeEngine {
             .actor_agent_id
             .clone()
             .or_else(|| self.sessions[position].actor_agent_id.clone());
+        let scope = input
+            .scope
+            .clone()
+            .and_then(non_empty_string)
+            .unwrap_or_else(|| "private".to_owned());
         let mut remembered_event_ids = Vec::new();
         let mut remembered_claim_ids = Vec::new();
 
@@ -480,7 +486,7 @@ impl MnemeEngine {
                     speaker_id: "agent".to_owned(),
                     actor_agent_id: actor_agent_id.clone(),
                     text,
-                    scope: "private".to_owned(),
+                    scope: scope.clone(),
                     trust_level: "agent_summary".to_owned(),
                 },
                 extractor,
@@ -988,6 +994,9 @@ pub struct CompactionReport {
 pub struct SessionBeginInput {
     /// Task or user request the agent is starting.
     pub task: String,
+    /// Optional task/project lineage identifier shared across agent sessions.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub lineage_id: Option<String>,
     /// Agent identifier, when available.
     pub actor_agent_id: Option<String>,
     /// Optional retrieval query. Defaults to `task`.
@@ -1007,6 +1016,9 @@ pub struct SessionEndInput {
     pub session_id: String,
     /// Agent identifier, when different from the begin call.
     pub actor_agent_id: Option<String>,
+    /// Scope used for memory written by this session end.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub scope: Option<String>,
     /// Optional task summary.
     pub summary: Option<String>,
     /// Claims or natural-language memory notes to record at session end.
@@ -1030,6 +1042,9 @@ pub struct SessionRecord {
     pub id: String,
     /// Task or user request associated with this session.
     pub task: String,
+    /// Optional task/project lineage identifier shared across agent sessions.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub lineage_id: Option<String>,
     /// Agent identifier, when available.
     pub actor_agent_id: Option<String>,
     /// Session lifecycle status.
@@ -2344,6 +2359,15 @@ fn dedupe_ids(ids: &mut Vec<String>) {
     *ids = deduped;
 }
 
+fn non_empty_string(value: String) -> Option<String> {
+    let trimmed = value.trim();
+    if trimmed.is_empty() {
+        None
+    } else {
+        Some(trimmed.to_owned())
+    }
+}
+
 fn find_remember_marker(text: &str) -> Option<&str> {
     for marker in ["remember:", "기억해줘:"] {
         if let Some((_, rest)) = text.split_once(marker) {
@@ -3561,6 +3585,7 @@ mod tests {
 
         let begin = engine.begin_session(SessionBeginInput {
             task: "Draft a setup plan".to_owned(),
+            lineage_id: None,
             actor_agent_id: Some("codex".to_owned()),
             query: Some("local-first".to_owned()),
             allowed_scopes: vec!["private".to_owned()],
@@ -3574,6 +3599,7 @@ mod tests {
         let end = engine.end_session(SessionEndInput {
             session_id: begin.session.id,
             actor_agent_id: Some("codex".to_owned()),
+            scope: None,
             summary: Some("Prepared a concise setup plan".to_owned()),
             remember: vec!["user prefers concise setup plans".to_owned()],
         })?;
@@ -3623,6 +3649,7 @@ mod tests {
         let mut engine = MnemeEngine::new(MnemeConfig::default());
         let begin = engine.begin_session(SessionBeginInput {
             task: "Draft a planning doc".to_owned(),
+            lineage_id: None,
             actor_agent_id: Some("codex".to_owned()),
             query: None,
             allowed_scopes: vec!["private".to_owned()],
@@ -3633,6 +3660,7 @@ mod tests {
             SessionEndInput {
                 session_id: begin.session.id,
                 actor_agent_id: Some("codex".to_owned()),
+                scope: None,
                 summary: Some("Prepared the planning doc".to_owned()),
                 remember: vec!["For future planning docs, keep explanations direct.".to_owned()],
             },
@@ -3664,6 +3692,7 @@ mod tests {
 
         let denied = engine.begin_session(SessionBeginInput {
             task: "Draft release notes".to_owned(),
+            lineage_id: None,
             actor_agent_id: Some("codex".to_owned()),
             query: Some("release notes".to_owned()),
             allowed_scopes: vec!["private".to_owned()],
@@ -3678,6 +3707,7 @@ mod tests {
 
         let allowed = engine.begin_session(SessionBeginInput {
             task: "Draft release notes".to_owned(),
+            lineage_id: None,
             actor_agent_id: Some("codex".to_owned()),
             query: Some("release notes".to_owned()),
             allowed_scopes: vec!["team".to_owned()],
@@ -3694,6 +3724,7 @@ mod tests {
         let result = engine.end_session(SessionEndInput {
             session_id: "session-404".to_owned(),
             actor_agent_id: None,
+            scope: None,
             summary: Some("nothing happened".to_owned()),
             remember: Vec::new(),
         });

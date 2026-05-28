@@ -3,7 +3,7 @@
 </p>
 
 <p align="center">
-  <a href="https://github.com/Orvek-dev/Mneme/releases/tag/v0.64.0"><img alt="Version" src="https://img.shields.io/badge/version-0.64.0-2ea44f"></a>
+  <a href="https://github.com/Orvek-dev/Mneme/releases/tag/v0.65.0"><img alt="Version" src="https://img.shields.io/badge/version-0.65.0-2ea44f"></a>
   <a href="./LICENSE"><img alt="License" src="https://img.shields.io/badge/license-MIT-0969da"></a>
   <img alt="Rust" src="https://img.shields.io/badge/Rust-CLI-b7410e">
   <img alt="Local first" src="https://img.shields.io/badge/local--first-JSON%20stores-6f42c1">
@@ -131,15 +131,15 @@ claims against external production workloads.
 
 | Evidence surface | Public-safe signal | Current result |
 | --- | --- | --- |
-| Public eval surface | Core, runtime, agent, dogfood, model, team, and MCP suites | `50` public scenarios |
+| Public eval surface | Core, runtime, agent, dogfood, model, team, and MCP suites | `51` public scenarios |
 | V1 ontology readiness | 13 golden ontology cases | `1.00` entity/relation/attribute F1 |
 | V1 hard dogfood | 100 normal records, 150 adversarial records, 30 handoff workflows | `30/30` workflows passed |
 | Safety guardrails | Scope leak and secret leak checks | `0` scope leaks, `0` secret leaks |
 | V2 team readiness | ACL, promotion, revoke, secret, sync, firewall, handoff, run, quality, checksum, ontology | `10/10` team scenarios passed |
-| MCP readiness | V1/V2 tools through the local stdio server | `4/4` MCP scenarios passed |
+| MCP readiness | V1/V2 tools through the local stdio server | `5/5` MCP scenarios passed |
 | MCP hard dogfood | V1 hard corpus, V1 ontology, V2 team corpus, team suite via MCP | passed locally |
 | MCP seeded faults | V1 skip/leak/citation faults plus V2 policy/leak faults through MCP | `9/9` detected |
-| Codex MCP smoke | Actual Codex CLI calling Mneme MCP with isolated temporary stores | V1 write/read, V2 handoff, wrong-owner denial passed |
+| MCP client smoke | Actual Codex, Claude Code, and Cursor CLI setup with isolated temporary stores | Registration, health, tool discovery, and protocol continuity passed |
 | V2 seeded faults | ACL bypass, secret leak, dropped citations, unapproved promotion, ignored revocation, quarantined leak | `6/6` detected |
 | V2 dogfood shape | 120 synthetic team records, 80 adversarial records, 25 handoff workflows | fixture shape verified |
 
@@ -173,6 +173,13 @@ mneme team firewall --json
 
 # MCP config for agent clients
 mneme mcp config --client all
+scripts/mcp-client-continuity-smoke.py --require-clients
+
+# V1 MCP continuity tools exposed to MCP clients:
+# mneme_mcp_status
+# mneme_v1_continuity_begin
+# mneme_v1_continuity_end
+# mneme_v1_continuity_handoff
 ```
 
 Without `--store`, V1 writes to `.mneme/mneme-v1.json` and V2 writes to
@@ -191,6 +198,9 @@ docs/v1/                personal-memory docs
 docs/v2/                team-memory, handoff, security, and eval docs
 docs/eval-harness/      scenario, baseline, candidate, and provider eval docs
 examples/codex/         Codex MCP config and smoke-test notes
+examples/claude-code/   Claude Code MCP config and continuity notes
+examples/cursor/        Cursor MCP config and continuity notes
+examples/mcp-client-smoke/  public-safe client smoke summary shape
 examples/v2-team-agent-ops/  public-safe v2 handoff demo
 evals/                  public scenario fixtures
 scripts/                quality, safety, legacy bridge, dogfood, and install helpers

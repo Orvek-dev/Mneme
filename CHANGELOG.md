@@ -2,7 +2,7 @@
 
 This project follows the spirit of Keep a Changelog.
 
-## Unreleased
+## [0.65.0] - 2026-05-29
 
 ### Added
 
@@ -20,6 +20,16 @@ This project follows the spirit of Keep a Changelog.
   `mneme-mcp --self-test` and MCP eval readiness.
 - Added a package-level `mneme-mcp` README and Codex MCP example documenting
   the public-safe real-client smoke-test shape.
+- Added `mneme_mcp_status` plus V1 MCP continuity tools for explicit
+  begin/end/handoff discipline across sequential agent sessions.
+- Added an MCP cross-agent continuity eval scenario where one agent writes
+  scoped memory, the server restarts, and another agent retrieves it by
+  lineage/scope with citations.
+- Added `scripts/mcp-client-continuity-smoke.py` for public-safe protocol
+  continuity checks and isolated Codex, Claude Code, and Cursor MCP client
+  setup checks.
+- Added Codex, Claude Code, and Cursor continuity rule examples for consistent
+  begin/end/handoff behavior.
 
 ### Changed
 
@@ -27,6 +37,7 @@ This project follows the spirit of Keep a Changelog.
   regressions can be caught with the same failure modes as native V1/V2 evals.
 - Extended the release quality gate with MCP hard dogfood contract, dataset, and
   seeded-fault checks.
+- Extended the release quality gate with MCP client continuity protocol checks.
 
 ## [0.64.0] - 2026-05-25
 

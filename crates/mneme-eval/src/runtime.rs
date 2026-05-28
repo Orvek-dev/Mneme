@@ -412,6 +412,22 @@ fn check_session(expected: &SessionExpected, actual: &ActualState) -> Vec<CheckR
             ));
         }
     }
+    if let Some(lineage_id) = &expected.lineage_id {
+        if session.lineage_id.as_ref() == Some(lineage_id) {
+            checks.push(CheckReport::pass(
+                "session.lineage_id",
+                lineage_id,
+                lineage_id,
+            ));
+        } else {
+            checks.push(CheckReport::fail(
+                "session.lineage_id",
+                lineage_id,
+                format!("{:?}", session.lineage_id),
+                "actual.sessions.lineage_id",
+            ));
+        }
+    }
     if let Some(actor_agent_id) = &expected.actor_agent_id {
         if session.actor_agent_id.as_ref() == Some(actor_agent_id) {
             checks.push(CheckReport::pass(
@@ -1156,6 +1172,7 @@ mod tests {
             persistence: None,
             maintenance: Maintenance::default(),
             agent_flow: None,
+            mcp_continuity_flow: None,
             team_flow: None,
             events: vec![InputEvent {
                 speaker_id: "user".to_owned(),
@@ -1220,6 +1237,7 @@ mod tests {
             persistence: None,
             maintenance: Maintenance::default(),
             agent_flow: None,
+            mcp_continuity_flow: None,
             team_flow: None,
             events: vec![InputEvent {
                 speaker_id: "user".to_owned(),

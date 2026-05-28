@@ -246,6 +246,7 @@ fn run_with_optional_persistence(
     if let Some(agent_flow) = &scenario.agent_flow {
         let begin = engine.begin_session(SessionBeginInput {
             task: agent_flow.begin.task.clone(),
+            lineage_id: None,
             actor_agent_id: agent_flow.begin.actor_agent_id.clone(),
             query: agent_flow.begin.query.clone(),
             allowed_scopes: effective_allowed_scopes(&agent_flow.begin.allowed_scopes),
@@ -255,6 +256,7 @@ fn run_with_optional_persistence(
             let input = SessionEndInput {
                 session_id: begin.session.id,
                 actor_agent_id: agent_flow.begin.actor_agent_id.clone(),
+                scope: None,
                 summary: end.summary.clone(),
                 remember: end.remember.clone(),
             };
@@ -334,6 +336,7 @@ fn run_with_optional_persistence(
             .map(|session| SessionActual {
                 id: session.id,
                 task: session.task,
+                lineage_id: session.lineage_id,
                 actor_agent_id: session.actor_agent_id,
                 status: session.status.as_str().to_owned(),
                 context_claim_ids: session.context_claim_ids,

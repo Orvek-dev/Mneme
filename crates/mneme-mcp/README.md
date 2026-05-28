@@ -44,17 +44,27 @@ Generate snippets for supported clients:
 mneme mcp config --client all
 ```
 
-For Codex, see [examples/codex](../../examples/codex/README.md). The example
-uses explicit workspace-local stores so memory remains outside git.
+Client examples:
+
+- [Codex](../../examples/codex/README.md)
+- [Claude Code](../../examples/claude-code/README.md)
+- [Cursor](../../examples/cursor/README.md)
+
+The examples use explicit workspace-local stores so memory remains outside git.
 
 ## Tool Surface
 
 V1 tools:
 
+- `mneme_mcp_status`
 - `mneme_v1_remember`
+- `mneme_v1_ingest`
 - `mneme_v1_context`
 - `mneme_v1_begin`
 - `mneme_v1_end`
+- `mneme_v1_continuity_begin`
+- `mneme_v1_continuity_end`
+- `mneme_v1_continuity_handoff`
 - `mneme_v1_forget`
 - `mneme_v1_correct`
 - `mneme_v1_quality`
@@ -85,21 +95,47 @@ cargo run -p mneme-eval -- run --suite mcp --target mneme-mcp
 scripts/mcp-hard-dogfood.py --out-dir /tmp/mneme-mcp-hard-dogfood --force
 ```
 
-Current public-safe MCP coverage includes V1 write/read, V1 restart
-persistence, V2 handoff, V2 private-scope blocking, citation checks, scope leak
-checks, secret leak checks, hard dogfood corpora, and seeded fault detection.
+Current public-safe MCP coverage includes installation/status checks, V1
+write/read, V1 restart persistence, V1 cross-agent continuity, V2 handoff, V2
+private-scope blocking, citation checks, scope leak checks, secret leak checks,
+hard dogfood corpora, and seeded fault detection.
 
-## Real Codex Smoke
+## V1 Continuity Flow
 
-Mneme MCP has also been smoke-tested through actual Codex CLI execution with
-isolated temporary stores:
+Sequential agents should use the continuity tools rather than relying on
+best-effort memory calls:
+
+```text
+Agent A: mneme_v1_continuity_begin(lineage, scope)
+Agent A: work
+Agent A: mneme_v1_continuity_end(session_id, remember, scope)
+Agent B: mneme_v1_continuity_handoff(lineage, scope)
+Agent B: mneme_v1_continuity_begin(lineage, scope)
+```
+
+The MCP eval suite verifies this with a cross-agent scenario: `codex` writes
+back scoped memory, the server restarts, and `claude-code` retrieves the cited
+context from the same lineage/scope.
+
+## Real Client Smoke
+
+Mneme MCP has also been smoke-tested through actual installed client CLIs with
+isolated temporary config homes and stores:
 
 | Client | Check | Result |
 | --- | --- | --- |
-| Codex CLI | V1 MCP write/read | Passed |
-| Codex CLI | V2 team handoff | Passed |
-| Codex CLI | V2 wrong agent-owner denial | Passed |
+| Direct MCP protocol | V1 cross-agent continuity after server restart | Passed |
+| Direct MCP protocol | Missing end, wrong scope, and secret-context guards | Passed |
+| Codex CLI | Isolated `codex mcp add/list/get` | Passed |
+| Claude Code CLI | Isolated `claude mcp add/list/get`, health connected | Passed |
+| Cursor Agent CLI | Workspace approval and `list-tools` with 38 tools | Passed |
 
 This is a client integration smoke test, not an external production benchmark.
 Raw client logs are intentionally not committed because they may include local
 paths or environment details.
+
+Reproduce locally:
+
+```sh
+scripts/mcp-client-continuity-smoke.py --require-clients
+```
