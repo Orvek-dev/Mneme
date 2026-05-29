@@ -272,9 +272,25 @@ fn run_mcp_continuity_flow(
         )));
     }
 
+    let begin_tool = if flow.use_agent_workflow_tools {
+        "mneme_task_start"
+    } else {
+        "mneme_v1_continuity_begin"
+    };
+    let finish_tool = if flow.use_agent_workflow_tools {
+        "mneme_task_finish"
+    } else {
+        "mneme_v1_continuity_end"
+    };
+    let handoff_tool = if flow.use_agent_workflow_tools {
+        "mneme_prepare_handoff"
+    } else {
+        "mneme_v1_continuity_handoff"
+    };
+
     let begin = call_tool(
         server,
-        "mneme_v1_continuity_begin",
+        begin_tool,
         json!({
             "task": flow.writer_task,
             "agent": flow.writer_agent,
@@ -284,6 +300,9 @@ fn run_mcp_continuity_flow(
         }),
         scenario,
     )?;
+    if flow.use_agent_workflow_tools {
+        assert_next_actions(&begin, scenario, begin_tool)?;
+    }
     let session_id = begin
         .get("session_id")
         .and_then(Value::as_str)
@@ -295,7 +314,7 @@ fn run_mcp_continuity_flow(
         })?;
     let end = call_tool(
         server,
-        "mneme_v1_continuity_end",
+        finish_tool,
         json!({
             "session_id": session_id,
             "agent": flow.writer_agent,
@@ -306,6 +325,9 @@ fn run_mcp_continuity_flow(
         }),
         scenario,
     )?;
+    if flow.use_agent_workflow_tools {
+        assert_next_actions(&end, scenario, finish_tool)?;
+    }
     if end.get("write_back_ok").and_then(Value::as_bool) != Some(true) {
         return Err(EvalError::scenario(format!(
             "scenario {} MCP continuity end did not write memory",
@@ -319,7 +341,7 @@ fn run_mcp_continuity_flow(
 
     let handoff = call_tool(
         server,
-        "mneme_v1_continuity_handoff",
+        handoff_tool,
         json!({
             "agent": flow.reader_agent,
             "lineage": flow.lineage,
@@ -328,6 +350,9 @@ fn run_mcp_continuity_flow(
         }),
         scenario,
     )?;
+    if flow.use_agent_workflow_tools {
+        assert_next_actions(&handoff, scenario, handoff_tool)?;
+    }
     if handoff
         .get("source_session_count")
         .and_then(Value::as_u64)
@@ -342,7 +367,7 @@ fn run_mcp_continuity_flow(
 
     let reader_begin = call_tool(
         server,
-        "mneme_v1_continuity_begin",
+        begin_tool,
         json!({
             "task": flow.reader_task,
             "agent": flow.reader_agent,
@@ -352,6 +377,9 @@ fn run_mcp_continuity_flow(
         }),
         scenario,
     )?;
+    if flow.use_agent_workflow_tools {
+        assert_next_actions(&reader_begin, scenario, begin_tool)?;
+    }
     let pack = reader_begin
         .get("report")
         .and_then(|report| report.get("context_pack"))
@@ -369,6 +397,25 @@ fn run_mcp_continuity_flow(
         ))
     })?;
     Ok(context_actual(pack))
+}
+
+fn assert_next_actions(value: &Value, scenario: &Scenario, tool: &str) -> Result<(), EvalError> {
+    let actions = value
+        .get("next_recommended_actions")
+        .and_then(Value::as_array)
+        .ok_or_else(|| {
+            EvalError::scenario(format!(
+                "scenario {} MCP tool {tool} returned no next_recommended_actions",
+                scenario.id
+            ))
+        })?;
+    if actions.is_empty() {
+        return Err(EvalError::scenario(format!(
+            "scenario {} MCP tool {tool} returned empty next_recommended_actions",
+            scenario.id
+        )));
+    }
+    Ok(())
 }
 
 fn run_team_mcp_flow(

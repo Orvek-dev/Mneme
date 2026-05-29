@@ -3,11 +3,11 @@
 </p>
 
 <p align="center">
-  <a href="https://github.com/Orvek-dev/Mneme/releases/tag/v0.65.2"><img alt="Version" src="https://img.shields.io/badge/version-0.65.2-2ea44f"></a>
+  <a href="https://github.com/Orvek-dev/Mneme/releases/tag/v0.66.0"><img alt="Version" src="https://img.shields.io/badge/version-0.66.0-2ea44f"></a>
   <a href="./LICENSE"><img alt="License" src="https://img.shields.io/badge/license-MIT-0969da"></a>
   <img alt="Rust" src="https://img.shields.io/badge/Rust-CLI-b7410e">
   <img alt="Local first" src="https://img.shields.io/badge/local--first-JSON%20stores-6f42c1">
-  <img alt="Eval scenarios" src="https://img.shields.io/badge/eval-50%20public%20scenarios-1f883d">
+  <img alt="Eval scenarios" src="https://img.shields.io/badge/eval-52%20public%20scenarios-1f883d">
   <img alt="Team suite" src="https://img.shields.io/badge/v2%20team-10%2F10%20scenarios-8250df">
   <img alt="Codex MCP" src="https://img.shields.io/badge/Codex%20MCP-smoke%20passed-0969da">
 </p>
@@ -133,18 +133,19 @@ the reduced public-safe summary.
 
 | Evidence surface | Public-safe signal | Current result |
 | --- | --- | --- |
-| Public eval surface | Core, runtime, agent, dogfood, model, team, and MCP suites | `51` public scenarios |
-| V1 ontology readiness | 13 golden ontology cases | `1.00` entity/relation/attribute F1 |
-| V1 hard dogfood | 100 normal records, 150 adversarial records, 30 handoff workflows | `30/30` workflows passed |
-| Safety guardrails | Scope leak and secret leak checks | `0` scope leaks, `0` secret leaks |
+| Public eval surface | Core, runtime, agent, dogfood, model, team, MCP, and MCP agent-usability suites | `52` public scenarios |
+| V1 ontology fixture regression | 14 committed ontology cases, including one paraphrase canary | committed fixture passes; not an open-domain ontology claim |
+| V1 hard dogfood | 100 normal records, 150 adversarial records, 30 handoff workflows with non-exact retrieval queries | `30/30` workflows passed |
+| Safety guardrails | Pattern-based scope leak and synthetic secret leak checks | `0` scope leaks, `0` synthetic secret leaks |
 | V2 team readiness | ACL, promotion, revoke, secret, sync, firewall, handoff, run, quality, checksum, ontology | `10/10` team scenarios passed |
 | MCP readiness | V1/V2 tools through the local stdio server | `5/5` MCP scenarios passed |
+| MCP agent usability | High-level task start/finish/handoff tools plus next-action checks | wrapper flow passed |
 | MCP hard dogfood | V1 hard corpus, V1 ontology, V2 team corpus, team suite via MCP | passed locally |
 | MCP seeded faults | V1 skip/leak/citation faults plus V2 policy/leak faults through MCP | `9/9` detected |
 | MCP client smoke | Actual Codex, Claude Code, and Cursor CLI setup with isolated temporary stores | Registration, health, tool discovery, and protocol continuity passed |
-| MCP V2 handoff dogfood | 30 local-only scripted handoff episodes across projects and reader agents | `30/30` passed, Recall@K `1.00`, Precision@K `1.00`, citation coverage `1.00` |
+| MCP V2 handoff dogfood | 30 local-only scripted handoff episodes across projects and reader agents | scripted loop passed; retrieval scores are local regression signals, not semantic-search benchmarks |
 | MCP dogfood safety | Scope, secret-like, quarantined, and unauthorized-write probes in the local-only handoff loop | `0` scope leaks, `0` secret leaks, `0` quarantine leaks |
-| Reduced real-session ledger | 3 public-safe development-session summaries, no raw transcript included | `3/3` passed, recall `1.00`, citation coverage `1.00` |
+| Reduced real-session ledger | 3 public-safe development-session summaries, no raw transcript included | `3/3` scripted continuity checks passed with required citations |
 | Local edge dogfood | Concurrent writes, concurrent handoffs, noisy scope retrieval, injection guard, restart guard | 80 V1 writers, 24 V2 handoffs, 300 noise records, and MCP restart guards passed |
 | V2 seeded faults | ACL bypass, secret leak, dropped citations, unapproved promotion, ignored revocation, quarantined leak | `6/6` detected |
 | V2 dogfood shape | 120 synthetic team records, 80 adversarial records, 25 handoff workflows | fixture shape verified |
@@ -152,6 +153,12 @@ the reduced public-safe summary.
 For a GitHub-native scorecard with reproducibility notes, see
 [Mneme v1 Evidence Scorecard](docs/v1/evidence-scorecard.md). For V2 evidence,
 see [V2 Evaluation](docs/v2/evaluation.md).
+
+Read these numbers as local regression and safety-boundary evidence. They do
+not prove broad natural-language understanding, semantic search quality, or
+third-party production performance. The ontology fixture is committed and
+public-safe; the quality gate also runs `scripts/eval-integrity-check.py` so
+golden input text cannot be copied into runtime source code.
 
 ## Commands
 
@@ -183,18 +190,24 @@ scripts/mcp-client-continuity-smoke.py --require-clients
 
 # V1 MCP continuity tools exposed to MCP clients:
 # mneme_mcp_status
-# mneme_v1_continuity_begin
-# mneme_v1_continuity_end
-# mneme_v1_continuity_handoff
-# mneme_v1_backfill_context
+# mneme_agent_guide
+# mneme_task_start
+# mneme_task_finish
+# mneme_prepare_handoff
+# mneme_import_previous_context
 ```
+
+Most agents should use the five high-level MCP tools first:
+`mneme_mcp_status`, `mneme_agent_guide`, `mneme_task_start`,
+`mneme_task_finish`, and `mneme_prepare_handoff`. The lower-level V1/V2 tools
+remain available for advanced adapters and explicit policy workflows.
 
 Every context pack and handoff package is explicitly marked as partial context.
 Mneme returns scoped, ranked memory with citations; it does not claim to be the
 full conversation transcript. When you install Mneme after a long session, use
-`mneme_v1_backfill_context` to import a public-safe summary and specific memory
-notes into a lineage/scope without pretending the raw prior conversation was
-captured.
+`mneme_import_previous_context` to import a public-safe summary and specific
+memory notes into a lineage/scope without pretending the raw prior conversation
+was captured.
 
 Without `--store`, V1 writes to `.mneme/mneme-v1.json` and V2 writes to
 `.mneme/mneme-team-v2.json`. `.mneme/` is ignored by git.

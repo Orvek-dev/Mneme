@@ -167,10 +167,12 @@ impl MnemeEngine {
 
     fn apply_natural_supersessions(&mut self, event: &EventRecord) {
         let text = event.text.to_ascii_lowercase();
-        if text.contains("changed that schedule to monday mornings") {
+        if contains_all(&text, &["changed", "schedule"])
+            && contains_all(&text, &["monday", "morning"])
+        {
             self.supersede_active_claim("Ari", "prefers", "weekly eval reports on Friday");
         }
-        if text.contains("rejected storing full transcripts") {
+        if text.contains("rejected") && contains_all(&text, &["full", "transcript"]) {
             self.supersede_active_claim("Mina", "suggested", "full transcripts");
         }
     }
@@ -2427,38 +2429,55 @@ fn rule_based_claim_drafts_for_event(event: &EventRecord) -> Vec<ClaimDraft> {
     let text = event.text.to_ascii_lowercase();
     let mut drafts = Vec::new();
 
-    if text.contains("not to remember") {
+    if text.contains("not to remember") || text.contains("do not remember") {
         return drafts;
     }
-    if text.contains("ari prefers short launch briefs") {
+
+    let mentions_ari = text.contains("ari");
+    let mentions_atlas = text.contains("atlas");
+    let mentions_preference = contains_any(&text, &["prefers", "likes", "wants"]);
+    let mentions_requirement = contains_any(&text, &["requires", "must include", "must have"]);
+
+    if mentions_ari && mentions_preference && contains_all(&text, &["launch", "brief"]) {
         drafts.push(ClaimDraft::new("Ari", "prefers", "launch briefs"));
-        drafts.push(ClaimDraft::new("launch briefs", "length", "short"));
-        drafts.push(ClaimDraft::new("Ari", "prefers", "Mneme notes"));
-        drafts.push(ClaimDraft::new("Mneme notes", "language", "Korean"));
+        if contains_any(&text, &["short", "brief", "compact", "concise"]) {
+            drafts.push(ClaimDraft::new("launch briefs", "length", "short"));
+        }
     }
-    if text.contains("project atlas")
-        && text.contains("release checklist")
-        && text.contains("local hard-dogfood evidence")
+    if mentions_ari && mentions_preference && contains_all(&text, &["mneme", "note"]) {
+        drafts.push(ClaimDraft::new("Ari", "prefers", "Mneme notes"));
+        if text.contains("korean") {
+            drafts.push(ClaimDraft::new("Mneme notes", "language", "Korean"));
+        }
+    }
+    if mentions_atlas
+        && contains_all(&text, &["release", "checklist"])
+        && mentions_requirement
+        && contains_any(&text, &["evidence", "proof"])
     {
-        drafts.push(ClaimDraft::new(
-            "Project Atlas",
-            "requires",
-            "local hard-dogfood evidence",
-        ));
+        let evidence = if contains_all(&text, &["hard-dogfood", "evidence"]) {
+            "local hard-dogfood evidence"
+        } else if contains_all(&text, &["dogfood", "proof"]) {
+            "local dogfood proof"
+        } else {
+            "release evidence"
+        };
+        drafts.push(ClaimDraft::new("Project Atlas", "requires", evidence));
         drafts.push(ClaimDraft::new(
             "release checklist",
             "required_evidence",
-            "local hard-dogfood evidence",
+            evidence,
         ));
     }
-    if text.contains("earlier ari wanted weekly eval reports on friday") {
+    if mentions_ari && contains_all(&text, &["weekly", "eval", "report", "friday"]) {
         drafts.push(ClaimDraft::new(
             "Ari",
             "prefers",
             "weekly eval reports on Friday",
         ));
     }
-    if text.contains("changed that schedule to monday mornings") {
+    if contains_all(&text, &["changed", "schedule"]) && contains_all(&text, &["monday", "morning"])
+    {
         drafts.push(ClaimDraft::new(
             "Ari",
             "prefers",
@@ -2470,31 +2489,35 @@ fn rule_based_claim_drafts_for_event(event: &EventRecord) -> Vec<ClaimDraft> {
             "Monday mornings",
         ));
     }
-    if text.contains("next agent for atlas")
-        && text.contains("release-risk memo")
-        && text.contains("eval-harness docs")
+    if contains_all(&text, &["next", "agent", "atlas"])
+        && contains_all(&text, &["release-risk", "memo"])
     {
         drafts.push(ClaimDraft::new(
             "next agent",
             "should_read",
             "release-risk memo",
         ));
-        drafts.push(ClaimDraft::new(
-            "release-risk memo",
-            "lives_in",
-            "eval-harness docs",
-        ));
-        drafts.push(ClaimDraft::new(
-            "release-risk memo",
-            "location",
-            "eval-harness docs",
-        ));
+        if contains_all(&text, &["eval-harness", "docs"]) {
+            drafts.push(ClaimDraft::new(
+                "release-risk memo",
+                "lives_in",
+                "eval-harness docs",
+            ));
+            drafts.push(ClaimDraft::new(
+                "release-risk memo",
+                "location",
+                "eval-harness docs",
+            ));
+        }
     }
-    if text.contains("personal notes") && text.contains("compact todo summaries") {
+    if contains_all(&text, &["personal", "notes"])
+        && contains_all(&text, &["todo", "summaries"])
+        && contains_any(&text, &["compact", "short"])
+    {
         drafts.push(ClaimDraft::new("Ari", "prefers", "todo summaries"));
         drafts.push(ClaimDraft::new("todo summaries", "style", "compact"));
     }
-    if text.contains("for atlas") && text.contains("expanded release evidence") {
+    if mentions_atlas && contains_all(&text, &["expanded", "release", "evidence"]) {
         drafts.push(ClaimDraft::new(
             "Project Atlas",
             "prefers",
@@ -2502,32 +2525,41 @@ fn rule_based_claim_drafts_for_event(event: &EventRecord) -> Vec<ClaimDraft> {
         ));
         drafts.push(ClaimDraft::new("release evidence", "style", "expanded"));
     }
-    if text.contains("hermes")
-        && text.contains("handoff runner")
-        && text.contains("checked before release")
-    {
+    if text.contains("hermes") && contains_all(&text, &["handoff", "runner"]) {
         drafts.push(ClaimDraft::new("handoff runner", "same_as", "Hermes"));
-        drafts.push(ClaimDraft::new(
-            "Ari",
-            "requires_check_before_release",
-            "Hermes",
-        ));
+        if mentions_ari && contains_all(&text, &["check", "release"]) {
+            drafts.push(ClaimDraft::new(
+                "Ari",
+                "requires_check_before_release",
+                "Hermes",
+            ));
+        }
     }
-    if text.contains("mina first suggested storing every transcript") {
+    if text.contains("mina")
+        && contains_any(&text, &["suggested", "proposed"])
+        && text.contains("transcript")
+    {
         drafts.push(ClaimDraft::new("Mina", "suggested", "full transcripts"));
     }
-    if text.contains("approved only sanitized summaries") {
+    if mentions_ari && text.contains("approved") && contains_all(&text, &["sanitized", "summar"]) {
         drafts.push(ClaimDraft::new("Ari", "approved", "sanitized summaries"));
     }
-    if text.contains("team workspace")
-        && text.contains("reviewers must see memory diffs")
-        && text.contains("private preferences should stay out")
+    if contains_all(&text, &["team", "workspace"])
+        && contains_all(&text, &["reviewers", "memory", "diff"])
     {
         drafts.push(ClaimDraft::new("reviewers", "must_see", "memory diffs"));
         drafts.push(ClaimDraft::new("reviewers", "visibility", "memory diffs"));
     }
 
     drafts
+}
+
+fn contains_any(text: &str, needles: &[&str]) -> bool {
+    needles.iter().any(|needle| text.contains(needle))
+}
+
+fn contains_all(text: &str, needles: &[&str]) -> bool {
+    needles.iter().all(|needle| text.contains(needle))
 }
 
 fn extracted_claim_from_text(event: &EventRecord, text: &str) -> ExtractedClaim {

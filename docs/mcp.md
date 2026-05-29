@@ -62,9 +62,17 @@ files.
 
 ## Tool Surface
 
+Most agents should start with the high-level workflow tools:
+
+- `mneme_mcp_status`: verify server, stores, and continuity contract;
+- `mneme_agent_guide`: ask which Mneme tool should come next;
+- `mneme_task_start`: read partial cited context and open a continuity session;
+- `mneme_task_finish`: close the session and write durable non-secret memory;
+- `mneme_prepare_handoff`: package cited context for the next sequential agent;
+- `mneme_import_previous_context`: backfill public-safe prior context summaries.
+
 V1 tools cover personal memory:
 
-- check MCP status and the continuity contract;
 - remember and ingest memory;
 - retrieve cited context;
 - begin and end task sessions;
@@ -102,6 +110,7 @@ Current MCP readiness checks include:
 | V1 remember/context | Personal memory can be written and retrieved through MCP. |
 | V1 session restart | Stored personal memory survives a new server instance. |
 | V1 cross-agent continuity | Agent A writes back scoped memory, the MCP server restarts, and Agent B retrieves it through the same lineage/scope. |
+| MCP agent usability | High-level task start/finish/handoff tools return next actions and preserve the continuity loop. |
 | V2 team handoff | Team context, handoff package, sync checksum, firewall, and audit are reachable. |
 | V2 private-scope block | A second actor cannot read private memory through context, handoff, ontology, or sync paths. |
 | citations and leaks | Context keeps citations while scope and secret leak counters remain zero. |
@@ -130,7 +139,7 @@ It covers:
 | Surface | Coverage |
 | --- | --- |
 | V1 MCP hard corpus | 100 normal records, 150 adversarial records, 30 handoff workflows |
-| V1 MCP ontology | 13 natural-language ontology cases |
+| V1 MCP ontology | 14 committed ontology cases, including one paraphrase canary |
 | V2 MCP hard corpus | 120 team records, 80 adversarial records, 25 handoff workflows |
 | Suite parity | `mcp` and `team` suites run against `mneme-mcp` |
 | Fault detection | 9 seeded V1/V2 faults detected through the MCP eval target |
@@ -148,7 +157,7 @@ client logs, and reduced real-session ledger under ignored local paths.
 | --- | --- |
 | Scripted V2 MCP handoff episodes | `30/30` passed |
 | Tested client surfaces | `protocol-stdio`, `codex`, `claude`, `cursor` |
-| Recall@K / Precision@K / citation coverage | `1.00 / 1.00 / 1.00` |
+| Retrieval and citation checks | local scripted loop passed; scores are regression signals, not semantic-search benchmarks |
 | Scope, secret, and quarantine leaks | `0 / 0 / 0` |
 | Reduced real-session summaries | `3/3` passed, no raw transcript included |
 | Edge dogfood | 80 V1 concurrent writers, 24 V2 concurrent handoffs, 300 noisy records, injection guard, and MCP restart guard passed |

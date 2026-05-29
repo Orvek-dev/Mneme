@@ -54,9 +54,17 @@ The examples use explicit workspace-local stores so memory remains outside git.
 
 ## Tool Surface
 
-V1 tools:
+Recommended agent workflow tools:
 
 - `mneme_mcp_status`
+- `mneme_agent_guide`
+- `mneme_task_start`
+- `mneme_task_finish`
+- `mneme_prepare_handoff`
+- `mneme_import_previous_context`
+
+V1 tools:
+
 - `mneme_v1_remember`
 - `mneme_v1_ingest`
 - `mneme_v1_context`
@@ -65,6 +73,7 @@ V1 tools:
 - `mneme_v1_continuity_begin`
 - `mneme_v1_continuity_end`
 - `mneme_v1_continuity_handoff`
+- `mneme_v1_backfill_context`
 - `mneme_v1_forget`
 - `mneme_v1_correct`
 - `mneme_v1_quality`
@@ -103,9 +112,10 @@ hard dogfood corpora, and seeded fault detection.
 Local-only development dogfood has also exercised 30 scripted V2 MCP handoff
 episodes across `protocol-stdio`, Codex, Claude Code, and Cursor smoke
 surfaces. The reduced public-safe summary from the latest run was `30/30`
-episodes passed with Recall@K `1.00`, Precision@K `1.00`, citation coverage
-`1.00`, and zero scope/secret/quarantine leaks. The runner, raw stores, client
-logs, and real-session ledger are intentionally not committed.
+episodes passed with zero scope/secret/quarantine leaks. Retrieval and citation
+scores from that loop are local regression signals, not semantic-search
+benchmarks. The runner, raw stores, client logs, and real-session ledger are
+intentionally not committed.
 
 Local edge dogfood also covered 80 concurrent V1 writers, 24 concurrent V2
 handoffs, 300 noisy records, prompt-injection context blocking, and MCP restart
@@ -151,7 +161,7 @@ isolated temporary config homes and stores:
 | Direct MCP protocol | Missing end, wrong scope, and secret-context guards | Passed |
 | Codex CLI | Isolated `codex mcp add/list/get` | Passed |
 | Claude Code CLI | Isolated `claude mcp add/list/get`, health connected | Passed |
-| Cursor Agent CLI | Workspace approval and `list-tools` with 39 tools | Passed |
+| Cursor Agent CLI | Workspace approval and `list-tools` with 44 tools | Passed |
 
 This is a client integration smoke test, not an external production benchmark.
 Raw client logs are intentionally not committed because they may include local

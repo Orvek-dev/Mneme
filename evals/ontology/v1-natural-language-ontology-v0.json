@@ -105,6 +105,104 @@
       "title": "Pronoun-linked personal preferences"
     },
     {
+      "category": "paraphrase_generalization",
+      "events": [
+        {
+          "actor_agent_id": "codex",
+          "id": "e1",
+          "scope": "private",
+          "speaker_id": "user",
+          "text": "Ari likes concise launch briefs and wants user-facing Mneme notes written in Korean.",
+          "trust_level": "trusted_user"
+        }
+      ],
+      "expected": {
+        "attributes": [
+          {
+            "entity": "artifact_launch_briefs",
+            "id": "attr_paraphrase_launch_briefs_length",
+            "key": "length",
+            "scope": "private",
+            "source_event_ids": [
+              "e1"
+            ],
+            "status": "active",
+            "value": "short"
+          },
+          {
+            "entity": "artifact_mneme_notes",
+            "id": "attr_paraphrase_mneme_notes_language",
+            "key": "language",
+            "scope": "private",
+            "source_event_ids": [
+              "e1"
+            ],
+            "status": "active",
+            "value": "Korean"
+          }
+        ],
+        "context_checks": [
+          {
+            "allowed_scopes": [
+              "private"
+            ],
+            "id": "ctx_paraphrase_launch_briefs",
+            "must_include_relation_ids": [
+              "rel_paraphrase_ari_prefers_launch_briefs"
+            ],
+            "must_not_include_relation_ids": [],
+            "query": "Ari concise briefs"
+          }
+        ],
+        "entities": [
+          {
+            "id": "person_ari",
+            "name": "Ari",
+            "type": "person"
+          },
+          {
+            "id": "artifact_launch_briefs",
+            "name": "launch briefs",
+            "type": "artifact"
+          },
+          {
+            "id": "artifact_mneme_notes",
+            "name": "Mneme notes",
+            "type": "artifact"
+          }
+        ],
+        "must_not_relations": [],
+        "relations": [
+          {
+            "id": "rel_paraphrase_ari_prefers_launch_briefs",
+            "object": "artifact_launch_briefs",
+            "predicate": "prefers",
+            "scope": "private",
+            "source_event_ids": [
+              "e1"
+            ],
+            "status": "active",
+            "subject": "person_ari"
+          },
+          {
+            "id": "rel_paraphrase_ari_prefers_korean_notes",
+            "object": "artifact_mneme_notes",
+            "predicate": "prefers",
+            "scope": "private",
+            "source_event_ids": [
+              "e1"
+            ],
+            "status": "active",
+            "subject": "person_ari"
+          }
+        ],
+        "temporal_checks": []
+      },
+      "id": "paraphrase-concise-launch-notes",
+      "input_style": "natural_language",
+      "title": "Paraphrased preference wording"
+    },
+    {
       "category": "project_scope",
       "events": [
         {

@@ -24,7 +24,7 @@ from typing import Any
 
 SCHEMA_VERSION = 1
 BENCHMARK_ID = "v1-natural-language-ontology-v0"
-EXPECTED_CASE_COUNT = 13
+EXPECTED_CASE_COUNT = 14
 RUN_LABEL_RE = re.compile(r"^[A-Za-z0-9._/-]+$")
 SECRET_RE = re.compile(r"(?i)\b(api_key|token|access_token|password)\s*=")
 KEY_LIKE_RE = "sk" + r"-[A-Za-z0-9_-]{16,}"

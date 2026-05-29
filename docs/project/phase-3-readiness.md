@@ -241,5 +241,5 @@ next v1 completion phase.
 
 Phase 42 shipped the **Natural-Language Ontology Extraction MVP** in `v0.48.0`,
 adding the default v1 schema-lite natural-language extractor and
-source-event-aware retrieval so the public ontology benchmark reports
-`ontology_benchmark_passed` and `v1_ontology_ready`.
+source-event-aware retrieval so the committed public ontology fixture reports
+`ontology_benchmark_passed` and the fixture-bound `v1_ontology_ready` gate.

@@ -140,8 +140,8 @@ eval update land in the same PR.
 - Full real-use pilot evidence is local-only; CI checks the feedback contract,
   example feedback, and script syntax.
 - Full ontology benchmark evidence is usually local-only; the quality gate also
-  runs the compact public ontology benchmark in a temporary directory and
-  requires `v1_ontology_ready`.
+  runs the compact public ontology fixture in a temporary directory and requires
+  the fixture-bound `v1_ontology_ready` gate.
 - `RUSTDOCFLAGS="-D warnings" cargo doc --workspace --no-deps` must pass before
   release.
 - `scripts/public-safety-check.sh` guards against known private/public-safety

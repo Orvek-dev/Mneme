@@ -177,6 +177,7 @@ impl McpServer {
     pub fn tools(&self) -> Vec<ToolDefinition> {
         let mut tools = global_tools();
         if self.config.mode.includes_personal() {
+            tools.extend(personal_workflow_tools());
             tools.extend(personal_tools());
         }
         if self.config.mode.includes_team() {
@@ -192,6 +193,11 @@ impl McpServer {
                 "v1 tools are disabled for this server mode",
             ));
         }
+        if is_personal_workflow_tool(name) && !self.config.mode.includes_personal() {
+            return Err(McpError::invalid_request(
+                "personal workflow tools are disabled for this server mode",
+            ));
+        }
         if name.starts_with("mneme_v2_") && !self.config.mode.includes_team() {
             return Err(McpError::invalid_request(
                 "v2 tools are disabled for this server mode",
@@ -199,6 +205,11 @@ impl McpServer {
         }
         match name {
             "mneme_mcp_status" => Ok(self.mcp_status()),
+            "mneme_agent_guide" => Ok(self.agent_guide(arguments)),
+            "mneme_task_start" => self.task_start(arguments),
+            "mneme_task_finish" => self.task_finish(arguments),
+            "mneme_prepare_handoff" => self.prepare_handoff(arguments),
+            "mneme_import_previous_context" => self.import_previous_context(arguments),
             "mneme_v1_ingest" => self.v1_ingest(arguments, false, "ingest"),
             "mneme_v1_remember" => self.v1_ingest(arguments, true, "remember"),
             "mneme_v1_context" => self.v1_context(arguments),
@@ -310,6 +321,13 @@ impl McpServer {
             },
             "tool_count": tools.len(),
             "tools": tools.iter().map(|tool| tool.name).collect::<Vec<_>>(),
+            "recommended_agent_tools": [
+                "mneme_agent_guide",
+                "mneme_task_start",
+                "mneme_task_finish",
+                "mneme_prepare_handoff",
+                "mneme_import_previous_context"
+            ],
             "v1": v1,
             "v2": v2,
             "continuity_contract": {
@@ -321,8 +339,132 @@ impl McpServer {
                 "sequential_handoff_required": true,
                 "partial_context_warning_required": true,
                 "backfill_supported": true,
+                "preferred_agent_loop": [
+                    "mneme_mcp_status",
+                    "mneme_agent_guide",
+                    "mneme_task_start",
+                    "mneme_task_finish",
+                    "mneme_prepare_handoff"
+                ],
             }
         })
+    }
+
+    fn agent_guide(&self, arguments: &Map<String, Value>) -> Value {
+        let situation =
+            optional_string(arguments, "situation").unwrap_or_else(|| "task".to_owned());
+        json!({
+            "command": "mcp.agent_guide",
+            "schema_version": "mneme.mcp_agent_guide.v1",
+            "mode": self.config.mode.as_str(),
+            "situation": situation,
+            "recommended_tools_first": [
+                "mneme_task_start",
+                "mneme_task_finish",
+                "mneme_prepare_handoff",
+                "mneme_import_previous_context"
+            ],
+            "advanced_tools": [
+                "mneme_v1_context",
+                "mneme_v1_continuity_begin",
+                "mneme_v1_continuity_end",
+                "mneme_v2_run_begin",
+                "mneme_v2_run_end",
+                "mneme_v2_run_handoff"
+            ],
+            "rules": [
+                "Use the same lineage and scope for a task across sessions.",
+                "Treat Mneme context as partial cited memory, not a full transcript.",
+                "Call mneme_task_finish before stopping if mneme_task_start returned a session_id.",
+                "Store only durable non-secret facts in remember.",
+                "Use mneme_prepare_handoff before another agent continues the task."
+            ],
+            "next_recommended_actions": guide_next_actions(),
+        })
+    }
+
+    fn task_start(&self, arguments: &Map<String, Value>) -> Result<Value, McpError> {
+        let task = required_string(arguments, "task")?;
+        let query = optional_string(arguments, "query").unwrap_or_else(|| task.clone());
+        let mut begin_args = arguments.clone();
+        begin_args.insert("query".to_owned(), Value::String(query.clone()));
+        let begin = self.v1_continuity_begin(&begin_args)?;
+        let include_handoff = optional_bool(arguments, "include_handoff").unwrap_or(true);
+        let handoff = if include_handoff {
+            let mut handoff_args = arguments.clone();
+            handoff_args.insert("query".to_owned(), Value::String(query));
+            Some(self.v1_continuity_handoff(&handoff_args)?)
+        } else {
+            None
+        };
+        Ok(json!({
+            "command": "mcp.task_start",
+            "schema_version": "mneme.mcp_task_start.v1",
+            "store": self.config.v1_store.display().to_string(),
+            "session_id": begin.get("session_id").cloned().unwrap_or(Value::Null),
+            "lineage_id": begin.get("lineage_id").cloned().unwrap_or(Value::Null),
+            "continuity_scope": begin.get("continuity_scope").cloned().unwrap_or(Value::Null),
+            "partial_context": begin.get("partial_context").cloned().unwrap_or(Value::Bool(true)),
+            "not_full_transcript": begin.get("not_full_transcript").cloned().unwrap_or(Value::Bool(true)),
+            "warning": begin.get("warning").cloned().unwrap_or(Value::Null),
+            "handoff": handoff,
+            "report": begin.get("report").cloned().unwrap_or(Value::Null),
+            "next_recommended_actions": task_start_next_actions(),
+        }))
+    }
+
+    fn task_finish(&self, arguments: &Map<String, Value>) -> Result<Value, McpError> {
+        let finish = self.v1_continuity_end(arguments)?;
+        Ok(json!({
+            "command": "mcp.task_finish",
+            "schema_version": "mneme.mcp_task_finish.v1",
+            "store": self.config.v1_store.display().to_string(),
+            "session_id": finish.get("session_id").cloned().unwrap_or(Value::Null),
+            "lineage_id": finish.get("lineage_id").cloned().unwrap_or(Value::Null),
+            "continuity_scope": finish.get("continuity_scope").cloned().unwrap_or(Value::Null),
+            "write_back_ok": finish.get("write_back_ok").cloned().unwrap_or(Value::Bool(false)),
+            "remembered_event_count": finish.get("remembered_event_count").cloned().unwrap_or(Value::from(0)),
+            "remembered_claim_count": finish.get("remembered_claim_count").cloned().unwrap_or(Value::from(0)),
+            "report": finish.get("report").cloned().unwrap_or(Value::Null),
+            "next_recommended_actions": task_finish_next_actions(),
+        }))
+    }
+
+    fn prepare_handoff(&self, arguments: &Map<String, Value>) -> Result<Value, McpError> {
+        let handoff = self.v1_continuity_handoff(arguments)?;
+        Ok(json!({
+            "command": "mcp.prepare_handoff",
+            "schema_version": "mneme.mcp_prepare_handoff.v1",
+            "store": self.config.v1_store.display().to_string(),
+            "lineage_id": handoff.get("lineage_id").cloned().unwrap_or(Value::Null),
+            "continuity_scope": handoff.get("continuity_scope").cloned().unwrap_or(Value::Null),
+            "partial_context": handoff.get("partial_context").cloned().unwrap_or(Value::Bool(true)),
+            "not_full_transcript": handoff.get("not_full_transcript").cloned().unwrap_or(Value::Bool(true)),
+            "warning": handoff.get("warning").cloned().unwrap_or(Value::Null),
+            "source_session_count": handoff.get("source_session_count").cloned().unwrap_or(Value::from(0)),
+            "context_item_count": handoff.get("context_item_count").cloned().unwrap_or(Value::from(0)),
+            "source_sessions": handoff.get("source_sessions").cloned().unwrap_or(Value::Array(Vec::new())),
+            "context_pack": handoff.get("context_pack").cloned().unwrap_or(Value::Null),
+            "next_recommended_actions": handoff_next_actions(),
+        }))
+    }
+
+    fn import_previous_context(&self, arguments: &Map<String, Value>) -> Result<Value, McpError> {
+        let backfill = self.v1_backfill_context(arguments)?;
+        Ok(json!({
+            "command": "mcp.import_previous_context",
+            "schema_version": "mneme.mcp_import_previous_context.v1",
+            "store": self.config.v1_store.display().to_string(),
+            "session_id": backfill.get("session_id").cloned().unwrap_or(Value::Null),
+            "lineage_id": backfill.get("lineage_id").cloned().unwrap_or(Value::Null),
+            "partial_context": backfill.get("partial_context").cloned().unwrap_or(Value::Bool(true)),
+            "not_full_transcript": backfill.get("not_full_transcript").cloned().unwrap_or(Value::Bool(true)),
+            "warning": backfill.get("warning").cloned().unwrap_or(Value::Null),
+            "remembered_event_count": backfill.get("remembered_event_count").cloned().unwrap_or(Value::from(0)),
+            "remembered_claim_count": backfill.get("remembered_claim_count").cloned().unwrap_or(Value::from(0)),
+            "report": backfill.get("report").cloned().unwrap_or(Value::Null),
+            "next_recommended_actions": import_next_actions(),
+        }))
     }
 
     fn v1_ingest(
@@ -377,6 +519,7 @@ impl McpServer {
             "item_count": context_pack.items.len(),
             "omitted_count": context_pack.omitted.len(),
             "context_pack": context_pack,
+            "next_recommended_actions": partial_context_next_actions(),
         }))
     }
 
@@ -402,6 +545,7 @@ impl McpServer {
             "not_full_transcript": report.context_pack.metadata.not_full_transcript,
             "warning": report.context_pack.metadata.warning.clone(),
             "report": report,
+            "next_recommended_actions": task_start_next_actions(),
         }))
     }
 
@@ -460,6 +604,7 @@ impl McpServer {
             "context_item_count": report.context_pack.items.len(),
             "omitted_count": report.context_pack.omitted.len(),
             "report": report,
+            "next_recommended_actions": task_start_next_actions(),
         }))
     }
 
@@ -489,6 +634,7 @@ impl McpServer {
             "remembered_event_count": report.remembered_event_ids.len(),
             "remembered_claim_count": report.remembered_claim_ids.len(),
             "report": report,
+            "next_recommended_actions": task_finish_next_actions(),
         }))
     }
 
@@ -534,6 +680,7 @@ impl McpServer {
             "omitted_count": context_pack.omitted.len(),
             "source_sessions": source_sessions,
             "context_pack": context_pack,
+            "next_recommended_actions": handoff_next_actions(),
         }))
     }
 
@@ -562,6 +709,7 @@ impl McpServer {
             "remembered_event_count": report.remembered_event_ids.len(),
             "remembered_claim_count": report.remembered_claim_ids.len(),
             "report": report,
+            "next_recommended_actions": import_next_actions(),
         }))
     }
 
@@ -793,6 +941,7 @@ impl McpServer {
             "item_count": context_pack.items.len(),
             "omitted_count": context_pack.omitted.len(),
             "context_pack": context_pack,
+            "next_recommended_actions": partial_context_next_actions(),
         }))
     }
 
@@ -822,6 +971,7 @@ impl McpServer {
             "sync_memory_count": package.sync_envelope.memories.len(),
             "firewall_ok": package.firewall.ok,
             "package": package,
+            "next_recommended_actions": handoff_next_actions(),
         }))
     }
 
@@ -849,6 +999,7 @@ impl McpServer {
             "warning": report.context_pack.metadata.warning.clone(),
             "report": report,
             "validation": validate_team_state(&engine.state()),
+            "next_recommended_actions": task_start_next_actions(),
         }))
     }
 
@@ -913,6 +1064,7 @@ impl McpServer {
             "sync_memory_count": package.sync_envelope.memories.len(),
             "firewall_ok": package.firewall.ok,
             "package": package,
+            "next_recommended_actions": handoff_next_actions(),
         }))
     }
 
@@ -1130,6 +1282,24 @@ pub struct ToolDefinition {
     /// JSON schema for tool arguments.
     #[serde(rename = "inputSchema")]
     pub input_schema: Value,
+    /// MCP tool behavior annotations for model/client planning.
+    pub annotations: ToolAnnotations,
+}
+
+/// MCP tool annotations.
+#[derive(Debug, Clone, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct ToolAnnotations {
+    /// Human-readable title.
+    pub title: &'static str,
+    /// True when the tool does not mutate local Mneme stores.
+    pub read_only_hint: bool,
+    /// True when the tool can delete, revoke, import, or otherwise perform risky mutation.
+    pub destructive_hint: bool,
+    /// True when repeat calls with the same arguments should not add duplicate state.
+    pub idempotent_hint: bool,
+    /// True when the tool may interact with external systems outside local stores.
+    pub open_world_hint: bool,
 }
 
 /// MCP server error.
@@ -1236,6 +1406,64 @@ fn tool_result(value: Value) -> Value {
     })
 }
 
+fn is_personal_workflow_tool(name: &str) -> bool {
+    matches!(
+        name,
+        "mneme_task_start"
+            | "mneme_task_finish"
+            | "mneme_prepare_handoff"
+            | "mneme_import_previous_context"
+    )
+}
+
+fn guide_next_actions() -> Vec<&'static str> {
+    vec![
+        "Call mneme_task_start before planning meaningful work.",
+        "Use cited memories as partial context and verify against the current repo.",
+        "Call mneme_task_finish with a summary and durable remember items before stopping.",
+    ]
+}
+
+fn partial_context_next_actions() -> Vec<&'static str> {
+    vec![
+        "Treat this as scoped, ranked memory rather than the full transcript.",
+        "Use citations and source counts as confidence signals.",
+        "Verify stale or surprising memory against current files before acting.",
+    ]
+}
+
+fn task_start_next_actions() -> Vec<&'static str> {
+    vec![
+        "Read the cited context before planning.",
+        "Keep the returned session_id, lineage, and scope for task finish.",
+        "Call mneme_task_finish before stopping.",
+    ]
+}
+
+fn task_finish_next_actions() -> Vec<&'static str> {
+    vec![
+        "If another agent will continue, call mneme_prepare_handoff.",
+        "Do not store secrets, raw credentials, or private local paths.",
+        "Use the same lineage and scope for follow-up work.",
+    ]
+}
+
+fn handoff_next_actions() -> Vec<&'static str> {
+    vec![
+        "Pass the handoff package to the next agent as partial cited context.",
+        "The receiving agent should call mneme_task_start with the same lineage and scope.",
+        "Do not treat omitted or redacted memory as available context.",
+    ]
+}
+
+fn import_next_actions() -> Vec<&'static str> {
+    vec![
+        "Use this imported context as a summarized historical session, not a raw transcript.",
+        "Follow with mneme_task_start using the same lineage and scope.",
+        "Keep future durable facts in mneme_task_finish remember items.",
+    ]
+}
+
 fn is_json_rpc_notification(request: &Value) -> bool {
     request.get("id").is_none()
         && request
@@ -1307,13 +1535,88 @@ fn entity_report<T: Serialize>(
 fn object_schema(required: &[&str], properties: Vec<(&'static str, Value)>) -> Value {
     let props = properties
         .into_iter()
-        .map(|(key, value)| (key.to_owned(), value))
+        .map(|(key, value)| (key.to_owned(), enrich_property_schema(key, value)))
         .collect::<Map<_, _>>();
     json!({
         "type": "object",
         "required": required,
         "properties": props,
     })
+}
+
+fn enrich_property_schema(key: &str, mut schema: Value) -> Value {
+    if let Some(object) = schema.as_object_mut() {
+        object
+            .entry("description")
+            .or_insert_with(|| Value::String(field_description(key).to_owned()));
+        if let Some(examples) = field_examples(key) {
+            object
+                .entry("examples")
+                .or_insert_with(|| Value::Array(examples.into_iter().map(Value::String).collect()));
+        }
+    }
+    schema
+}
+
+fn field_description(key: &str) -> &'static str {
+    match key {
+        "actor" => "Team user id performing the action, for example alice or reviewer-bob.",
+        "admin" => "Optional admin user id to create during team initialization.",
+        "agent" => "Agent id making the call, for example codex, claude-code, cursor, planner, or reviewer.",
+        "apply" => "When false, dry-run only. When true, apply the sync envelope and mutate the store.",
+        "approve" => "True to approve a promotion candidate, false to reject it.",
+        "claim_id" => "Stable claim id returned by Mneme, such as claim-001.",
+        "envelope" => "Connector-safe V2 sync envelope previously exported by Mneme.",
+        "include_handoff" => "When true, task_start also builds a handoff/context package before opening the session.",
+        "include_projects" => "Include connector-safe project metadata in the sync export when policy allows it.",
+        "lineage" => "Stable task lineage shared across sessions. Use an issue id, branch name, or task slug.",
+        "max_items" => "Maximum context items to return. Keep small unless the agent explicitly needs more context.",
+        "memory_id" => "V2 memory id to promote, review, or inspect.",
+        "members" => "Team user ids that can access the project scope.",
+        "new_text" => "Replacement durable memory text.",
+        "next" => "Next steps another agent or future session should continue.",
+        "note" => "Reviewer or promotion note explaining why the action is being taken.",
+        "old_text" => "Existing memory text to replace when claim_id is not available.",
+        "owner" => "User id that owns the agent.",
+        "project" => "Project id used for project-scoped memory, for example atlas.",
+        "promotion_id" => "Promotion candidate id returned by mneme_v2_promote.",
+        "query" => "Plain-language retrieval query for scoped memory. Use task-specific terms, not secrets.",
+        "remember" => "Durable non-secret facts to save for future sessions. Do not include raw transcripts.",
+        "role" => "Team role such as admin, member, or reviewer.",
+        "run_id" => "V2 task-run id returned by mneme_v2_run_begin.",
+        "scope" => "Memory scope. For V1 use private or project:<name>. For V2 use private:<user>, project:<id>, agent-private:<agent>, or team.",
+        "scopes" => "Allowed V1 scopes to read. Include the shared task scope and private only when appropriate.",
+        "session_id" => "V1 session id returned by mneme_task_start or mneme_v1_begin.",
+        "situation" => "Short description of what the agent is trying to do, used to return tool guidance.",
+        "speaker" => "Speaker id for raw events, usually user or agent.",
+        "summary" => "Concise public-safe summary of completed work. Do not include secrets or raw transcripts.",
+        "target_agent" => "Agent id to revoke.",
+        "task" => "Concrete task the agent is starting or backfilling.",
+        "text" => "Memory or event text. Store durable non-secret facts only.",
+        "trust" => "Trust level for raw events, such as trusted_user, agent_summary, or untrusted_transcript.",
+        "user" => "Team user id.",
+        "workspace" => "Team workspace id for the local V2 store.",
+        _ => "Tool argument.",
+    }
+}
+
+fn field_examples(key: &str) -> Option<Vec<String>> {
+    let examples = match key {
+        "actor" => vec!["alice", "reviewer-bob"],
+        "agent" => vec!["codex", "claude-code", "cursor"],
+        "lineage" => vec!["issue-42-auth-refactor", "branch:feat/mcp-memory"],
+        "query" => vec![
+            "release checklist evidence",
+            "continuity smoke before release",
+        ],
+        "scope" => vec!["private", "project:atlas", "team"],
+        "summary" => vec!["Implemented the parser and verified cargo test."],
+        "remember" => vec!["Project Atlas release requires local dogfood evidence."],
+        "task" => vec!["Continue the MCP handoff validation"],
+        "text" => vec!["user prefers concise release notes"],
+        _ => return None,
+    };
+    Some(examples.into_iter().map(str::to_owned).collect())
 }
 
 fn string_schema() -> Value {
@@ -1332,89 +1635,143 @@ fn string_array_schema() -> Value {
     json!({"type": "array", "items": {"type": "string"}})
 }
 
-fn global_tools() -> Vec<ToolDefinition> {
-    vec![ToolDefinition {
-        name: "mneme_mcp_status",
-        description:
-            "Check Mneme MCP installation, store paths, tool inventory, and continuity contract.",
-        input_schema: object_schema(&[], Vec::new()),
-    }]
+fn tool_definition(
+    name: &'static str,
+    description: &'static str,
+    input_schema: Value,
+) -> ToolDefinition {
+    ToolDefinition {
+        name,
+        description,
+        input_schema,
+        annotations: tool_annotations(name),
+    }
 }
 
-fn personal_tools() -> Vec<ToolDefinition> {
+fn tool_annotations(name: &'static str) -> ToolAnnotations {
+    let read_only = matches!(
+        name,
+        "mneme_mcp_status"
+            | "mneme_agent_guide"
+            | "mneme_v1_context"
+            | "mneme_v1_quality"
+            | "mneme_v1_validate"
+            | "mneme_v1_snapshot"
+            | "mneme_v1_continuity_handoff"
+            | "mneme_prepare_handoff"
+            | "mneme_v2_team_context"
+            | "mneme_v2_team_handoff"
+            | "mneme_v2_run_handoff"
+            | "mneme_v2_promotion_report"
+            | "mneme_v2_firewall"
+            | "mneme_v2_quality"
+            | "mneme_v2_ontology"
+            | "mneme_v2_validate"
+            | "mneme_v2_snapshot"
+            | "mneme_v2_sync_export"
+    );
+    let destructive = matches!(
+        name,
+        "mneme_v1_forget"
+            | "mneme_v1_correct"
+            | "mneme_v2_sync_import"
+            | "mneme_v2_review"
+            | "mneme_v2_revoke_user"
+            | "mneme_v2_revoke_agent"
+    );
+    let idempotent = matches!(
+        name,
+        "mneme_mcp_status"
+            | "mneme_agent_guide"
+            | "mneme_v1_context"
+            | "mneme_v1_quality"
+            | "mneme_v1_validate"
+            | "mneme_v1_snapshot"
+            | "mneme_v2_team_context"
+            | "mneme_v2_team_handoff"
+            | "mneme_v2_firewall"
+            | "mneme_v2_quality"
+            | "mneme_v2_ontology"
+            | "mneme_v2_validate"
+            | "mneme_v2_snapshot"
+    );
+    ToolAnnotations {
+        title: tool_title(name),
+        read_only_hint: read_only,
+        destructive_hint: destructive,
+        idempotent_hint: idempotent,
+        open_world_hint: false,
+    }
+}
+
+fn tool_title(name: &str) -> &'static str {
+    match name {
+        "mneme_mcp_status" => "Mneme MCP Status",
+        "mneme_agent_guide" => "Mneme Agent Guide",
+        "mneme_task_start" => "Start Mneme Task",
+        "mneme_task_finish" => "Finish Mneme Task",
+        "mneme_prepare_handoff" => "Prepare Mneme Handoff",
+        "mneme_import_previous_context" => "Import Previous Context",
+        "mneme_v1_remember" => "V1 Remember",
+        "mneme_v1_ingest" => "V1 Ingest",
+        "mneme_v1_context" => "V1 Context",
+        "mneme_v1_begin" => "V1 Begin",
+        "mneme_v1_end" => "V1 End",
+        "mneme_v1_continuity_begin" => "V1 Continuity Begin",
+        "mneme_v1_continuity_end" => "V1 Continuity End",
+        "mneme_v1_continuity_handoff" => "V1 Continuity Handoff",
+        "mneme_v1_backfill_context" => "V1 Backfill Context",
+        "mneme_v1_forget" => "V1 Forget",
+        "mneme_v1_correct" => "V1 Correct",
+        "mneme_v2_team_init" => "V2 Team Init",
+        "mneme_v2_user_add" => "V2 User Add",
+        "mneme_v2_agent_add" => "V2 Agent Add",
+        "mneme_v2_project_add" => "V2 Project Add",
+        "mneme_v2_project_grant" => "V2 Project Grant",
+        "mneme_v2_team_remember" => "V2 Team Remember",
+        "mneme_v2_team_context" => "V2 Team Context",
+        "mneme_v2_team_handoff" => "V2 Team Handoff",
+        "mneme_v2_run_begin" => "V2 Run Begin",
+        "mneme_v2_run_note" => "V2 Run Note",
+        "mneme_v2_run_end" => "V2 Run End",
+        "mneme_v2_run_handoff" => "V2 Run Handoff",
+        "mneme_v2_promote" => "V2 Promote",
+        "mneme_v2_promotion_report" => "V2 Promotion Report",
+        "mneme_v2_review" => "V2 Review",
+        "mneme_v2_sync_export" => "V2 Sync Export",
+        "mneme_v2_sync_import" => "V2 Sync Import",
+        "mneme_v2_firewall" => "V2 Firewall",
+        "mneme_v2_quality" => "V2 Quality",
+        "mneme_v2_ontology" => "V2 Ontology",
+        "mneme_v2_revoke_user" => "V2 Revoke User",
+        "mneme_v2_revoke_agent" => "V2 Revoke Agent",
+        "mneme_v2_validate" => "V2 Validate",
+        "mneme_v2_snapshot" => "V2 Snapshot",
+        _ => "Mneme Tool",
+    }
+}
+
+fn global_tools() -> Vec<ToolDefinition> {
     vec![
-        ToolDefinition {
-            name: "mneme_v1_remember",
-            description: "Store one explicit v1 personal-memory claim.",
-            input_schema: object_schema(
-                &["text"],
-                vec![
-                    ("text", string_schema()),
-                    ("scope", string_schema()),
-                    ("agent", string_schema()),
-                ],
-            ),
-        },
-        ToolDefinition {
-            name: "mneme_v1_ingest",
-            description: "Append one raw v1 event for evals or advanced adapters.",
-            input_schema: object_schema(
-                &["text"],
-                vec![
-                    ("text", string_schema()),
-                    ("speaker", string_schema()),
-                    ("scope", string_schema()),
-                    ("trust", string_schema()),
-                    ("agent", string_schema()),
-                ],
-            ),
-        },
-        ToolDefinition {
-            name: "mneme_v1_context",
-            description: "Read a scoped v1 context pack.",
-            input_schema: object_schema(
-                &["query"],
-                vec![
-                    ("query", string_schema()),
-                    ("scopes", string_array_schema()),
-                    ("max_items", int_schema()),
-                ],
-            ),
-        },
-        ToolDefinition {
-            name: "mneme_v1_begin",
-            description: "Begin a v1 agent session and return task-scoped context.",
-            input_schema: object_schema(
-                &["task"],
-                vec![
-                    ("task", string_schema()),
-                    ("lineage", string_schema()),
-                    ("query", string_schema()),
-                    ("scopes", string_array_schema()),
-                    ("max_items", int_schema()),
-                    ("agent", string_schema()),
-                ],
-            ),
-        },
-        ToolDefinition {
-            name: "mneme_v1_end",
-            description: "End a v1 agent session and record optional memories.",
-            input_schema: object_schema(
-                &["session_id"],
-                vec![
-                    ("session_id", string_schema()),
-                    ("scope", string_schema()),
-                    ("summary", string_schema()),
-                    ("remember", string_array_schema()),
-                    ("agent", string_schema()),
-                ],
-            ),
-        },
-        ToolDefinition {
-            name: "mneme_v1_continuity_begin",
-            description:
-                "Begin a v1 continuity session with explicit lineage/scope read discipline.",
-            input_schema: object_schema(
+        tool_definition(
+            "mneme_mcp_status",
+            "Check Mneme MCP installation, store paths, tool inventory, recommended agent tools, and continuity contract. Use first.",
+            object_schema(&[], Vec::new()),
+        ),
+        tool_definition(
+            "mneme_agent_guide",
+            "Explain which Mneme MCP tools an agent should use for the current situation. Use when unsure which tool comes next.",
+            object_schema(&[], vec![("situation", string_schema())]),
+        ),
+    ]
+}
+
+fn personal_workflow_tools() -> Vec<ToolDefinition> {
+    vec![
+        tool_definition(
+            "mneme_task_start",
+            "Preferred task-start tool for agents. It reads partial cited context, opens a continuity session, and can include a handoff package.",
+            object_schema(
                 &["task"],
                 vec![
                     ("task", string_schema()),
@@ -1424,14 +1781,14 @@ fn personal_tools() -> Vec<ToolDefinition> {
                     ("scopes", string_array_schema()),
                     ("max_items", int_schema()),
                     ("agent", string_schema()),
+                    ("include_handoff", bool_schema()),
                 ],
             ),
-        },
-        ToolDefinition {
-            name: "mneme_v1_continuity_end",
-            description:
-                "End a v1 continuity session and write back memory into the shared lineage/scope.",
-            input_schema: object_schema(
+        ),
+        tool_definition(
+            "mneme_task_finish",
+            "Preferred task-finish tool for agents. It closes the session and writes durable non-secret memory back into the same lineage/scope.",
+            object_schema(
                 &["session_id"],
                 vec![
                     ("session_id", string_schema()),
@@ -1442,11 +1799,11 @@ fn personal_tools() -> Vec<ToolDefinition> {
                     ("agent", string_schema()),
                 ],
             ),
-        },
-        ToolDefinition {
-            name: "mneme_v1_continuity_handoff",
-            description: "Build a v1 continuity handoff package for another agent/session.",
-            input_schema: object_schema(
+        ),
+        tool_definition(
+            "mneme_prepare_handoff",
+            "Preferred handoff tool for agents. It packages partial cited context for the next sequential agent without exposing a full transcript.",
+            object_schema(
                 &["query"],
                 vec![
                     ("query", string_schema()),
@@ -1457,12 +1814,11 @@ fn personal_tools() -> Vec<ToolDefinition> {
                     ("agent", string_schema()),
                 ],
             ),
-        },
-        ToolDefinition {
-            name: "mneme_v1_backfill_context",
-            description:
-                "Import a public-safe summary of previous context that was not captured live.",
-            input_schema: object_schema(
+        ),
+        tool_definition(
+            "mneme_import_previous_context",
+            "Import a public-safe summary of prior work that happened before Mneme was active. Do not paste secrets or raw transcripts.",
+            object_schema(
                 &["summary"],
                 vec![
                     ("summary", string_schema()),
@@ -1473,11 +1829,144 @@ fn personal_tools() -> Vec<ToolDefinition> {
                     ("agent", string_schema()),
                 ],
             ),
-        },
-        ToolDefinition {
-            name: "mneme_v1_forget",
-            description: "Forget v1 memory by claim id or text.",
-            input_schema: object_schema(
+        ),
+    ]
+}
+
+fn personal_tools() -> Vec<ToolDefinition> {
+    vec![
+        tool_definition(
+            "mneme_v1_remember",
+            "Store one explicit durable V1 personal-memory claim. Use for explicit facts only; do not store secrets or transient task notes.",
+            object_schema(
+                &["text"],
+                vec![
+                    ("text", string_schema()),
+                    ("scope", string_schema()),
+                    ("agent", string_schema()),
+                ],
+            ),
+        ),
+        tool_definition(
+            "mneme_v1_ingest",
+            "Append one raw V1 event for evals or advanced adapters. Most agents should prefer mneme_task_start/finish.",
+            object_schema(
+                &["text"],
+                vec![
+                    ("text", string_schema()),
+                    ("speaker", string_schema()),
+                    ("scope", string_schema()),
+                    ("trust", string_schema()),
+                    ("agent", string_schema()),
+                ],
+            ),
+        ),
+        tool_definition(
+            "mneme_v1_context",
+            "Read a scoped V1 context pack. Use for advanced reads; most task starts should use mneme_task_start.",
+            object_schema(
+                &["query"],
+                vec![
+                    ("query", string_schema()),
+                    ("scopes", string_array_schema()),
+                    ("max_items", int_schema()),
+                ],
+            ),
+        ),
+        tool_definition(
+            "mneme_v1_begin",
+            "Begin a V1 agent session and return task-scoped context. Prefer mneme_task_start unless you need low-level control.",
+            object_schema(
+                &["task"],
+                vec![
+                    ("task", string_schema()),
+                    ("lineage", string_schema()),
+                    ("query", string_schema()),
+                    ("scopes", string_array_schema()),
+                    ("max_items", int_schema()),
+                    ("agent", string_schema()),
+                ],
+            ),
+        ),
+        tool_definition(
+            "mneme_v1_end",
+            "End a V1 agent session and record optional memories. Prefer mneme_task_finish for normal agent loops.",
+            object_schema(
+                &["session_id"],
+                vec![
+                    ("session_id", string_schema()),
+                    ("scope", string_schema()),
+                    ("summary", string_schema()),
+                    ("remember", string_array_schema()),
+                    ("agent", string_schema()),
+                ],
+            ),
+        ),
+        tool_definition(
+            "mneme_v1_continuity_begin",
+            "Begin a V1 continuity session with explicit lineage/scope read discipline. Prefer mneme_task_start for normal agents.",
+            object_schema(
+                &["task"],
+                vec![
+                    ("task", string_schema()),
+                    ("lineage", string_schema()),
+                    ("scope", string_schema()),
+                    ("query", string_schema()),
+                    ("scopes", string_array_schema()),
+                    ("max_items", int_schema()),
+                    ("agent", string_schema()),
+                ],
+            ),
+        ),
+        tool_definition(
+            "mneme_v1_continuity_end",
+            "End a V1 continuity session and write back memory into the shared lineage/scope. Prefer mneme_task_finish for normal agents.",
+            object_schema(
+                &["session_id"],
+                vec![
+                    ("session_id", string_schema()),
+                    ("lineage", string_schema()),
+                    ("scope", string_schema()),
+                    ("summary", string_schema()),
+                    ("remember", string_array_schema()),
+                    ("agent", string_schema()),
+                ],
+            ),
+        ),
+        tool_definition(
+            "mneme_v1_continuity_handoff",
+            "Build a V1 continuity handoff package for another agent/session. Prefer mneme_prepare_handoff for normal agents.",
+            object_schema(
+                &["query"],
+                vec![
+                    ("query", string_schema()),
+                    ("lineage", string_schema()),
+                    ("scope", string_schema()),
+                    ("scopes", string_array_schema()),
+                    ("max_items", int_schema()),
+                    ("agent", string_schema()),
+                ],
+            ),
+        ),
+        tool_definition(
+            "mneme_v1_backfill_context",
+            "Import a public-safe summary of previous context that was not captured live. Prefer mneme_import_previous_context for normal agents.",
+            object_schema(
+                &["summary"],
+                vec![
+                    ("summary", string_schema()),
+                    ("remember", string_array_schema()),
+                    ("task", string_schema()),
+                    ("lineage", string_schema()),
+                    ("scope", string_schema()),
+                    ("agent", string_schema()),
+                ],
+            ),
+        ),
+        tool_definition(
+            "mneme_v1_forget",
+            "Forget V1 memory by claim id or text. Use only when a cited memory is wrong, unsafe, or no longer useful.",
+            object_schema(
                 &[],
                 vec![
                     ("claim_id", string_schema()),
@@ -1485,11 +1974,11 @@ fn personal_tools() -> Vec<ToolDefinition> {
                     ("agent", string_schema()),
                 ],
             ),
-        },
-        ToolDefinition {
-            name: "mneme_v1_correct",
-            description: "Correct v1 memory by claim id or old/new text.",
-            input_schema: object_schema(
+        ),
+        tool_definition(
+            "mneme_v1_correct",
+            "Correct V1 memory by claim id or old/new text. Use when replacing a durable fact with a better cited version.",
+            object_schema(
                 &["new_text"],
                 vec![
                     ("claim_id", string_schema()),
@@ -1498,74 +1987,74 @@ fn personal_tools() -> Vec<ToolDefinition> {
                     ("agent", string_schema()),
                 ],
             ),
-        },
-        ToolDefinition {
-            name: "mneme_v1_quality",
-            description: "Summarize v1 personal-memory quality counters.",
-            input_schema: object_schema(&[], Vec::new()),
-        },
-        ToolDefinition {
-            name: "mneme_v1_validate",
-            description: "Validate the v1 JSON store.",
-            input_schema: object_schema(&[], Vec::new()),
-        },
-        ToolDefinition {
-            name: "mneme_v1_snapshot",
-            description: "Return the v1 store snapshot.",
-            input_schema: object_schema(&[], Vec::new()),
-        },
+        ),
+        tool_definition(
+            "mneme_v1_quality",
+            "Summarize V1 personal-memory quality counters before trusting or publishing memory state.",
+            object_schema(&[], Vec::new()),
+        ),
+        tool_definition(
+            "mneme_v1_validate",
+            "Validate the V1 JSON store without mutating memory.",
+            object_schema(&[], Vec::new()),
+        ),
+        tool_definition(
+            "mneme_v1_snapshot",
+            "Return the V1 store snapshot for inspection. Avoid exposing this output to unauthorized users.",
+            object_schema(&[], Vec::new()),
+        ),
     ]
 }
 
 fn team_tools() -> Vec<ToolDefinition> {
     vec![
-        ToolDefinition {
-            name: "mneme_v2_team_init",
-            description: "Initialize a v2 team store.",
-            input_schema: object_schema(
+        tool_definition(
+            "mneme_v2_team_init",
+            "Initialize a V2 team store. Use once per isolated team store before adding users, agents, projects, or runs.",
+            object_schema(
                 &[],
                 vec![("workspace", string_schema()), ("admin", string_schema())],
             ),
-        },
-        ToolDefinition {
-            name: "mneme_v2_user_add",
-            description: "Add or update a v2 team user.",
-            input_schema: object_schema(
+        ),
+        tool_definition(
+            "mneme_v2_user_add",
+            "Add or update a V2 team user. Use during setup; do not call for every memory write.",
+            object_schema(
                 &["user", "role"],
                 vec![("user", string_schema()), ("role", string_schema())],
             ),
-        },
-        ToolDefinition {
-            name: "mneme_v2_agent_add",
-            description: "Add or update a v2 team agent.",
-            input_schema: object_schema(
+        ),
+        tool_definition(
+            "mneme_v2_agent_add",
+            "Add or update a V2 team agent and owner. Use during setup before run or handoff flows.",
+            object_schema(
                 &["agent", "owner"],
                 vec![("agent", string_schema()), ("owner", string_schema())],
             ),
-        },
-        ToolDefinition {
-            name: "mneme_v2_project_add",
-            description: "Add or update a v2 team project.",
-            input_schema: object_schema(
+        ),
+        tool_definition(
+            "mneme_v2_project_add",
+            "Add or update a V2 project and members. Use to define project access boundaries.",
+            object_schema(
                 &["project"],
                 vec![
                     ("project", string_schema()),
                     ("members", string_array_schema()),
                 ],
             ),
-        },
-        ToolDefinition {
-            name: "mneme_v2_project_grant",
-            description: "Grant one user access to a v2 project.",
-            input_schema: object_schema(
+        ),
+        tool_definition(
+            "mneme_v2_project_grant",
+            "Grant one user access to a V2 project. Use when a team member should read project-scoped memory.",
+            object_schema(
                 &["project", "user"],
                 vec![("project", string_schema()), ("user", string_schema())],
             ),
-        },
-        ToolDefinition {
-            name: "mneme_v2_team_remember",
-            description: "Write scoped v2 team memory through policy.",
-            input_schema: object_schema(
+        ),
+        tool_definition(
+            "mneme_v2_team_remember",
+            "Write scoped V2 team memory through policy. Use durable, non-secret facts only.",
+            object_schema(
                 &["text", "actor", "scope"],
                 vec![
                     ("text", string_schema()),
@@ -1574,11 +2063,11 @@ fn team_tools() -> Vec<ToolDefinition> {
                     ("scope", string_schema()),
                 ],
             ),
-        },
-        ToolDefinition {
-            name: "mneme_v2_team_context",
-            description: "Read a policy-filtered v2 team context pack.",
-            input_schema: object_schema(
+        ),
+        tool_definition(
+            "mneme_v2_team_context",
+            "Read a policy-filtered V2 team context pack for one actor. Treat output as partial context, not a full transcript.",
+            object_schema(
                 &["query", "actor"],
                 vec![
                     ("query", string_schema()),
@@ -1587,11 +2076,11 @@ fn team_tools() -> Vec<ToolDefinition> {
                     ("max_items", int_schema()),
                 ],
             ),
-        },
-        ToolDefinition {
-            name: "mneme_v2_team_handoff",
-            description: "Build a policy-filtered v2 handoff package.",
-            input_schema: object_schema(
+        ),
+        tool_definition(
+            "mneme_v2_team_handoff",
+            "Build a policy-filtered V2 handoff package for another team agent. Use before sequential continuation.",
+            object_schema(
                 &["query", "actor"],
                 vec![
                     ("query", string_schema()),
@@ -1600,11 +2089,11 @@ fn team_tools() -> Vec<ToolDefinition> {
                     ("max_items", int_schema()),
                 ],
             ),
-        },
-        ToolDefinition {
-            name: "mneme_v2_run_begin",
-            description: "Open a v2 team task run.",
-            input_schema: object_schema(
+        ),
+        tool_definition(
+            "mneme_v2_run_begin",
+            "Open a V2 team task run and read actor-scoped context. Use at the start of team-agent work.",
+            object_schema(
                 &["task", "actor"],
                 vec![
                     ("task", string_schema()),
@@ -1615,11 +2104,11 @@ fn team_tools() -> Vec<ToolDefinition> {
                     ("max_items", int_schema()),
                 ],
             ),
-        },
-        ToolDefinition {
-            name: "mneme_v2_run_note",
-            description: "Attach scoped memory to an open v2 run.",
-            input_schema: object_schema(
+        ),
+        tool_definition(
+            "mneme_v2_run_note",
+            "Attach scoped memory to an open V2 run. Use for durable non-secret notes discovered during the run.",
+            object_schema(
                 &["run_id", "text", "actor", "scope"],
                 vec![
                     ("run_id", string_schema()),
@@ -1629,11 +2118,11 @@ fn team_tools() -> Vec<ToolDefinition> {
                     ("scope", string_schema()),
                 ],
             ),
-        },
-        ToolDefinition {
-            name: "mneme_v2_run_end",
-            description: "Close a v2 team task run.",
-            input_schema: object_schema(
+        ),
+        tool_definition(
+            "mneme_v2_run_end",
+            "Close a V2 team task run with summary, next steps, and optional durable memories. Call before stopping.",
+            object_schema(
                 &["run_id", "summary", "actor"],
                 vec![
                     ("run_id", string_schema()),
@@ -1645,11 +2134,11 @@ fn team_tools() -> Vec<ToolDefinition> {
                     ("scope", string_schema()),
                 ],
             ),
-        },
-        ToolDefinition {
-            name: "mneme_v2_run_handoff",
-            description: "Build a policy-filtered v2 handoff package for one run.",
-            input_schema: object_schema(
+        ),
+        tool_definition(
+            "mneme_v2_run_handoff",
+            "Build a policy-filtered V2 handoff package for one closed or active run.",
+            object_schema(
                 &["run_id", "actor"],
                 vec![
                     ("run_id", string_schema()),
@@ -1659,11 +2148,11 @@ fn team_tools() -> Vec<ToolDefinition> {
                     ("max_items", int_schema()),
                 ],
             ),
-        },
-        ToolDefinition {
-            name: "mneme_v2_promote",
-            description: "Create a v2 team-memory promotion candidate.",
-            input_schema: object_schema(
+        ),
+        tool_definition(
+            "mneme_v2_promote",
+            "Create a V2 promotion candidate before moving memory into broader team visibility.",
+            object_schema(
                 &["memory_id", "actor"],
                 vec![
                     ("memory_id", string_schema()),
@@ -1672,16 +2161,16 @@ fn team_tools() -> Vec<ToolDefinition> {
                     ("note", string_schema()),
                 ],
             ),
-        },
-        ToolDefinition {
-            name: "mneme_v2_promotion_report",
-            description: "Inspect v2 promotion quality and reviewer risk.",
-            input_schema: object_schema(&["promotion_id"], vec![("promotion_id", string_schema())]),
-        },
-        ToolDefinition {
-            name: "mneme_v2_review",
-            description: "Approve or reject a v2 promotion candidate.",
-            input_schema: object_schema(
+        ),
+        tool_definition(
+            "mneme_v2_promotion_report",
+            "Inspect V2 promotion quality and reviewer risk without changing review state.",
+            object_schema(&["promotion_id"], vec![("promotion_id", string_schema())]),
+        ),
+        tool_definition(
+            "mneme_v2_review",
+            "Approve or reject a V2 promotion candidate. Use carefully because this changes team memory visibility.",
+            object_schema(
                 &["promotion_id", "actor", "approve"],
                 vec![
                     ("promotion_id", string_schema()),
@@ -1690,11 +2179,11 @@ fn team_tools() -> Vec<ToolDefinition> {
                     ("approve", bool_schema()),
                 ],
             ),
-        },
-        ToolDefinition {
-            name: "mneme_v2_sync_export",
-            description: "Export a connector-safe v2 sync envelope.",
-            input_schema: object_schema(
+        ),
+        tool_definition(
+            "mneme_v2_sync_export",
+            "Export a connector-safe V2 sync envelope. Use for read-only inspection or connector handoff.",
+            object_schema(
                 &["actor"],
                 vec![
                     ("actor", string_schema()),
@@ -1702,11 +2191,11 @@ fn team_tools() -> Vec<ToolDefinition> {
                     ("include_projects", bool_schema()),
                 ],
             ),
-        },
-        ToolDefinition {
-            name: "mneme_v2_sync_import",
-            description: "Dry-run or apply a connector sync envelope.",
-            input_schema: object_schema(
+        ),
+        tool_definition(
+            "mneme_v2_sync_import",
+            "Dry-run or apply a V2 connector sync envelope. Prefer dry-run first; apply mutates the local team store.",
+            object_schema(
                 &["envelope"],
                 vec![
                     ("envelope", json!({"type": "object"})),
@@ -1715,29 +2204,29 @@ fn team_tools() -> Vec<ToolDefinition> {
                     ("agent", string_schema()),
                 ],
             ),
-        },
-        ToolDefinition {
-            name: "mneme_v2_firewall",
-            description: "Scan v2 team memory for leakage and poisoning risk.",
-            input_schema: object_schema(&[], Vec::new()),
-        },
-        ToolDefinition {
-            name: "mneme_v2_quality",
-            description: "Analyze v2 duplicates, conflicts, stale candidates, and run state.",
-            input_schema: object_schema(&[], Vec::new()),
-        },
-        ToolDefinition {
-            name: "mneme_v2_ontology",
-            description: "Return v2 entity, relation, and attribute projection.",
-            input_schema: object_schema(
+        ),
+        tool_definition(
+            "mneme_v2_firewall",
+            "Scan V2 team memory for leakage, quarantine, and poisoning risk before handoff or sync.",
+            object_schema(&[], Vec::new()),
+        ),
+        tool_definition(
+            "mneme_v2_quality",
+            "Analyze V2 duplicates, conflicts, stale candidates, and run state before release or handoff.",
+            object_schema(&[], Vec::new()),
+        ),
+        tool_definition(
+            "mneme_v2_ontology",
+            "Return actor-scoped V2 entity, relation, and attribute projection. Use for inspection, not broad semantic proof.",
+            object_schema(
                 &[],
                 vec![("actor", string_schema()), ("agent", string_schema())],
             ),
-        },
-        ToolDefinition {
-            name: "mneme_v2_revoke_user",
-            description: "Revoke a v2 user through an admin actor.",
-            input_schema: object_schema(
+        ),
+        tool_definition(
+            "mneme_v2_revoke_user",
+            "Revoke a V2 user through an admin actor. Use carefully because it changes access to team memory.",
+            object_schema(
                 &["user", "actor"],
                 vec![
                     ("user", string_schema()),
@@ -1745,11 +2234,11 @@ fn team_tools() -> Vec<ToolDefinition> {
                     ("agent", string_schema()),
                 ],
             ),
-        },
-        ToolDefinition {
-            name: "mneme_v2_revoke_agent",
-            description: "Revoke a v2 agent through an admin actor.",
-            input_schema: object_schema(
+        ),
+        tool_definition(
+            "mneme_v2_revoke_agent",
+            "Revoke a V2 agent through an admin actor. Use carefully because it changes agent access.",
+            object_schema(
                 &["target_agent", "actor"],
                 vec![
                     ("target_agent", string_schema()),
@@ -1757,17 +2246,17 @@ fn team_tools() -> Vec<ToolDefinition> {
                     ("agent", string_schema()),
                 ],
             ),
-        },
-        ToolDefinition {
-            name: "mneme_v2_validate",
-            description: "Validate the v2 team JSON store.",
-            input_schema: object_schema(&[], Vec::new()),
-        },
-        ToolDefinition {
-            name: "mneme_v2_snapshot",
-            description: "Return the v2 team store snapshot.",
-            input_schema: object_schema(&[], Vec::new()),
-        },
+        ),
+        tool_definition(
+            "mneme_v2_validate",
+            "Validate the V2 team JSON store without mutating memory.",
+            object_schema(&[], Vec::new()),
+        ),
+        tool_definition(
+            "mneme_v2_snapshot",
+            "Return the V2 team store snapshot for inspection. Avoid sharing with unauthorized actors.",
+            object_schema(&[], Vec::new()),
+        ),
     ]
 }
 
@@ -1803,11 +2292,16 @@ mod tests {
         assert!(personal
             .tools()
             .iter()
-            .all(|tool| tool.name == "mneme_mcp_status" || tool.name.starts_with("mneme_v1_")));
+            .all(|tool| tool.name == "mneme_mcp_status"
+                || tool.name == "mneme_agent_guide"
+                || is_personal_workflow_tool(tool.name)
+                || tool.name.starts_with("mneme_v1_")));
         assert!(team
             .tools()
             .iter()
-            .all(|tool| tool.name == "mneme_mcp_status" || tool.name.starts_with("mneme_v2_")));
+            .all(|tool| tool.name == "mneme_mcp_status"
+                || tool.name == "mneme_agent_guide"
+                || tool.name.starts_with("mneme_v2_")));
         assert_eq!(
             personal.tools().len() + team.tools().len() - global_tools().len(),
             all.tools().len()

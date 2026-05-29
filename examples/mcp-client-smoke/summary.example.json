@@ -6,7 +6,7 @@
   "raw_logs_committed": false,
   "protocol": {
     "ok": true,
-    "tool_count": 38,
+    "tool_count": 44,
     "required_tools_present": true,
     "status_contract": "passed",
     "cross_agent_continuity": "passed",
@@ -33,7 +33,7 @@
       "available": true,
       "status": "passed",
       "checks": ["workspace mcp.json", "mcp enable", "mcp list ready", "mcp list-tools"],
-      "tool_count": 38
+      "tool_count": 44
     }
   ]
 }

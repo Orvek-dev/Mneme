@@ -31,18 +31,17 @@ language wording.
 
 ## Evidence
 
-The v1 ontology benchmark is the acceptance gate for this surface. A complete
-run should report:
+The v1 ontology benchmark is a committed fixture-regression gate for this
+surface. A complete run should report that the committed fixture passed, but
+that result is not proof of open-domain ontology understanding:
 
 ```text
 decision_status: ontology_benchmark_passed
 readiness_status: v1_ontology_ready
-entity_f1: 1.0
-relation_f1: 1.0
-attribute_f1: 1.0
-context_recall_at_k: 1.0
+fixture: committed public-safe ontology cases
+generalization_claim: not_proven_by_this_fixture
 scope_leak_count: 0
-secret_leak_count: 0
+synthetic_secret_leak_count: 0
 ```
 
 Run it locally with:

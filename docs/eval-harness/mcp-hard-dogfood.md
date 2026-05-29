@@ -10,8 +10,8 @@ over JSON-RPC.
 
 | Surface | Dataset or check | Expected signal |
 | --- | --- | --- |
-| V1 hard corpus | 100 normal records, 150 adversarial records, 30 handoff workflows | Recall, precision, citation coverage, handoff success, zero leaks |
-| V1 ontology | 13 natural-language ontology cases | Entity/relation/attribute F1 and context safety |
+| V1 hard corpus | 100 normal records, 150 adversarial records, 30 handoff workflows | Fixture retrieval, citation coverage, handoff success, zero leaks |
+| V1 ontology | 14 committed ontology cases, including one paraphrase canary | Fixture-bound entity/relation/attribute F1 and context safety |
 | V2 team corpus | 120 team records, 80 adversarial records, 25 handoff workflows | Handoff success, citations, secret blocking, quarantine, sync checksum |
 | MCP scenario suite | `evals/scenarios/mcp` against `mneme-mcp` | MCP protocol and V1/V2 tool readiness |
 | Team scenario suite | `evals/scenarios/team` against `mneme-mcp` | V2 ACL, promotion, revoke, sync, firewall, ontology, quality over MCP |
@@ -50,8 +50,8 @@ The full run writes:
 
 The run is considered passed only when:
 
-- V1 hard corpus has `1.0` recall, precision, citation coverage, and handoff
-  success with zero scope or secret leaks;
+- V1 hard corpus passes the deterministic fixture retrieval, citation, and
+  handoff checks with zero scope or secret leaks;
 - V1 ontology has at least `0.8` entity, relation, and attribute F1 with zero
   leaks;
 - V2 team MCP corpus has at least `0.95` handoff success, full citation

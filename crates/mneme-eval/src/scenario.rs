@@ -112,6 +112,8 @@ pub(crate) struct McpContinuityFlow {
     pub(crate) reader_query: Option<String>,
     #[serde(default)]
     pub(crate) restart_before_reader: bool,
+    #[serde(default)]
+    pub(crate) use_agent_workflow_tools: bool,
 }
 
 #[derive(Debug, Clone, Copy, Default, Eq, PartialEq, Deserialize, Serialize)]

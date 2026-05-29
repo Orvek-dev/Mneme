@@ -1,0 +1,58 @@
+id: mcp-agent-usability-workflow-tools
+tags:
+  - mcp
+  - agent-usability
+  - continuity
+mcp_continuity_flow:
+  lineage: usability-continuity
+  scope: project:usability
+  writer_agent: codex
+  reader_agent: claude-code
+  writer_task: "Implement MCP agent usability wrapper tools"
+  writer_query: "agent usability wrapper tools"
+  writer_summary: "Codex added high-level MCP tools for agent task start and finish"
+  remember:
+    - "agent should use mneme_task_start before planning"
+    - "agent should use mneme_task_finish before stopping"
+  handoff_query: "task start finish agent workflow"
+  reader_task: "Continue MCP agent usability validation"
+  reader_query: "agent workflow task finish"
+  restart_before_reader: true
+  use_agent_workflow_tools: true
+expected:
+  event_append:
+    count: 2
+  claims:
+    - subject: agent
+      predicate: should
+      object: use mneme_task_start before planning
+      status: active
+      scope: project:usability
+    - subject: agent
+      predicate: should
+      object: use mneme_task_finish before stopping
+      status: active
+      scope: project:usability
+  context_pack:
+    query: "agent workflow task finish"
+    allowed_scopes:
+      - project:usability
+    item_count: 2
+    must_include:
+      - mneme_task_start
+      - mneme_task_finish
+    citation_required: true
+  audit:
+    read_write_events_required: true
+    session_events_required: true
+  session:
+    status: closed
+    task: "Implement MCP agent usability wrapper tools"
+    lineage_id: usability-continuity
+    actor_agent_id: codex
+    memory_event_count: 2
+    summary_contains: high-level MCP tools
+  store:
+    schema_version: 2
+    valid: true
+    backup_required: true

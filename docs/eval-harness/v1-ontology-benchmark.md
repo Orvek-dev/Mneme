@@ -10,10 +10,12 @@ The benchmark answers a narrow question: how far does current v1 get on
 realistic memory inputs before adding a richer ontology model?
 
 The current committed fixture is expected to report
-`ontology_benchmark_passed` and `v1_ontology_ready`. The gap-analysis command
-still exists as a scorer and planning check: when a future implementation or
-fixture falls below target it reports `ontology_design_needed` instead of
-failing with an opaque process error.
+`ontology_benchmark_passed` and the fixture-bound internal gate
+`v1_ontology_ready`. That status means "the committed regression fixture passed";
+it does not mean Mneme has broad open-domain ontology understanding. The
+gap-analysis command still exists as a scorer and planning check: when a future
+implementation or fixture falls below target it reports `ontology_design_needed`
+instead of failing with an opaque process error.
 
 ## Fixture
 
@@ -25,12 +27,12 @@ evals/ontology/v1-natural-language-ontology-v0.json
 
 It contains:
 
-- 13 cases;
-- 10 natural-language cases;
+- 14 cases;
+- 11 natural-language cases;
 - 3 explicit-marker anchor cases for current v1 behavior;
 - 33 entities;
-- 17 expected relations;
-- 8 expected attributes;
+- 19 expected relations;
+- 10 expected attributes;
 - 16 context checks;
 - 2 temporal checks;
 - 3 prohibited relations.
@@ -57,8 +59,10 @@ The scorecard reports:
 - `prohibited_relation_count`.
 
 The target thresholds in the contract are the public regression target for the
-current fixture. The scorer check also verifies that intentionally faulted
-outputs still fall back to `ontology_design_needed`.
+current fixture. They are not a claim that substring-free paraphrases,
+cross-domain prose, or semantic search are solved. The scorer check also
+verifies that intentionally faulted outputs still fall back to
+`ontology_design_needed`.
 
 ## Commands
 
@@ -108,11 +112,11 @@ Current v1 passes the committed public fixture with a deterministic,
 schema-lite ontology extractor. Treat that as a bounded public regression claim,
 not as proof of broad open-domain ontology understanding.
 
-When v1 is below target, `gap-analysis.json` maps low scores into implementation
-buckets such as
+When v1 is below the fixture target, `gap-analysis.json` maps low scores into
+implementation buckets such as
 `natural_language_extraction`, `relation_mapping`, `entity_resolution`,
 `attribute_capture`, `temporal_state`, `multi_hop_context`, `scope_ownership`,
-`provenance`, and `safety`. A complete v1 ontology run should report
+`provenance`, and `safety`. A passing fixture run should report
 `v1_ontology_ready`; otherwise the gap analysis names the next development
 phase.
 

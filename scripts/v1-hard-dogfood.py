@@ -267,7 +267,7 @@ def build_agent_workflows() -> list[dict[str, Any]]:
         add(
             f"needle recall {index}",
             f"Continue hardmode recall task {index}",
-            f"hardmode recall target {index}",
+            f"target {index} recall evidence",
             must_include=[f"needle-fixture requires hardmode recall target {index}"],
             must_not_include=[f"noise-fixture mentions hardmode recall decoy {index + 5}"],
             category="needle_in_noise",
@@ -277,7 +277,7 @@ def build_agent_workflows() -> list[dict[str, Any]]:
         add(
             f"project alpha scope {index}",
             f"Continue project alpha release lane {index}",
-            f"scope trap release lane {index}",
+            f"alpha release lane {index} scope trap",
             scopes=["project-alpha"],
             must_include=[f"project-alpha requires scope trap release lane {index}"],
             must_not_include=[
@@ -291,7 +291,7 @@ def build_agent_workflows() -> list[dict[str, Any]]:
         add(
             f"private scope {index}",
             f"Continue private release lane {index}",
-            f"scope trap private release lane {index}",
+            f"private lane {index} scope trap",
             scopes=["private"],
             must_include=[f"user prefers scope trap private release lane {index}"],
             must_not_include=[
@@ -305,7 +305,7 @@ def build_agent_workflows() -> list[dict[str, Any]]:
         add(
             f"stale correction {index}",
             f"Continue corrected phase route {index}",
-            f"current phase route {index}",
+            f"phase route {index} current",
             must_include=[f"stale-fixture prefers current phase route {index}"],
             must_not_include=[f"stale-fixture prefers legacy phase route {index}"],
             category="stale_correction",
@@ -316,7 +316,7 @@ def build_agent_workflows() -> list[dict[str, Any]]:
         add(
             f"handoff checkpoint {index}",
             f"Handoff checkpoint {index} to next agent",
-            f"next-agent checkpoint {index}",
+            f"checkpoint {index} next-agent",
             scopes=[scope],
             must_include=[f"agent-handoff requires next-agent checkpoint {index}"],
             category="handoff_continuity",

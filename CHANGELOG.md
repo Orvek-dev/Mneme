@@ -2,6 +2,32 @@
 
 This project follows the spirit of Keep a Changelog.
 
+## [0.66.0] - 2026-05-29
+
+### Added
+
+- Added agent-first MCP workflow tools: `mneme_agent_guide`,
+  `mneme_task_start`, `mneme_task_finish`, `mneme_prepare_handoff`, and
+  `mneme_import_previous_context`.
+- Added MCP tool annotations plus input field descriptions and examples so
+  coding agents can choose safer Mneme tools with less prompt guesswork.
+- Added the `mcp-agent-usability` eval suite for high-level MCP begin, finish,
+  and handoff wrapper behavior.
+- Added `scripts/eval-integrity-check.py` to guard against golden ontology
+  fixture text being copied into runtime code and exact query/answer coupling in
+  dogfood fixtures.
+- Added a paraphrase ontology fixture canary to make fixture-level extraction
+  regressions less brittle.
+
+### Changed
+
+- Reframed public evaluation evidence as local regression and safety-boundary
+  evidence, not proof of broad open-domain natural-language understanding.
+- Reworked the v1 rule extractor away from full golden sentence matching and
+  toward concept-level deterministic rules for the committed fixture.
+- Updated hard-dogfood workflow queries so retrieval is checked with non-exact
+  queries rather than answer-substring echoes.
+
 ## [0.65.2] - 2026-05-29
 
 ### Added

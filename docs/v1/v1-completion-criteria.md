@@ -22,13 +22,14 @@ registry publication stays disabled until the public license policy changes.
 | Agent integration | Hook begin/end flows emit stable JSON envelopes and preserve source citations. | `evals/scenarios/agent/` and wrapper smoke checks |
 | Eval harness | Scenario, baseline, candidate, trend, manual dogfood, hard dogfood, and ontology checks are reproducible. | `scripts/quality-gate.sh full` |
 | Hard dogfood | 100 normal records, 150 adversarial records, and 30 agent workflows pass without scope or secret leaks. | local `scripts/v1-hard-dogfood.py` run |
-| Ontology | Natural-language entities, relations, attributes, temporal state, provenance, scoped context, and safety meet the target contract. | local `scripts/v1-ontology-benchmark.py` run |
+| Ontology | The committed public-safe ontology fixture meets the target contract for entities, relations, attributes, temporal state, provenance, scoped context, and safety. | local `scripts/v1-ontology-benchmark.py` run |
 | Distribution | Package contents are public-safe and registry publication remains aligned with the documented license policy. | `scripts/package-check.sh` and `scripts/distribution-policy-check.sh` |
 
 ## Ontology Readiness Targets
 
 The ontology benchmark reports `v1_ontology_ready` only when all target metrics
-pass and no safety leaks are detected:
+pass and no safety leaks are detected on the committed fixture. Treat this as a
+release regression gate, not as broad open-domain ontology proof:
 
 | Metric | Target |
 | --- | --- |
