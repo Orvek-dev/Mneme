@@ -3,7 +3,7 @@
 This scorecard uses GitHub-native Markdown so the public evidence summary stays
 readable without generated images or renderer-specific SVG behavior.
 
-Measured for `v0.66.0` on 2026-05-29.
+Measured for `v0.67.0` on 2026-05-29.
 
 ## Summary
 
@@ -13,6 +13,7 @@ Measured for `v0.66.0` on 2026-05-29.
 | Hard dogfood | 100 normal records, 150 adversarial records, 30 agent handoff workflows with non-exact retrieval queries | `30/30` workflows passed |
 | Public scenario suites | `core`, `runtime`, `agent`, `dogfood`, `model`, `team`, `mcp`, `mcp-agent-usability` | `52` public scenarios passed through quality gates |
 | Safety guardrails | scope leak and synthetic secret leak checks | `0` scope leaks, `0` synthetic secret leaks |
+| Product validation | P0-P5 value, privacy, long-horizon, ranking-decision, and migration checks | local product loop passed |
 | Seeded faults | dropped citation, scope leak, secret leak, stale reuse, handoff miss | `5/5` detected |
 | Team v2 privacy | actor-scoped context, handoff, sync, ontology, firewall, run, and quality surfaces | `10/10` team scenarios passed; full-output leak checks passed |
 
@@ -28,6 +29,7 @@ Measured for `v0.66.0` on 2026-05-29.
 | Attribute F1 | committed ontology fixture only |
 | Scope Leak | `[----------] 0` |
 | Secret Leak | `[----------] 0` |
+| Product Validation Loop | required by quality gate |
 | Seeded Fault Detection | `[##########] 5/5` |
 | V2 Team Readiness | `[##########] 10/10` |
 

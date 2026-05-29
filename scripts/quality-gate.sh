@@ -23,9 +23,34 @@ python3 -m py_compile scripts/mneme-mcp-stdio.py
 python3 -m py_compile scripts/v1-real-use-pilot.py
 python3 -m py_compile scripts/v1-ontology-benchmark.py
 python3 -m py_compile scripts/eval-integrity-check.py
+python3 -m py_compile scripts/product-validation-loop.py
 scripts/mneme-mcp-stdio.py --self-test | grep -q '"tool_count": 13'
 cargo run -q -p mneme-mcp -- --self-test | grep -q '"tool_count":44'
 scripts/eval-integrity-check.py | grep -q '"ok": true'
+PRODUCT_VALIDATION_CONTRACT="${TMP_ROOT}/mneme-quality-gate-product-validation-contract.json"
+PRODUCT_VALIDATION_DATASET="${TMP_ROOT}/mneme-quality-gate-product-validation-dataset.json"
+PRODUCT_VALIDATION_OUT="${TMP_ROOT}/mneme-quality-gate-product-validation"
+PRODUCT_VALIDATION_STDOUT="${TMP_ROOT}/mneme-quality-gate-product-validation.stdout.json"
+rm -rf "$PRODUCT_VALIDATION_OUT"
+scripts/product-validation-loop.py --check-contract > "$PRODUCT_VALIDATION_CONTRACT"
+grep -q '"command": "product-validation-loop-contract"' "$PRODUCT_VALIDATION_CONTRACT"
+grep -q '"id": "P0"' "$PRODUCT_VALIDATION_CONTRACT"
+grep -q '"id": "P5"' "$PRODUCT_VALIDATION_CONTRACT"
+scripts/product-validation-loop.py --check-dataset --record-count 180 > "$PRODUCT_VALIDATION_DATASET"
+grep -q '"value_task_count": 4' "$PRODUCT_VALIDATION_DATASET"
+grep -q '"privacy_case_count": 4' "$PRODUCT_VALIDATION_DATASET"
+grep -q '"ranking_case_count": 4' "$PRODUCT_VALIDATION_DATASET"
+scripts/product-validation-loop.py \
+  --out-dir "$PRODUCT_VALIDATION_OUT" \
+  --run-label quality-gate \
+  --record-count 180 \
+  --force \
+  --no-build > "$PRODUCT_VALIDATION_STDOUT"
+grep -q '"ok": true' "$PRODUCT_VALIDATION_STDOUT"
+grep -q '"value_task_outcome_delta": 1.0' "$PRODUCT_VALIDATION_STDOUT"
+grep -q '"provider_opt_in_required": true' "$PRODUCT_VALIDATION_STDOUT"
+grep -q '"long_horizon_scope_leak_count": 0' "$PRODUCT_VALIDATION_STDOUT"
+grep -q '"migration_memory_preserved": true' "$PRODUCT_VALIDATION_STDOUT"
 MCP_READINESS_REPORT="${TMP_ROOT}/mneme-quality-gate-mcp-readiness.json"
 MCP_AGENT_USABILITY_REPORT="${TMP_ROOT}/mneme-quality-gate-mcp-agent-usability.json"
 cargo run -q -p mneme-eval -- validate --suite mcp >/dev/null

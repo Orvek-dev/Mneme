@@ -2,6 +2,25 @@
 
 This project follows the spirit of Keep a Changelog.
 
+## [0.67.0] - 2026-05-29
+
+### Added
+
+- Added `scripts/product-validation-loop.py`, a P0-P5 local product-validation
+  gate for memory usefulness, downstream outcome delta, extractor privacy,
+  long-horizon memory accumulation, retrieval ranking decisions, and store
+  migration safety.
+- Added product validation loop documentation that makes real-use value,
+  privacy, determinism, ranking delta, and migration safety explicit release
+  concerns.
+
+### Changed
+
+- Updated the public evidence summary to treat semantic retrieval and provider
+  extraction as gated future work, not default product behavior.
+- Extended the release quality gate with product-validation contract, dataset,
+  and quick full-loop checks.
+
 ## [0.66.0] - 2026-05-29
 
 ### Added
