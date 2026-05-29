@@ -32,6 +32,7 @@ pub const MNEME_TEAM_ADAPTER_MANIFEST_SCHEMA_VERSION: &str = "mneme.team_adapter
 
 const REDACTED_CONTEXT_MEMORY_TEXT: &str = "[redacted]";
 const TEAM_STORE_LOCK_STALE_SECONDS: u64 = 60 * 60;
+const TEAM_PARTIAL_CONTEXT_WARNING: &str = "Mneme returned actor-scoped, ranked team memory, not the full team transcript. Treat this as partial context and verify decisions against cited source events, run state, and policy scope.";
 
 /// Team-memory engine for Mneme v2.
 #[derive(Debug, Clone)]
@@ -844,6 +845,16 @@ impl TeamMemoryEngine {
             workspace_id: self.state.workspace_id.clone(),
             actor: query.actor,
             query: query.query,
+            metadata: TeamHandoffMetadata {
+                schema_version: "mneme.team_handoff_metadata.v1".to_owned(),
+                partial_context: true,
+                not_full_transcript: true,
+                warning: TEAM_PARTIAL_CONTEXT_WARNING.to_owned(),
+                generated_at_unix_seconds: unix_timestamp(),
+                context_item_count: context_pack.items.len(),
+                omitted_item_count: context_pack.omitted.len(),
+                source_run_count: context_pack.metadata.source_run_count,
+            },
             run: None,
             context_pack,
             sync_envelope: envelope,
@@ -1287,14 +1298,18 @@ impl TeamMemoryEngine {
                     false,
                     &error.to_string(),
                 );
+                let items = Vec::new();
+                let omitted = self
+                    .state
+                    .memories
+                    .iter()
+                    .map(|memory| omitted_context_item(&memory.id, &error.to_string()))
+                    .collect::<Vec<_>>();
+                let metadata = self.team_context_pack_metadata(&items, &omitted);
                 return TeamContextPack {
-                    items: Vec::new(),
-                    omitted: self
-                        .state
-                        .memories
-                        .iter()
-                        .map(|memory| omitted_context_item(&memory.id, &error.to_string()))
-                        .collect(),
+                    metadata,
+                    items,
+                    omitted,
                 };
             }
         };
@@ -1355,7 +1370,59 @@ impl TeamMemoryEngine {
             true,
             "context_read",
         );
-        TeamContextPack { items, omitted }
+        let metadata = self.team_context_pack_metadata(&items, &omitted);
+        TeamContextPack {
+            metadata,
+            items,
+            omitted,
+        }
+    }
+
+    fn team_context_pack_metadata(
+        &self,
+        items: &[TeamContextItem],
+        omitted: &[TeamOmittedContextItem],
+    ) -> TeamContextPackMetadata {
+        let mut source_event_ids = BTreeSet::new();
+        let mut source_memory_ids = BTreeSet::new();
+        for item in items {
+            source_event_ids.extend(item.source_event_ids.iter().cloned());
+            source_memory_ids.insert(item.memory_id.clone());
+            source_memory_ids.extend(item.source_memory_ids.iter().cloned());
+        }
+        let source_runs = self
+            .state
+            .runs
+            .iter()
+            .filter(|run| {
+                run.memory_ids
+                    .iter()
+                    .chain(run.context_memory_ids.iter())
+                    .any(|memory_id| source_memory_ids.contains(memory_id))
+            })
+            .collect::<Vec<_>>();
+        let latest_source_run_closed_at_unix_seconds = source_runs
+            .iter()
+            .filter_map(|run| run.closed_at_unix_seconds)
+            .max();
+        TeamContextPackMetadata {
+            schema_version: "mneme.team_context_pack_metadata.v1".to_owned(),
+            partial_context: true,
+            not_full_transcript: true,
+            warning: TEAM_PARTIAL_CONTEXT_WARNING.to_owned(),
+            generated_at_unix_seconds: unix_timestamp(),
+            selected_item_count: items.len(),
+            omitted_item_count: omitted.len(),
+            total_active_memory_count: self
+                .state
+                .memories
+                .iter()
+                .filter(|memory| memory.status == TeamMemoryStatus::Active)
+                .count(),
+            selected_source_event_count: source_event_ids.len(),
+            source_run_count: source_runs.len(),
+            latest_source_run_closed_at_unix_seconds,
+        }
     }
 
     /// Creates a reviewable promotion candidate for team memory.
@@ -2237,10 +2304,39 @@ pub struct TeamRunEndReport {
 /// Team context-pack output.
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct TeamContextPack {
+    /// Metadata warning consumers that this is partial scoped memory, not a full transcript.
+    pub metadata: TeamContextPackMetadata,
     /// Memories selected for the actor.
     pub items: Vec<TeamContextItem>,
     /// Memories intentionally omitted with reasons.
     pub omitted: Vec<TeamOmittedContextItem>,
+}
+
+/// Team context-pack completeness metadata.
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct TeamContextPackMetadata {
+    /// Metadata schema.
+    pub schema_version: String,
+    /// Context is selected memory, not the whole team history.
+    pub partial_context: bool,
+    /// Mneme does not return full team transcripts in context packs.
+    pub not_full_transcript: bool,
+    /// Human-readable warning for agent clients.
+    pub warning: String,
+    /// Unix timestamp when this pack was generated.
+    pub generated_at_unix_seconds: u64,
+    /// Number of items selected into the pack.
+    pub selected_item_count: usize,
+    /// Number of candidates omitted for policy, lifecycle, relevance, or budget.
+    pub omitted_item_count: usize,
+    /// Total active memories before actor/policy/query filtering.
+    pub total_active_memory_count: usize,
+    /// Unique source event count supporting selected items.
+    pub selected_source_event_count: usize,
+    /// Runs that wrote or initially saw selected memory.
+    pub source_run_count: usize,
+    /// Latest close timestamp among source runs, when any are closed.
+    pub latest_source_run_closed_at_unix_seconds: Option<u64>,
 }
 
 /// One team context item.
@@ -2752,6 +2848,8 @@ pub struct TeamHandoffPackage {
     pub actor: TeamActor,
     /// Query/task being handed off.
     pub query: String,
+    /// Metadata warning consumers that handoff context is partial.
+    pub metadata: TeamHandoffMetadata,
     /// Run anchor, when this handoff is tied to a task run.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub run: Option<TeamRunRecord>,
@@ -2765,6 +2863,27 @@ pub struct TeamHandoffPackage {
     pub quality: TeamMemoryQualityReport,
     /// Entity/relation/attribute projection at handoff time.
     pub ontology: TeamOntologyReport,
+}
+
+/// Team handoff completeness metadata.
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct TeamHandoffMetadata {
+    /// Metadata schema.
+    pub schema_version: String,
+    /// Handoff includes selected memory, not the whole team history.
+    pub partial_context: bool,
+    /// Mneme does not return full transcripts in handoff packages.
+    pub not_full_transcript: bool,
+    /// Human-readable warning for agent clients.
+    pub warning: String,
+    /// Unix timestamp when the package was generated.
+    pub generated_at_unix_seconds: u64,
+    /// Number of context items included in the handoff package.
+    pub context_item_count: usize,
+    /// Number of context candidates omitted.
+    pub omitted_item_count: usize,
+    /// Number of source runs reflected by the selected context.
+    pub source_run_count: usize,
 }
 
 /// Memory quality report for v2 team state.
@@ -4509,6 +4628,57 @@ mod tests {
         );
         assert_eq!(package.actor.agent_id, Some("claude-bob".to_owned()));
         assert_eq!(package.context_pack.items.len(), 1);
+    }
+
+    #[test]
+    fn team_context_and_handoff_mark_partial_context() {
+        let mut engine = configured_engine();
+        engine
+            .remember(TeamRememberInput {
+                actor: TeamActor {
+                    user_id: "bob".to_owned(),
+                    agent_id: Some("codex-bob".to_owned()),
+                },
+                text: "remember: Atlas handoff should cite source memory".to_owned(),
+                scope: "project:atlas".to_owned(),
+            })
+            .expect("project memory write should succeed");
+        let begin = engine
+            .begin_run(TeamRunBeginInput {
+                actor: TeamActor {
+                    user_id: "bob".to_owned(),
+                    agent_id: Some("codex-bob".to_owned()),
+                },
+                task: "Atlas handoff".to_owned(),
+                query: Some("handoff cite source".to_owned()),
+                scope: Some("project:atlas".to_owned()),
+                max_items: Some(4),
+            })
+            .expect("run should begin");
+        let package = engine
+            .build_run_handoff_package(TeamRunHandoffInput {
+                actor: TeamActor {
+                    user_id: "bob".to_owned(),
+                    agent_id: Some("codex-bob".to_owned()),
+                },
+                run_id: begin.run.id,
+                query: Some("handoff cite source".to_owned()),
+                max_items: Some(4),
+            })
+            .expect("run handoff should build");
+
+        assert!(package.metadata.partial_context);
+        assert!(package.metadata.not_full_transcript);
+        assert!(package.context_pack.metadata.partial_context);
+        assert!(package
+            .metadata
+            .warning
+            .contains("not the full team transcript"));
+        assert_eq!(
+            package.metadata.context_item_count,
+            package.context_pack.items.len()
+        );
+        assert_eq!(package.context_pack.metadata.source_run_count, 1);
     }
 
     #[test]

@@ -2,6 +2,22 @@
 
 This project follows the spirit of Keep a Changelog.
 
+## [0.65.2] - 2026-05-29
+
+### Added
+
+- Added explicit partial-context metadata to V1 context packs, V2 context packs,
+  and V2 handoff packages so agent clients do not mistake selected memory for a
+  complete transcript.
+- Added `mneme_v1_backfill_context` for MCP clients to import public-safe
+  summaries and explicit memory notes from useful work that happened before
+  Mneme was installed or invoked.
+
+### Changed
+
+- Extended the MCP continuity contract with partial-context warning and backfill
+  support signals.
+
 ## [0.65.1] - 2026-05-29
 
 ### Fixed

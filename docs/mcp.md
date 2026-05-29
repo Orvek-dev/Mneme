@@ -189,6 +189,26 @@ which agent clients are installed:
 scripts/mcp-client-continuity-smoke.py --protocol-only
 ```
 
+## Partial Context Contract
+
+Mneme context is intentionally bounded. `context_pack.metadata` and V2 handoff
+`package.metadata` mark every result with:
+
+- `partial_context: true`
+- `not_full_transcript: true`
+- a warning that the agent should treat the result as scoped, ranked memory
+  rather than the whole conversation
+- selected/omitted counts and source session or run counts
+
+This prevents a receiving agent from mistaking a few memory items for total
+project truth. Agent clients should read the warning, inspect citations, and use
+the source counts as a confidence signal before making irreversible decisions.
+
+If Mneme is installed after useful work already happened, use
+`mneme_v1_backfill_context`. It imports a public-safe summary and explicit
+memory notes into a lineage/scope as a closed historical session. It does not
+claim that the old raw transcript was captured.
+
 ## Continuity Contract
 
 MCP makes Mneme reachable, but continuity still depends on client behavior. The
@@ -206,6 +226,9 @@ mneme_v1_continuity_end
 
 mneme_v1_continuity_handoff
   -> package cited context and closed source sessions for the next agent
+
+mneme_v1_backfill_context
+  -> import a public-safe summary of useful prior work that was not captured live
 ```
 
 For two sequential agents to inherit context, they must use the same store and

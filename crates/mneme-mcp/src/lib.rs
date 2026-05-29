@@ -6,12 +6,12 @@ use std::path::{Path, PathBuf};
 
 use mneme_core::{
     validate_state, validate_team_state, ClaimStatus, ContextQuery, EventInput, JsonFileStore,
-    JsonTeamFileStore, MnemeConfig, MnemeEngine, SessionBeginInput, SessionEndInput, StoreError,
-    TeamActor, TeamAgentInput, TeamContextQuery, TeamMemoryConfig, TeamMemoryEngine,
-    TeamProjectInput, TeamPromotionCreateInput, TeamPromotionReviewInput, TeamRememberInput,
-    TeamRole, TeamRunBeginInput, TeamRunEndInput, TeamRunHandoffInput, TeamRunNoteInput,
-    TeamSyncEnvelope, TeamSyncExportInput, TeamUserInput, DEFAULT_CONTEXT_MAX_ITEMS,
-    DEFAULT_TEAM_CONTEXT_MAX_ITEMS,
+    JsonTeamFileStore, MnemeConfig, MnemeEngine, SessionBackfillInput, SessionBeginInput,
+    SessionEndInput, StoreError, TeamActor, TeamAgentInput, TeamContextQuery, TeamMemoryConfig,
+    TeamMemoryEngine, TeamProjectInput, TeamPromotionCreateInput, TeamPromotionReviewInput,
+    TeamRememberInput, TeamRole, TeamRunBeginInput, TeamRunEndInput, TeamRunHandoffInput,
+    TeamRunNoteInput, TeamSyncEnvelope, TeamSyncExportInput, TeamUserInput,
+    DEFAULT_CONTEXT_MAX_ITEMS, DEFAULT_TEAM_CONTEXT_MAX_ITEMS,
 };
 use serde::Serialize;
 use serde_json::{json, Map, Value};
@@ -207,6 +207,7 @@ impl McpServer {
             "mneme_v1_continuity_begin" => self.v1_continuity_begin(arguments),
             "mneme_v1_continuity_end" => self.v1_continuity_end(arguments),
             "mneme_v1_continuity_handoff" => self.v1_continuity_handoff(arguments),
+            "mneme_v1_backfill_context" => self.v1_backfill_context(arguments),
             "mneme_v1_forget" => self.v1_lifecycle(arguments, "forget"),
             "mneme_v1_correct" => self.v1_lifecycle(arguments, "correct"),
             "mneme_v1_quality" => self.v1_quality(),
@@ -318,6 +319,8 @@ impl McpServer {
                 "read_and_honor_required": true,
                 "shared_scope_or_lineage_required": true,
                 "sequential_handoff_required": true,
+                "partial_context_warning_required": true,
+                "backfill_supported": true,
             }
         })
     }
@@ -368,6 +371,9 @@ impl McpServer {
             "command": "v1.context",
             "store": self.config.v1_store.display().to_string(),
             "query": query,
+            "partial_context": context_pack.metadata.partial_context,
+            "not_full_transcript": context_pack.metadata.not_full_transcript,
+            "warning": context_pack.metadata.warning.clone(),
             "item_count": context_pack.items.len(),
             "omitted_count": context_pack.omitted.len(),
             "context_pack": context_pack,
@@ -392,6 +398,9 @@ impl McpServer {
             "command": "v1.begin",
             "store": self.config.v1_store.display().to_string(),
             "session_id": report.session.id,
+            "partial_context": report.context_pack.metadata.partial_context,
+            "not_full_transcript": report.context_pack.metadata.not_full_transcript,
+            "warning": report.context_pack.metadata.warning.clone(),
             "report": report,
         }))
     }
@@ -445,6 +454,9 @@ impl McpServer {
             "continuity_scope": continuity_scope,
             "allowed_scopes": scopes,
             "read_and_honor_required": true,
+            "partial_context": report.context_pack.metadata.partial_context,
+            "not_full_transcript": report.context_pack.metadata.not_full_transcript,
+            "warning": report.context_pack.metadata.warning.clone(),
             "context_item_count": report.context_pack.items.len(),
             "omitted_count": report.context_pack.omitted.len(),
             "report": report,
@@ -514,11 +526,42 @@ impl McpServer {
             "query": query,
             "sequential_handoff_required": true,
             "read_and_honor_required": true,
+            "partial_context": context_pack.metadata.partial_context,
+            "not_full_transcript": context_pack.metadata.not_full_transcript,
+            "warning": context_pack.metadata.warning.clone(),
             "source_session_count": source_sessions.len(),
             "context_item_count": context_pack.items.len(),
             "omitted_count": context_pack.omitted.len(),
             "source_sessions": source_sessions,
             "context_pack": context_pack,
+        }))
+    }
+
+    fn v1_backfill_context(&self, arguments: &Map<String, Value>) -> Result<Value, McpError> {
+        let mut engine = self.load_v1_engine()?;
+        let report = engine
+            .backfill_context(SessionBackfillInput {
+                task: optional_string(arguments, "task"),
+                lineage_id: optional_string(arguments, "lineage"),
+                actor_agent_id: optional_string(arguments, "agent"),
+                scope: optional_string(arguments, "scope"),
+                summary: required_string(arguments, "summary")?,
+                remember: optional_string_vec(arguments, "remember").unwrap_or_default(),
+            })
+            .map_err(McpError::tool)?;
+        self.persist_v1(&engine)?;
+        Ok(json!({
+            "command": "v1.backfill_context",
+            "schema_version": "mneme.v1_backfill_context.v1",
+            "store": self.config.v1_store.display().to_string(),
+            "session_id": report.session.id,
+            "lineage_id": report.session.lineage_id,
+            "partial_context": report.partial_context,
+            "not_full_transcript": report.not_full_transcript,
+            "warning": report.warning,
+            "remembered_event_count": report.remembered_event_ids.len(),
+            "remembered_claim_count": report.remembered_claim_ids.len(),
+            "report": report,
         }))
     }
 
@@ -744,6 +787,9 @@ impl McpServer {
             "actor_user_id": actor.user_id,
             "actor_agent_id": actor.agent_id,
             "query": query,
+            "partial_context": context_pack.metadata.partial_context,
+            "not_full_transcript": context_pack.metadata.not_full_transcript,
+            "warning": context_pack.metadata.warning.clone(),
             "item_count": context_pack.items.len(),
             "omitted_count": context_pack.omitted.len(),
             "context_pack": context_pack,
@@ -769,6 +815,9 @@ impl McpServer {
             "actor_user_id": actor.user_id,
             "actor_agent_id": actor.agent_id,
             "query": query,
+            "partial_context": package.metadata.partial_context,
+            "not_full_transcript": package.metadata.not_full_transcript,
+            "warning": package.metadata.warning.clone(),
             "context_item_count": package.context_pack.items.len(),
             "sync_memory_count": package.sync_envelope.memories.len(),
             "firewall_ok": package.firewall.ok,
@@ -795,6 +844,9 @@ impl McpServer {
             "actor_user_id": actor.user_id,
             "actor_agent_id": actor.agent_id,
             "run_id": report.run.id,
+            "partial_context": report.context_pack.metadata.partial_context,
+            "not_full_transcript": report.context_pack.metadata.not_full_transcript,
+            "warning": report.context_pack.metadata.warning.clone(),
             "report": report,
             "validation": validate_team_state(&engine.state()),
         }))
@@ -854,6 +906,9 @@ impl McpServer {
         Ok(json!({
             "command": "v2.run.handoff",
             "store": self.config.team_store.display().to_string(),
+            "partial_context": package.metadata.partial_context,
+            "not_full_transcript": package.metadata.not_full_transcript,
+            "warning": package.metadata.warning.clone(),
             "context_item_count": package.context_pack.items.len(),
             "sync_memory_count": package.sync_envelope.memories.len(),
             "firewall_ok": package.firewall.ok,
@@ -1404,6 +1459,22 @@ fn personal_tools() -> Vec<ToolDefinition> {
             ),
         },
         ToolDefinition {
+            name: "mneme_v1_backfill_context",
+            description:
+                "Import a public-safe summary of previous context that was not captured live.",
+            input_schema: object_schema(
+                &["summary"],
+                vec![
+                    ("summary", string_schema()),
+                    ("remember", string_array_schema()),
+                    ("task", string_schema()),
+                    ("lineage", string_schema()),
+                    ("scope", string_schema()),
+                    ("agent", string_schema()),
+                ],
+            ),
+        },
+        ToolDefinition {
             name: "mneme_v1_forget",
             description: "Forget v1 memory by claim id or text.",
             input_schema: object_schema(
@@ -1741,5 +1812,57 @@ mod tests {
             personal.tools().len() + team.tools().len() - global_tools().len(),
             all.tools().len()
         );
+    }
+
+    #[test]
+    fn backfill_tool_marks_partial_context_and_feeds_handoff() {
+        let server = McpServer::new(test_config(ServerMode::Personal));
+        let backfill = server.handle_request(json!({
+            "jsonrpc": "2.0",
+            "id": 1,
+            "method": "tools/call",
+            "params": {
+                "name": "mneme_v1_backfill_context",
+                "arguments": {
+                    "summary": "Earlier session decided to keep MCP evidence reduced.",
+                    "remember": ["MCP evidence format uses reduced public-safe summaries"],
+                    "lineage": "mcp-evidence",
+                    "scope": "lineage:mcp-evidence",
+                    "agent": "codex"
+                }
+            }
+        }));
+        let backfill_content = backfill
+            .get("result")
+            .and_then(|result| result.get("structuredContent"))
+            .expect("backfill should return structured content");
+        assert_eq!(backfill_content["partial_context"], true);
+        assert_eq!(backfill_content["not_full_transcript"], true);
+        assert_eq!(backfill_content["remembered_claim_count"], 1);
+
+        let handoff = server.handle_request(json!({
+            "jsonrpc": "2.0",
+            "id": 2,
+            "method": "tools/call",
+            "params": {
+                "name": "mneme_v1_continuity_handoff",
+                "arguments": {
+                    "query": "MCP evidence public-safe",
+                    "lineage": "mcp-evidence",
+                    "scope": "lineage:mcp-evidence"
+                }
+            }
+        }));
+        let handoff_content = handoff
+            .get("result")
+            .and_then(|result| result.get("structuredContent"))
+            .expect("handoff should return structured content");
+        assert_eq!(handoff_content["partial_context"], true);
+        assert_eq!(handoff_content["source_session_count"], 1);
+        assert_eq!(
+            handoff_content["context_pack"]["metadata"]["source_session_count"],
+            1
+        );
+        assert_eq!(handoff_content["context_item_count"], 1);
     }
 }

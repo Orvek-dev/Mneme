@@ -111,6 +111,18 @@ Local edge dogfood also covered 80 concurrent V1 writers, 24 concurrent V2
 handoffs, 300 noisy records, prompt-injection context blocking, and MCP restart
 guards. Those fixtures remain local-only; only the reduced summary is published.
 
+## Partial Context and Backfill
+
+Every V1/V2 context result carries explicit completeness metadata:
+`partial_context: true`, `not_full_transcript: true`, selected/omitted counts,
+and source session/run counts. MCP clients should treat Mneme output as scoped,
+ranked memory with citations, not as the full prior conversation.
+
+Use `mneme_v1_backfill_context` when Mneme is installed after useful work has
+already happened. The tool records a public-safe summary and explicit memory
+notes into a lineage/scope as a closed historical session, so later handoffs can
+retrieve the useful parts without pretending the raw transcript was captured.
+
 ## V1 Continuity Flow
 
 Sequential agents should use the continuity tools rather than relying on
@@ -139,7 +151,7 @@ isolated temporary config homes and stores:
 | Direct MCP protocol | Missing end, wrong scope, and secret-context guards | Passed |
 | Codex CLI | Isolated `codex mcp add/list/get` | Passed |
 | Claude Code CLI | Isolated `claude mcp add/list/get`, health connected | Passed |
-| Cursor Agent CLI | Workspace approval and `list-tools` with 38 tools | Passed |
+| Cursor Agent CLI | Workspace approval and `list-tools` with 39 tools | Passed |
 
 This is a client integration smoke test, not an external production benchmark.
 Raw client logs are intentionally not committed because they may include local

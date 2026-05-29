@@ -16,6 +16,7 @@ use std::time::{SystemTime, UNIX_EPOCH};
 use serde::{Deserialize, Serialize};
 
 const STORE_LOCK_STALE_SECONDS: u64 = 60 * 60;
+const PARTIAL_CONTEXT_WARNING: &str = "Mneme returned scoped, ranked memory, not the full conversation transcript. Treat this as partial context and verify decisions against cited source events.";
 
 /// Current persisted state schema version for v1 local stores.
 pub const MNEME_STATE_SCHEMA_VERSION: u32 = 2;
@@ -379,7 +380,12 @@ impl MnemeEngine {
             },
         });
 
-        ContextPack { items, omitted }
+        let metadata = self.context_pack_metadata(&items, &omitted);
+        ContextPack {
+            metadata,
+            items,
+            omitted,
+        }
     }
 
     fn claim_relevance_text(&self, claim: &ClaimRecord, claim_text: &str) -> String {
@@ -395,6 +401,49 @@ impl MnemeEngine {
             }
         }
         text
+    }
+
+    fn context_pack_metadata(
+        &self,
+        items: &[ContextItem],
+        omitted: &[OmittedContextItem],
+    ) -> ContextPackMetadata {
+        let mut source_event_ids = BTreeSet::new();
+        for item in items {
+            source_event_ids.extend(item.source_event_ids.iter().cloned());
+        }
+        let source_sessions = self
+            .sessions
+            .iter()
+            .filter(|session| {
+                session
+                    .memory_event_ids
+                    .iter()
+                    .any(|event_id| source_event_ids.contains(event_id))
+            })
+            .collect::<Vec<_>>();
+        let latest_source_session_closed_at_unix_seconds = source_sessions
+            .iter()
+            .filter_map(|session| session.ended_at_unix_seconds)
+            .max();
+        ContextPackMetadata {
+            schema_version: "mneme.context_pack_metadata.v1".to_owned(),
+            partial_context: true,
+            not_full_transcript: true,
+            warning: PARTIAL_CONTEXT_WARNING.to_owned(),
+            generated_at_unix_seconds: unix_timestamp(),
+            store_updated_at_unix_seconds: self.metadata.updated_at_unix_seconds,
+            selected_item_count: items.len(),
+            omitted_item_count: omitted.len(),
+            total_active_claim_count: self
+                .claims
+                .iter()
+                .filter(|claim| claim.status == ClaimStatus::Active)
+                .count(),
+            selected_source_event_count: source_event_ids.len(),
+            source_session_count: source_sessions.len(),
+            latest_source_session_closed_at_unix_seconds,
+        }
     }
 
     /// Starts an agent session and returns task-scoped context.
@@ -517,6 +566,80 @@ impl MnemeEngine {
             session: session.clone(),
             remembered_event_ids,
             remembered_claim_ids,
+        })
+    }
+
+    /// Imports a summary of previous context that was not captured live.
+    pub fn backfill_context(
+        &mut self,
+        input: SessionBackfillInput,
+    ) -> Result<SessionBackfillReport, SessionError> {
+        let summary = non_empty_string(input.summary)
+            .ok_or_else(|| SessionError::new("backfill summary cannot be empty"))?;
+        let scope = input
+            .scope
+            .and_then(non_empty_string)
+            .unwrap_or_else(|| "private".to_owned());
+        let mut remember = input.remember;
+        if remember.is_empty() {
+            remember.push(format!("historical_context summary {summary}"));
+        }
+        let now = unix_timestamp();
+        let mut session = SessionRecord {
+            id: next_id("session", self.next_session_number()),
+            task: input
+                .task
+                .and_then(non_empty_string)
+                .unwrap_or_else(|| "Backfill previous context".to_owned()),
+            lineage_id: input.lineage_id.and_then(non_empty_string),
+            actor_agent_id: input.actor_agent_id,
+            status: SessionStatus::Closed,
+            started_at_unix_seconds: now,
+            ended_at_unix_seconds: Some(now),
+            context_query: "backfilled previous context".to_owned(),
+            context_claim_ids: Vec::new(),
+            summary: Some(summary),
+            memory_event_ids: Vec::new(),
+        };
+        let mut remembered_event_ids = Vec::new();
+        let mut remembered_claim_ids = Vec::new();
+        for claim in remember {
+            let event_id = next_id("event", self.next_event_number());
+            self.ingest_event(EventInput {
+                speaker_id: "agent".to_owned(),
+                actor_agent_id: session.actor_agent_id.clone(),
+                text: format!("remember: {claim}"),
+                scope: scope.clone(),
+                trust_level: "historical_backfill".to_owned(),
+            })
+            .map_err(|source| SessionError::new(format!("record backfill memory: {source}")))?;
+            remembered_event_ids.push(event_id.clone());
+            remembered_claim_ids.extend(
+                self.claims
+                    .iter()
+                    .filter(|claim| claim.source_event_ids.contains(&event_id))
+                    .map(|claim| claim.id.clone()),
+            );
+        }
+        session
+            .memory_event_ids
+            .extend(remembered_event_ids.iter().cloned());
+        self.audit.push(AuditRecord {
+            kind: AuditKind::SessionBegin,
+            target_id: session.id.clone(),
+        });
+        self.audit.push(AuditRecord {
+            kind: AuditKind::SessionEnd,
+            target_id: session.id.clone(),
+        });
+        self.sessions.push(session.clone());
+        Ok(SessionBackfillReport {
+            session,
+            remembered_event_ids,
+            remembered_claim_ids,
+            partial_context: true,
+            not_full_transcript: true,
+            warning: PARTIAL_CONTEXT_WARNING.to_owned(),
         })
     }
 
@@ -1023,6 +1146,45 @@ pub struct SessionEndInput {
     pub summary: Option<String>,
     /// Claims or natural-language memory notes to record at session end.
     pub remember: Vec<String>,
+}
+
+/// Input used to backfill earlier context that was not captured live.
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct SessionBackfillInput {
+    /// Optional display task for the imported context.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub task: Option<String>,
+    /// Optional task/project lineage shared by later continuity handoffs.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub lineage_id: Option<String>,
+    /// Agent that imported the context, when available.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub actor_agent_id: Option<String>,
+    /// Scope used for backfilled memories.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub scope: Option<String>,
+    /// Public-safe summary of the previous context.
+    pub summary: String,
+    /// Specific memories to save. If omitted, the summary is saved as one historical note.
+    #[serde(default)]
+    pub remember: Vec<String>,
+}
+
+/// Report returned after a backfill import.
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct SessionBackfillReport {
+    /// Closed synthetic session representing the backfilled context.
+    pub session: SessionRecord,
+    /// Event IDs created from imported memories.
+    pub remembered_event_ids: Vec<String>,
+    /// Claim IDs created from imported memories.
+    pub remembered_claim_ids: Vec<String>,
+    /// Backfilled memory is still partial context.
+    pub partial_context: bool,
+    /// The original full transcript was not imported.
+    pub not_full_transcript: bool,
+    /// Human-readable warning for agent clients.
+    pub warning: String,
 }
 
 /// How session-end memory inputs should be presented to an extractor.
@@ -1767,10 +1929,41 @@ impl ClaimStatus {
 /// Context-pack retrieval output.
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct ContextPack {
+    /// Metadata warning consumers that this is partial scoped memory, not a full transcript.
+    pub metadata: ContextPackMetadata,
     /// Context items selected for use by an agent.
     pub items: Vec<ContextItem>,
     /// Candidate items omitted from the context pack.
     pub omitted: Vec<OmittedContextItem>,
+}
+
+/// Context-pack completeness metadata.
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct ContextPackMetadata {
+    /// Metadata schema.
+    pub schema_version: String,
+    /// Context is selected memory, not the whole source history.
+    pub partial_context: bool,
+    /// Mneme does not return full conversation transcripts in context packs.
+    pub not_full_transcript: bool,
+    /// Human-readable warning for agent clients.
+    pub warning: String,
+    /// Unix timestamp when this pack was generated.
+    pub generated_at_unix_seconds: u64,
+    /// Last known persisted store update timestamp.
+    pub store_updated_at_unix_seconds: u64,
+    /// Number of items selected into the pack.
+    pub selected_item_count: usize,
+    /// Number of candidates omitted for scope, lifecycle, relevance, or budget.
+    pub omitted_item_count: usize,
+    /// Total active claims in the store before query filtering.
+    pub total_active_claim_count: usize,
+    /// Unique source event count supporting selected items.
+    pub selected_source_event_count: usize,
+    /// Closed source sessions that wrote selected source events.
+    pub source_session_count: usize,
+    /// Latest close timestamp among sessions that wrote selected source events.
+    pub latest_source_session_closed_at_unix_seconds: Option<u64>,
 }
 
 /// Scoped context-pack retrieval request.
@@ -3004,6 +3197,67 @@ mod tests {
         assert_eq!(snapshot.claims[0].status, ClaimStatus::BlockedSecret);
         assert!(context.items.is_empty());
         assert_eq!(context.omitted.len(), 1);
+        Ok(())
+    }
+
+    #[test]
+    fn context_pack_metadata_marks_partial_context() -> Result<(), Box<dyn std::error::Error>> {
+        let mut engine = MnemeEngine::new(MnemeConfig {
+            daily_cloud_tokens: 100,
+        });
+        engine.ingest_event(EventInput {
+            speaker_id: "user".to_owned(),
+            actor_agent_id: None,
+            text: "remember: user prefers scoped citations".to_owned(),
+            scope: "private".to_owned(),
+            trust_level: "trusted_user".to_owned(),
+        })?;
+        let context = engine.build_context_pack("scoped citations");
+
+        assert!(context.metadata.partial_context);
+        assert!(context.metadata.not_full_transcript);
+        assert!(context
+            .metadata
+            .warning
+            .contains("not the full conversation"));
+        assert_eq!(context.metadata.selected_item_count, context.items.len());
+        assert_eq!(context.metadata.omitted_item_count, context.omitted.len());
+        assert_eq!(context.metadata.selected_source_event_count, 1);
+        Ok(())
+    }
+
+    #[test]
+    fn backfill_context_records_closed_partial_session() -> Result<(), Box<dyn std::error::Error>> {
+        let mut engine = MnemeEngine::new(MnemeConfig {
+            daily_cloud_tokens: 100,
+        });
+        let report = engine.backfill_context(SessionBackfillInput {
+            task: Some("Backfill old Codex session".to_owned()),
+            lineage_id: Some("atlas-handoff".to_owned()),
+            actor_agent_id: Some("codex".to_owned()),
+            scope: Some("lineage:atlas-handoff".to_owned()),
+            summary: "Earlier session decided to keep MCP evidence reduced.".to_owned(),
+            remember: vec!["MCP evidence format reduced public-safe summaries".to_owned()],
+        })?;
+        let context = engine.build_context_pack_with(
+            ContextQuery::with_allowed_scopes(
+                "MCP evidence public-safe",
+                ["lineage:atlas-handoff"],
+            )
+            .with_max_items(4),
+        );
+
+        assert_eq!(report.session.status, SessionStatus::Closed);
+        assert!(report.partial_context);
+        assert_eq!(report.remembered_claim_ids.len(), 1);
+        assert_eq!(context.items.len(), 1);
+        assert_eq!(context.metadata.source_session_count, 1);
+        assert_eq!(
+            context
+                .metadata
+                .latest_source_session_closed_at_unix_seconds,
+            report.session.ended_at_unix_seconds
+        );
         Ok(())
     }
 

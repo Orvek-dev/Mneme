@@ -3,7 +3,7 @@
 </p>
 
 <p align="center">
-  <a href="https://github.com/Orvek-dev/Mneme/releases/tag/v0.65.1"><img alt="Version" src="https://img.shields.io/badge/version-0.65.1-2ea44f"></a>
+  <a href="https://github.com/Orvek-dev/Mneme/releases/tag/v0.65.2"><img alt="Version" src="https://img.shields.io/badge/version-0.65.2-2ea44f"></a>
   <a href="./LICENSE"><img alt="License" src="https://img.shields.io/badge/license-MIT-0969da"></a>
   <img alt="Rust" src="https://img.shields.io/badge/Rust-CLI-b7410e">
   <img alt="Local first" src="https://img.shields.io/badge/local--first-JSON%20stores-6f42c1">
@@ -186,7 +186,15 @@ scripts/mcp-client-continuity-smoke.py --require-clients
 # mneme_v1_continuity_begin
 # mneme_v1_continuity_end
 # mneme_v1_continuity_handoff
+# mneme_v1_backfill_context
 ```
+
+Every context pack and handoff package is explicitly marked as partial context.
+Mneme returns scoped, ranked memory with citations; it does not claim to be the
+full conversation transcript. When you install Mneme after a long session, use
+`mneme_v1_backfill_context` to import a public-safe summary and specific memory
+notes into a lineage/scope without pretending the raw prior conversation was
+captured.
 
 Without `--store`, V1 writes to `.mneme/mneme-v1.json` and V2 writes to
 `.mneme/mneme-team-v2.json`. `.mneme/` is ignored by git.

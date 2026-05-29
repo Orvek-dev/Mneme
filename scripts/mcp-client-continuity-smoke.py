@@ -19,7 +19,7 @@ from pathlib import Path
 from typing import Any
 
 SCHEMA_VERSION = 1
-EXPECTED_TOOL_COUNT = 38
+EXPECTED_TOOL_COUNT = 39
 REQUIRED_TOOLS = [
     "mneme_mcp_status",
     "mneme_v1_continuity_begin",
