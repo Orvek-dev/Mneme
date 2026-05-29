@@ -100,6 +100,17 @@ write/read, V1 restart persistence, V1 cross-agent continuity, V2 handoff, V2
 private-scope blocking, citation checks, scope leak checks, secret leak checks,
 hard dogfood corpora, and seeded fault detection.
 
+Local-only development dogfood has also exercised 30 scripted V2 MCP handoff
+episodes across `protocol-stdio`, Codex, Claude Code, and Cursor smoke
+surfaces. The reduced public-safe summary from the latest run was `30/30`
+episodes passed with Recall@K `1.00`, Precision@K `1.00`, citation coverage
+`1.00`, and zero scope/secret/quarantine leaks. The runner, raw stores, client
+logs, and real-session ledger are intentionally not committed.
+
+Local edge dogfood also covered 80 concurrent V1 writers, 24 concurrent V2
+handoffs, 300 noisy records, prompt-injection context blocking, and MCP restart
+guards. Those fixtures remain local-only; only the reduced summary is published.
+
 ## V1 Continuity Flow
 
 Sequential agents should use the continuity tools rather than relying on

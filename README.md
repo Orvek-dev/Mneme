@@ -3,7 +3,7 @@
 </p>
 
 <p align="center">
-  <a href="https://github.com/Orvek-dev/Mneme/releases/tag/v0.65.0"><img alt="Version" src="https://img.shields.io/badge/version-0.65.0-2ea44f"></a>
+  <a href="https://github.com/Orvek-dev/Mneme/releases/tag/v0.65.1"><img alt="Version" src="https://img.shields.io/badge/version-0.65.1-2ea44f"></a>
   <a href="./LICENSE"><img alt="License" src="https://img.shields.io/badge/license-MIT-0969da"></a>
   <img alt="Rust" src="https://img.shields.io/badge/Rust-CLI-b7410e">
   <img alt="Local first" src="https://img.shields.io/badge/local--first-JSON%20stores-6f42c1">
@@ -125,9 +125,11 @@ Agent B receives only allowed context
 
 ## Evidence
 
-The latest public-safe local evidence snapshot was measured on 2026-05-27.
-These numbers are reproducible development evidence for Mneme, not
-claims against external production workloads.
+The latest public-safe local evidence snapshot was measured on 2026-05-29.
+These numbers are reproducible development evidence for Mneme, not claims
+against external production workloads. Raw dogfood logs, local client paths,
+and real-session ledgers are intentionally kept out of git; the table below is
+the reduced public-safe summary.
 
 | Evidence surface | Public-safe signal | Current result |
 | --- | --- | --- |
@@ -140,6 +142,10 @@ claims against external production workloads.
 | MCP hard dogfood | V1 hard corpus, V1 ontology, V2 team corpus, team suite via MCP | passed locally |
 | MCP seeded faults | V1 skip/leak/citation faults plus V2 policy/leak faults through MCP | `9/9` detected |
 | MCP client smoke | Actual Codex, Claude Code, and Cursor CLI setup with isolated temporary stores | Registration, health, tool discovery, and protocol continuity passed |
+| MCP V2 handoff dogfood | 30 local-only scripted handoff episodes across projects and reader agents | `30/30` passed, Recall@K `1.00`, Precision@K `1.00`, citation coverage `1.00` |
+| MCP dogfood safety | Scope, secret-like, quarantined, and unauthorized-write probes in the local-only handoff loop | `0` scope leaks, `0` secret leaks, `0` quarantine leaks |
+| Reduced real-session ledger | 3 public-safe development-session summaries, no raw transcript included | `3/3` passed, recall `1.00`, citation coverage `1.00` |
+| Local edge dogfood | Concurrent writes, concurrent handoffs, noisy scope retrieval, injection guard, restart guard | 80 V1 writers, 24 V2 handoffs, 300 noise records, and MCP restart guards passed |
 | V2 seeded faults | ACL bypass, secret leak, dropped citations, unapproved promotion, ignored revocation, quarantined leak | `6/6` detected |
 | V2 dogfood shape | 120 synthetic team records, 80 adversarial records, 25 handoff workflows | fixture shape verified |
 

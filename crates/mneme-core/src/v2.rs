@@ -958,7 +958,7 @@ impl TeamMemoryEngine {
         &mut self,
         input: TeamRunHandoffInput,
     ) -> Result<TeamHandoffPackage, TeamPolicyError> {
-        let run_position = self.require_run_for_actor(&input.run_id, &input.actor)?;
+        let run_position = self.require_run_for_actor(&input.run_id, &input.actor, false)?;
         let run = self.state.runs[run_position].clone();
         let mut query = input.query.unwrap_or_else(|| run.context_query.clone());
         if let Some(summary) = &run.summary {
@@ -1725,7 +1725,7 @@ impl TeamMemoryEngine {
         run_id: &str,
         actor: &TeamActor,
     ) -> Result<usize, TeamPolicyError> {
-        let position = self.require_run_for_actor(run_id, actor)?;
+        let position = self.require_run_for_actor(run_id, actor, true)?;
         if self.state.runs[position].status != TeamRunStatus::Open {
             let error = TeamPolicyError::new(format!("run {run_id} is not open"));
             self.audit(
@@ -1744,6 +1744,7 @@ impl TeamMemoryEngine {
         &mut self,
         run_id: &str,
         actor: &TeamActor,
+        require_same_agent: bool,
     ) -> Result<usize, TeamPolicyError> {
         let validated = match self.validate_actor(actor) {
             Ok(actor) => actor,
@@ -1781,7 +1782,7 @@ impl TeamMemoryEngine {
             );
             return Err(error);
         }
-        if run.actor_agent_id != validated.agent_id {
+        if require_same_agent && run.actor_agent_id != validated.agent_id {
             let error = TeamPolicyError::new(format!("run {run_id} belongs to another agent"));
             self.audit(
                 TeamAuditKind::PolicyDeny,
@@ -4442,6 +4443,72 @@ mod tests {
         assert!(!package.quality.ok);
         assert_eq!(package.quality.conflict_group_count, 1);
         assert!(package.sync_envelope.checksum.starts_with("fnv1a64:"));
+    }
+
+    #[test]
+    fn closed_run_handoff_allows_same_user_agent_transfer() {
+        let mut engine = configured_engine();
+        engine
+            .upsert_agent(TeamAgentInput {
+                agent_id: "claude-bob".to_owned(),
+                owner_user_id: "bob".to_owned(),
+            })
+            .expect("reader agent should be valid");
+        engine
+            .remember(TeamRememberInput {
+                actor: TeamActor {
+                    user_id: "bob".to_owned(),
+                    agent_id: Some("codex-bob".to_owned()),
+                },
+                text: "remember: Atlas release requires smoke test".to_owned(),
+                scope: "project:atlas".to_owned(),
+            })
+            .expect("project memory write should succeed");
+
+        let begin = engine
+            .begin_run(TeamRunBeginInput {
+                actor: TeamActor {
+                    user_id: "bob".to_owned(),
+                    agent_id: Some("codex-bob".to_owned()),
+                },
+                task: "Atlas cross-agent handoff".to_owned(),
+                query: Some("release smoke test".to_owned()),
+                scope: Some("project:atlas".to_owned()),
+                max_items: Some(8),
+            })
+            .expect("run should begin");
+        engine
+            .end_run(TeamRunEndInput {
+                actor: TeamActor {
+                    user_id: "bob".to_owned(),
+                    agent_id: Some("codex-bob".to_owned()),
+                },
+                run_id: begin.run.id.clone(),
+                summary: "Release smoke test checked".to_owned(),
+                next_steps: vec!["Continue release review".to_owned()],
+                remember: Vec::new(),
+                scope: None,
+            })
+            .expect("writer agent should close its run");
+
+        let package = engine
+            .build_run_handoff_package(TeamRunHandoffInput {
+                actor: TeamActor {
+                    user_id: "bob".to_owned(),
+                    agent_id: Some("claude-bob".to_owned()),
+                },
+                run_id: begin.run.id,
+                query: Some("release smoke test".to_owned()),
+                max_items: Some(8),
+            })
+            .expect("same user's reader agent should receive closed handoff");
+
+        assert_eq!(
+            package.run.expect("run should be attached").actor_agent_id,
+            Some("codex-bob".to_owned())
+        );
+        assert_eq!(package.actor.agent_id, Some("claude-bob".to_owned()));
+        assert_eq!(package.context_pack.items.len(), 1);
     }
 
     #[test]

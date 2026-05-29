@@ -10,6 +10,8 @@ use std::env;
 use std::fmt::{Display, Formatter};
 use std::io::{self, Write};
 use std::path::{Path, PathBuf};
+use std::thread;
+use std::time::Duration;
 
 use mneme_core::{
     validate_state, BuildStage, ClaimRecord, ClaimStatus, CommandExtractor, CompactionReport,
@@ -31,6 +33,8 @@ use mneme_core::{
 use serde::Serialize;
 
 const AGENT_HOOK_SCHEMA_VERSION: &str = "mneme.agent_hook.v1";
+const STORE_MUTATION_RETRY_ATTEMPTS: usize = 80;
+const STORE_MUTATION_RETRY_BASE_MS: u64 = 5;
 
 /// Error type returned by the Mneme local CLI.
 #[derive(Debug)]
@@ -1919,7 +1923,6 @@ fn run_event_command(
 ) -> Result<(), CliError> {
     let store_path = resolve_store_path(&options.common)?;
     let extractor_name = options.extractor.name().to_owned();
-    let mut engine = load_engine(&store_path)?;
     let input = EventInput {
         speaker_id: options.speaker_id,
         actor_agent_id: options.actor_agent_id,
@@ -1927,16 +1930,20 @@ fn run_event_command(
         scope: options.scope,
         trust_level: options.trust_level,
     };
-    match &options.extractor {
-        ExtractorOptions::Rule => engine.ingest_event(input),
-        ExtractorOptions::Command { .. } => {
-            let extractor = build_extractor(&options.extractor)?;
-            engine.ingest_event_with_extractor(input, extractor.as_ref())
+    let snapshot = retry_store_mutation(&store_path, || {
+        let mut engine = load_engine(&store_path)?;
+        match &options.extractor {
+            ExtractorOptions::Rule => engine.ingest_event(input.clone()),
+            ExtractorOptions::Command { .. } => {
+                let extractor = build_extractor(&options.extractor)?;
+                engine.ingest_event_with_extractor(input.clone(), extractor.as_ref())
+            }
         }
-    }
-    .map_err(CliError::extractor)?;
-    persist_engine(&store_path, &engine)?;
-    let snapshot = engine.snapshot();
+        .map_err(CliError::extractor)?;
+        persist_engine_once(&store_path, &engine)
+            .map_err(|source| CliError::store_error("save store", &store_path, source))?;
+        Ok(engine.snapshot())
+    })?;
     let report = EventCommandReport {
         command: command.to_owned(),
         store: store_path.display().to_string(),
@@ -1956,19 +1963,23 @@ fn run_claim_id_event_command(
     writer: &mut impl Write,
 ) -> Result<(), CliError> {
     let store_path = resolve_store_path(&options.common)?;
-    let mut engine = load_engine(&store_path)?;
-    require_active_claim_id(&engine, &claim_id)?;
-    engine
-        .ingest_event(EventInput {
-            speaker_id: options.speaker_id,
-            actor_agent_id: options.actor_agent_id,
-            text: event_text,
-            scope: options.scope,
-            trust_level: options.trust_level,
-        })
-        .map_err(CliError::extractor)?;
-    persist_engine(&store_path, &engine)?;
-    let snapshot = engine.snapshot();
+    let input = EventInput {
+        speaker_id: options.speaker_id,
+        actor_agent_id: options.actor_agent_id,
+        text: event_text,
+        scope: options.scope,
+        trust_level: options.trust_level,
+    };
+    let snapshot = retry_store_mutation(&store_path, || {
+        let mut engine = load_engine(&store_path)?;
+        require_active_claim_id(&engine, &claim_id)?;
+        engine
+            .ingest_event(input.clone())
+            .map_err(CliError::extractor)?;
+        persist_engine_once(&store_path, &engine)
+            .map_err(|source| CliError::store_error("save store", &store_path, source))?;
+        Ok(engine.snapshot())
+    })?;
     let report = EventCommandReport {
         command: command.to_owned(),
         store: store_path.display().to_string(),
@@ -5425,10 +5436,39 @@ fn load_engine(path: &Path) -> Result<MnemeEngine, CliError> {
 }
 
 fn persist_engine(path: &Path, engine: &MnemeEngine) -> Result<(), CliError> {
-    let mut store = JsonFileStore::new(path.to_path_buf());
-    engine
-        .persist(&mut store)
+    persist_engine_once(path, engine)
         .map_err(|source| CliError::store_error("save store", path, source))
+}
+
+fn persist_engine_once(path: &Path, engine: &MnemeEngine) -> Result<(), StoreError> {
+    let mut store = JsonFileStore::new(path.to_path_buf());
+    engine.persist(&mut store)
+}
+
+fn retry_store_mutation<T>(
+    path: &Path,
+    mut operation: impl FnMut() -> Result<T, CliError>,
+) -> Result<T, CliError> {
+    let mut last_error: Option<CliError> = None;
+    for attempt in 0..STORE_MUTATION_RETRY_ATTEMPTS {
+        match operation() {
+            Ok(value) => return Ok(value),
+            Err(error) if matches!(error.kind, CliErrorKind::StoreLock) => {
+                last_error = Some(error);
+                let delay_ms = STORE_MUTATION_RETRY_BASE_MS
+                    .saturating_mul((attempt as u64 % 10).saturating_add(1));
+                thread::sleep(Duration::from_millis(delay_ms));
+            }
+            Err(error) => return Err(error),
+        }
+    }
+    Err(last_error.unwrap_or_else(|| {
+        CliError::store(
+            "save store",
+            path,
+            "store stayed locked until retry budget was exhausted",
+        )
+    }))
 }
 
 fn load_team_engine(path: &Path) -> Result<TeamMemoryEngine, CliError> {
@@ -5438,10 +5478,38 @@ fn load_team_engine(path: &Path) -> Result<TeamMemoryEngine, CliError> {
 }
 
 fn persist_team_engine(path: &Path, engine: &TeamMemoryEngine) -> Result<(), CliError> {
+    let mut last_error: Option<CliError> = None;
+    for attempt in 0..STORE_MUTATION_RETRY_ATTEMPTS {
+        match persist_team_engine_once(path, engine) {
+            Ok(()) => return Ok(()),
+            Err(source) if team_store_error_is_lock_conflict(&source) => {
+                last_error = Some(CliError::store("save team store", path, source));
+                let delay_ms = STORE_MUTATION_RETRY_BASE_MS
+                    .saturating_mul((attempt as u64 % 10).saturating_add(1));
+                thread::sleep(Duration::from_millis(delay_ms));
+            }
+            Err(source) => return Err(CliError::store("save team store", path, source)),
+        }
+    }
+    Err(last_error.unwrap_or_else(|| {
+        CliError::store(
+            "save team store",
+            path,
+            "team store stayed locked until retry budget was exhausted",
+        )
+    }))
+}
+
+fn persist_team_engine_once(
+    path: &Path,
+    engine: &TeamMemoryEngine,
+) -> Result<(), mneme_core::TeamStoreError> {
     let mut store = JsonTeamFileStore::new(path.to_path_buf());
-    engine
-        .persist(&mut store)
-        .map_err(|source| CliError::store("save team store", path, source))
+    engine.persist(&mut store)
+}
+
+fn team_store_error_is_lock_conflict(error: &mneme_core::TeamStoreError) -> bool {
+    error.to_string().contains("team store lock already exists")
 }
 
 fn team_policy_error(source: impl Display) -> CliError {
@@ -9177,6 +9245,44 @@ mod tests {
         assert!(text.contains("\"recoverable\": true"));
 
         let _ = std::fs::remove_file(&path);
+        let _ = std::fs::remove_file(store.lock_path());
+        Ok(())
+    }
+
+    #[test]
+    fn remember_retries_transient_store_lock() -> Result<(), Box<dyn std::error::Error>> {
+        let path = temp_store_path("remember-lock-retry");
+        let store = JsonFileStore::new(path.clone());
+        let lock_path = store.lock_path();
+        let _ = std::fs::remove_file(&path);
+        let _ = std::fs::remove_file(&lock_path);
+        std::fs::write(&lock_path, "held by test\n")?;
+
+        let release_lock = lock_path.clone();
+        let handle = std::thread::spawn(move || {
+            std::thread::sleep(std::time::Duration::from_millis(30));
+            let _ = std::fs::remove_file(release_lock);
+        });
+
+        let mut output = Vec::new();
+        run_cli_with_writer(
+            vec![
+                "mneme".to_owned(),
+                "remember".to_owned(),
+                "user prefers retrying transient locks".to_owned(),
+                "--store".to_owned(),
+                path.display().to_string(),
+                "--json".to_owned(),
+            ],
+            &mut output,
+        )?;
+        handle.join().expect("lock releaser should not panic");
+        let text = String::from_utf8(output)?;
+        assert!(text.contains("\"command\": \"remember\""));
+        assert!(text.contains("\"claim_count\": 1"));
+
+        let _ = std::fs::remove_file(&path);
+        let _ = std::fs::remove_file(format!("{}.bak", path.display()));
         let _ = std::fs::remove_file(store.lock_path());
         Ok(())
     }

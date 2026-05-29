@@ -2,6 +2,25 @@
 
 This project follows the spirit of Keep a Changelog.
 
+## [0.65.1] - 2026-05-29
+
+### Fixed
+
+- Added transient lock retry for V1 event writes so short-lived concurrent
+  CLI/agent writes do not fail or lose memory under local contention.
+- Added transient lock retry for V2 team-store persistence so simultaneous
+  handoff readers can complete without surfacing temporary lock conflicts.
+- Allowed closed-run V2 handoff packages to transfer from one agent to another
+  active agent owned by the same user while preserving write/end ownership
+  checks.
+- Blocked prompt-injection-like V1 memory text from active context retrieval.
+
+### Changed
+
+- Updated public MCP evidence summaries with local-only handoff dogfood and
+  edge-dogfood results while keeping raw logs, test runners, and real-session
+  ledgers out of git.
+
 ## [0.65.0] - 2026-05-29
 
 ### Added

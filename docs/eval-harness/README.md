@@ -52,6 +52,7 @@ Useful commands:
 - `scripts/v1-real-use-pilot.py`
 - `scripts/v1-ontology-benchmark.py`
 - `scripts/mcp-hard-dogfood.py`
+- `scripts/mcp-client-continuity-smoke.py`
 
 ## MCP Workflow
 

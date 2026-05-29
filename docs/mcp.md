@@ -138,6 +138,25 @@ It covers:
 Full run outputs are local evidence bundles. Keep them out of git unless a
 reduced public-safe finding is promoted into `evals/scenarios/`.
 
+## Local-Only Handoff Dogfood Summary
+
+A private local dogfood loop was also run outside the committed test tree. It
+used the same public MCP/V2 surfaces but kept the runner, raw stores, local
+client logs, and reduced real-session ledger under ignored local paths.
+
+| Signal | Result |
+| --- | --- |
+| Scripted V2 MCP handoff episodes | `30/30` passed |
+| Tested client surfaces | `protocol-stdio`, `codex`, `claude`, `cursor` |
+| Recall@K / Precision@K / citation coverage | `1.00 / 1.00 / 1.00` |
+| Scope, secret, and quarantine leaks | `0 / 0 / 0` |
+| Reduced real-session summaries | `3/3` passed, no raw transcript included |
+| Edge dogfood | 80 V1 concurrent writers, 24 V2 concurrent handoffs, 300 noisy records, injection guard, and MCP restart guard passed |
+
+This is useful development evidence for the continuity path. It is not a claim
+that full raw conversations are automatically shared across clients, and it is
+not a third-party production benchmark.
+
 ## Real Client Smoke
 
 The MCP server has also been checked through actual installed client CLIs using
