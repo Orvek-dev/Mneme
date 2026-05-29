@@ -14,6 +14,11 @@
       "score_with_memory": 3,
       "memory_helped": true,
       "memory_harmed": false,
+      "citation_fidelity": 3,
+      "correction_count_without_memory": 2,
+      "correction_count_with_memory": 0,
+      "rework_count_without_memory": 1,
+      "rework_count_with_memory": 0,
       "public_safe": true,
       "evidence_summary": "The memory condition selected the migration decision with cited evidence; the no-memory condition requested review."
     },
@@ -24,6 +29,11 @@
       "score_with_memory": 3,
       "memory_helped": true,
       "memory_harmed": false,
+      "citation_fidelity": 3,
+      "correction_count_without_memory": 1,
+      "correction_count_with_memory": 0,
+      "rework_count_without_memory": 1,
+      "rework_count_with_memory": 0,
       "public_safe": true,
       "evidence_summary": "The memory condition used the current Monday schedule and did not reuse the superseded Friday schedule."
     }

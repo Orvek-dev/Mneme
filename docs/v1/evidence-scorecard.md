@@ -3,7 +3,7 @@
 This scorecard uses GitHub-native Markdown so the public evidence summary stays
 readable without generated images or renderer-specific SVG behavior.
 
-Measured for `v0.68.0` on 2026-05-29.
+Measured for `v0.69.0` on 2026-05-29.
 
 ## Summary
 
@@ -13,7 +13,7 @@ Measured for `v0.68.0` on 2026-05-29.
 | Hard dogfood | 100 normal records, 150 adversarial records, 30 agent handoff workflows with non-exact retrieval queries | `30/30` workflows passed |
 | Public scenario suites | `core`, `runtime`, `agent`, `dogfood`, `model`, `team`, `mcp`, `mcp-agent-usability` | `52` public scenarios passed through quality gates |
 | Safety guardrails | scope leak and synthetic secret leak checks | `0` scope leaks, `0` synthetic secret leaks |
-| Product validation | P1-P6 causal artifact adoption, privacy/cost, lifecycle, ranking-decision, migration, and review-schema checks | local product loop passed; third-party value is not claimed |
+| Product validation | P1-P6 scripted artifact adoption, privacy/cost, lifecycle, ranking-decision, migration, review-schema, dogfood-bundle, held-out-claim, and scale checks | local product loop passed; causal productivity, semantic search, open-domain extraction, and third-party value are not claimed |
 | Seeded faults | dropped citation, scope leak, secret leak, stale reuse, handoff miss | `5/5` detected |
 | Team v2 privacy | actor-scoped context, handoff, sync, ontology, firewall, run, and quality surfaces | `10/10` team scenarios passed; full-output leak checks passed |
 
@@ -29,7 +29,7 @@ Measured for `v0.68.0` on 2026-05-29.
 | Attribute F1 | committed ontology fixture only |
 | Scope Leak | `[----------] 0` |
 | Secret Leak | `[----------] 0` |
-| Product Validation Loop | P1-P6 required by quality gate |
+| Product Validation Loop | P1-P6 plus dogfood-bundle, held-out-claim, review-summary, and scale checks required by quality gate |
 | Seeded Fault Detection | `[##########] 5/5` |
 | V2 Team Readiness | `[##########] 10/10` |
 
@@ -43,13 +43,15 @@ safety checks.
 
 They are not external production benchmark claims. Generated run bundles remain
 git-ignored; the fixtures, scripts, and summary docs are committed so anyone can
-inspect and rerun the public path. The product-validation review example only
-validates the evidence format; it is not third-party validation.
+inspect and rerun the public path. P1 is scripted artifact adoption, not causal
+productivity evidence. The product-validation review example only validates the
+evidence format; it is not third-party validation.
 
-Do not read the fixture scores as broad natural-language understanding or
-semantic search quality. `scripts/eval-integrity-check.py` guards against
-copying golden input strings into runtime source code, and broader extractor
-quality should be measured with live-provider and hidden/local canary baselines.
+Do not read the fixture scores as broad natural-language understanding,
+semantic search quality, or external value proof. `scripts/eval-integrity-check.py`
+guards against copying golden input strings into runtime source code, and
+broader extractor quality should be measured with live-provider or independently
+reviewed held-out baselines.
 
 ## Reproduce
 

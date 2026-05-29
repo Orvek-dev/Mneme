@@ -24,6 +24,10 @@ python3 -m py_compile scripts/v1-real-use-pilot.py
 python3 -m py_compile scripts/v1-ontology-benchmark.py
 python3 -m py_compile scripts/eval-integrity-check.py
 python3 -m py_compile scripts/product-validation-loop.py
+python3 -m py_compile scripts/product-review-summary.py
+python3 -m py_compile scripts/product-dogfood-experiment.py
+python3 -m py_compile scripts/product-heldout-gates.py
+python3 -m py_compile scripts/long-horizon-scale-check.py
 scripts/mneme-mcp-stdio.py --self-test | grep -q '"tool_count": 13'
 cargo run -q -p mneme-mcp -- --self-test | grep -q '"tool_count":44'
 scripts/eval-integrity-check.py | grep -q '"ok": true'
@@ -37,7 +41,7 @@ grep -q '"command": "product-validation-loop-contract"' "$PRODUCT_VALIDATION_CON
 grep -q '"id": "P1"' "$PRODUCT_VALIDATION_CONTRACT"
 grep -q '"id": "P6"' "$PRODUCT_VALIDATION_CONTRACT"
 scripts/product-validation-loop.py --check-dataset --record-count 180 > "$PRODUCT_VALIDATION_DATASET"
-grep -q '"causal_task_count": 4' "$PRODUCT_VALIDATION_DATASET"
+grep -q '"scripted_adoption_task_count": 4' "$PRODUCT_VALIDATION_DATASET"
 grep -q '"privacy_cost_event_count": 4' "$PRODUCT_VALIDATION_DATASET"
 grep -q '"ranking_case_count": 4' "$PRODUCT_VALIDATION_DATASET"
 grep -q '"external_review_case_count": 1' "$PRODUCT_VALIDATION_DATASET"
@@ -48,8 +52,9 @@ scripts/product-validation-loop.py \
   --force \
   --no-build > "$PRODUCT_VALIDATION_STDOUT"
 grep -q '"ok": true' "$PRODUCT_VALIDATION_STDOUT"
-grep -q '"causal_memory_adoption_rate": 1.0' "$PRODUCT_VALIDATION_STDOUT"
-grep -q '"causal_decision_change_rate": 1.0' "$PRODUCT_VALIDATION_STDOUT"
+grep -q '"scripted_memory_adoption_rate": 1.0' "$PRODUCT_VALIDATION_STDOUT"
+grep -q '"scripted_decision_change_rate": 1.0' "$PRODUCT_VALIDATION_STDOUT"
+grep -q '"requires_blind_review_for_value_claim": true' "$PRODUCT_VALIDATION_STDOUT"
 grep -q '"harmful_memory_count": 0' "$PRODUCT_VALIDATION_STDOUT"
 grep -q '"provider_opt_in_required": true' "$PRODUCT_VALIDATION_STDOUT"
 grep -q '"live_provider_executed": false' "$PRODUCT_VALIDATION_STDOUT"
@@ -60,6 +65,57 @@ grep -q '"requires_external_embedding_eval_before_shipping": true' "$PRODUCT_VAL
 grep -q '"migration_memory_preserved": true' "$PRODUCT_VALIDATION_STDOUT"
 grep -q '"external_review_schema_valid": true' "$PRODUCT_VALIDATION_STDOUT"
 grep -q '"third_party_claim": false' "$PRODUCT_VALIDATION_STDOUT"
+PRODUCT_REVIEW_CONTRACT="${TMP_ROOT}/mneme-quality-gate-product-review-contract.json"
+PRODUCT_REVIEW_EXAMPLE="${TMP_ROOT}/mneme-quality-gate-product-review-example.json"
+scripts/product-review-summary.py --check-contract > "$PRODUCT_REVIEW_CONTRACT"
+grep -q '"command": "product-review-summary-contract"' "$PRODUCT_REVIEW_CONTRACT"
+scripts/product-review-summary.py --review examples/product-validation-review.example.json > "$PRODUCT_REVIEW_EXAMPLE"
+grep -q '"ok": true' "$PRODUCT_REVIEW_EXAMPLE"
+grep -q '"external_value_claim_allowed": false' "$PRODUCT_REVIEW_EXAMPLE"
+grep -q '"win_rate": 1.0' "$PRODUCT_REVIEW_EXAMPLE"
+PRODUCT_DOGFOOD_CONTRACT="${TMP_ROOT}/mneme-quality-gate-product-dogfood-contract.json"
+PRODUCT_DOGFOOD_OUT="${TMP_ROOT}/mneme-quality-gate-product-dogfood"
+PRODUCT_DOGFOOD_STDOUT="${TMP_ROOT}/mneme-quality-gate-product-dogfood.stdout.json"
+PRODUCT_DOGFOOD_CHECK="${TMP_ROOT}/mneme-quality-gate-product-dogfood-check.json"
+rm -rf "$PRODUCT_DOGFOOD_OUT"
+scripts/product-dogfood-experiment.py --check-contract > "$PRODUCT_DOGFOOD_CONTRACT"
+grep -q '"command": "product-dogfood-experiment-contract"' "$PRODUCT_DOGFOOD_CONTRACT"
+scripts/product-dogfood-experiment.py \
+  --out-dir "$PRODUCT_DOGFOOD_OUT" \
+  --run-label quality-gate \
+  --task-count 2 \
+  --force \
+  --no-build > "$PRODUCT_DOGFOOD_STDOUT"
+grep -q '"ok": true' "$PRODUCT_DOGFOOD_STDOUT"
+grep -q '"actual_agent_execution": false' "$PRODUCT_DOGFOOD_STDOUT"
+scripts/product-dogfood-experiment.py --check-bundle "$PRODUCT_DOGFOOD_OUT" > "$PRODUCT_DOGFOOD_CHECK"
+grep -q '"ok": true' "$PRODUCT_DOGFOOD_CHECK"
+grep -q '"external_value_claim_allowed": false' "$PRODUCT_DOGFOOD_CHECK"
+PRODUCT_HELDOUT_CONTRACT="${TMP_ROOT}/mneme-quality-gate-product-heldout-contract.json"
+PRODUCT_HELDOUT_DATASET="${TMP_ROOT}/mneme-quality-gate-product-heldout-dataset.json"
+PRODUCT_HELDOUT_STDOUT="${TMP_ROOT}/mneme-quality-gate-product-heldout.stdout.json"
+scripts/product-heldout-gates.py --check-contract > "$PRODUCT_HELDOUT_CONTRACT"
+grep -q '"command": "product-heldout-gates-contract"' "$PRODUCT_HELDOUT_CONTRACT"
+scripts/product-heldout-gates.py --check-dataset > "$PRODUCT_HELDOUT_DATASET"
+grep -q '"extraction_heldout_case_count": 4' "$PRODUCT_HELDOUT_DATASET"
+grep -q '"ranking_heldout_case_count": 3' "$PRODUCT_HELDOUT_DATASET"
+scripts/product-heldout-gates.py > "$PRODUCT_HELDOUT_STDOUT"
+grep -q '"open_domain_extraction_claim_allowed": false' "$PRODUCT_HELDOUT_STDOUT"
+grep -q '"semantic_search_claim_allowed": false' "$PRODUCT_HELDOUT_STDOUT"
+grep -q '"heldout_evidence_ready": false' "$PRODUCT_HELDOUT_STDOUT"
+LONG_HORIZON_CONTRACT="${TMP_ROOT}/mneme-quality-gate-long-horizon-contract.json"
+LONG_HORIZON_OUT="${TMP_ROOT}/mneme-quality-gate-long-horizon"
+LONG_HORIZON_STDOUT="${TMP_ROOT}/mneme-quality-gate-long-horizon.stdout.json"
+rm -rf "$LONG_HORIZON_OUT"
+scripts/long-horizon-scale-check.py --check-contract > "$LONG_HORIZON_CONTRACT"
+grep -q '"command": "long-horizon-scale-check-contract"' "$LONG_HORIZON_CONTRACT"
+scripts/long-horizon-scale-check.py \
+  --record-counts 1000 \
+  --out-dir "$LONG_HORIZON_OUT" \
+  --no-build > "$LONG_HORIZON_STDOUT"
+grep -q '"ok": true' "$LONG_HORIZON_STDOUT"
+grep -q '"record_count": 1000' "$LONG_HORIZON_STDOUT"
+grep -q '"scope_leak_count": 0' "$LONG_HORIZON_STDOUT"
 MCP_READINESS_REPORT="${TMP_ROOT}/mneme-quality-gate-mcp-readiness.json"
 MCP_AGENT_USABILITY_REPORT="${TMP_ROOT}/mneme-quality-gate-mcp-agent-usability.json"
 cargo run -q -p mneme-eval -- validate --suite mcp >/dev/null

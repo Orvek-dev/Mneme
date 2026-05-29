@@ -2,6 +2,29 @@
 
 This project follows the spirit of Keep a Changelog.
 
+## [0.69.0] - 2026-05-29
+
+### Added
+
+- Added a blindable Mneme ON/OFF dogfood bundle generator so product-value
+  evidence can be collected without self-scored scripted deltas.
+- Added a public-safe product review summarizer with citation, correction, and
+  rework metrics; external value claims remain blocked until real third-party
+  blinded reviews are supplied.
+- Added held-out claim gates for open-domain extraction and semantic search so
+  those claims stay false until live-provider or independently reviewed
+  evidence exists.
+- Added a long-horizon scale smoke that checks active recall, stale-memory
+  suppression, scope leak prevention, and context latency at larger local store
+  sizes.
+
+### Changed
+
+- Reframed P1 from causal product evidence to scripted artifact adoption with
+  citation and harmful-memory invariants.
+- Extended the release quality gate to enforce dogfood-bundle, review-summary,
+  held-out-claim, and scale-check contracts.
+
 ## [0.68.0] - 2026-05-29
 
 ### Added

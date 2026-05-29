@@ -39,6 +39,10 @@ Useful commands:
 - [V1 Ontology Benchmark](v1-ontology-benchmark.md)
 - [MCP Hard Dogfood](mcp-hard-dogfood.md)
 - [Product Validation Loop](product-validation-loop.md)
+- [Product Dogfood Experiment](product-dogfood-experiment.md)
+- [Product Review Summary](product-review-summary.md)
+- [Product Held-Out Gates](product-heldout-gates.md)
+- [Long-Horizon Scale Check](long-horizon-scale-check.md)
 
 Useful commands:
 
@@ -55,6 +59,10 @@ Useful commands:
 - `scripts/mcp-hard-dogfood.py`
 - `scripts/mcp-client-continuity-smoke.py`
 - `scripts/product-validation-loop.py`
+- `scripts/product-dogfood-experiment.py`
+- `scripts/product-review-summary.py`
+- `scripts/product-heldout-gates.py`
+- `scripts/long-horizon-scale-check.py`
 
 ## MCP Workflow
 

@@ -1,12 +1,13 @@
 #!/usr/bin/env python3
 """Run Mneme's product-value validation loop.
 
-This loop is intentionally stricter than a retrieval smoke test. It checks
-whether returned memory is adopted into downstream artifacts, whether provider
-extraction remains opt-in and budgeted, whether lifecycle operations hold up
-under accumulation, whether a semantic-ranking candidate is worth shipping,
-whether store migration remains safe, and whether external review evidence has
-a public-safe schema before Mneme claims real-world value.
+This loop is intentionally stricter than a retrieval smoke test, but it does
+not claim causal productivity evidence. It checks whether returned memory is
+adopted into scripted downstream artifacts, whether provider extraction remains
+opt-in and budgeted, whether lifecycle operations hold up under accumulation,
+whether a semantic-ranking candidate is worth shipping, whether store migration
+remains safe, and whether external review evidence has a public-safe schema
+before Mneme claims real-world value.
 """
 
 from __future__ import annotations
@@ -46,7 +47,7 @@ def repo_root() -> Path:
 ROOT = repo_root()
 
 
-CAUSAL_TASKS: list[dict[str, Any]] = [
+SCRIPTED_ADOPTION_TASKS: list[dict[str, Any]] = [
     {
         "id": "resume-storage-decision",
         "query": "sqlite migration decision",
@@ -257,11 +258,11 @@ def contract() -> dict[str, Any]:
         "phases": [
             {
                 "id": "P1",
-                "name": "causal_memory_usefulness",
-                "purpose": "Check that retrieved memory is adopted into a downstream artifact with citations.",
+                "name": "scripted_artifact_adoption",
+                "purpose": "Check that retrieved memory is adopted into scripted downstream artifacts with citations. This is not causal productivity evidence.",
                 "primary_metrics": [
                     "memory_adoption_rate",
-                    "decision_change_rate",
+                    "scripted_decision_change_rate",
                     "harmful_memory_count",
                     "citation_coverage",
                 ],
@@ -331,7 +332,7 @@ def dataset_summary(record_count: int = DEFAULT_RECORD_COUNT) -> dict[str, Any]:
     return {
         "schema_version": SCHEMA_VERSION,
         "command": "product-validation-loop-dataset",
-        "causal_task_count": len(CAUSAL_TASKS),
+        "scripted_adoption_task_count": len(SCRIPTED_ADOPTION_TASKS),
         "privacy_cost_event_count": len(PRIVACY_COST_EVENTS),
         "long_horizon_record_count": record_count,
         "ranking_case_count": len(RANKING_CASES),
@@ -513,11 +514,11 @@ def no_memory_artifact(task: dict[str, Any]) -> dict[str, Any]:
     }
 
 
-def run_causal_usefulness(binary: Path, out_dir: Path) -> dict[str, Any]:
+def run_scripted_artifact_adoption(binary: Path, out_dir: Path) -> dict[str, Any]:
     task_results = []
-    artifact_dir = out_dir / "P1-causal-artifacts"
+    artifact_dir = out_dir / "P1-scripted-adoption-artifacts"
     artifact_dir.mkdir()
-    for task in CAUSAL_TASKS:
+    for task in SCRIPTED_ADOPTION_TASKS:
         store = out_dir / f"{task['id']}.json"
         make_store(store, task["claims"])
         context = run_context(binary, store, task["query"], task["scope"])
@@ -555,7 +556,7 @@ def run_causal_usefulness(binary: Path, out_dir: Path) -> dict[str, Any]:
                 "scope": task["scope"],
                 "memory_read": context.get("item_count", 0) > 0,
                 "memory_adopted_in_artifact": evidence_adopted,
-                "decision_changed_by_memory": with_memory["decision"] != without_memory["decision"],
+                "scripted_decision_changed_by_memory": with_memory["decision"] != without_memory["decision"],
                 "harmful_memory_used": contains_any_text(text, task["forbidden_memory"]),
                 "citation_coverage": citation_coverage(context),
                 "artifact_path": str(artifact_path.relative_to(out_dir)),
@@ -563,19 +564,22 @@ def run_causal_usefulness(binary: Path, out_dir: Path) -> dict[str, Any]:
         )
     total = len(task_results)
     adopted = sum(1 for result in task_results if result["memory_adopted_in_artifact"])
-    changed = sum(1 for result in task_results if result["decision_changed_by_memory"])
+    changed = sum(1 for result in task_results if result["scripted_decision_changed_by_memory"])
     harmful = sum(1 for result in task_results if result["harmful_memory_used"])
     coverage_values = [result["citation_coverage"] for result in task_results]
     return {
         "phase": "P1",
         "ok": adopted == total and changed == total and harmful == 0,
+        "evidence_level": "scripted_fixture",
+        "claim_boundary": "validates adoption, citation, and harmful-memory invariants; does not measure real agent productivity",
         "task_count": total,
         "memory_adoption_rate": adopted / total,
-        "decision_change_rate": changed / total,
+        "scripted_decision_change_rate": changed / total,
         "harmful_memory_count": harmful,
         "citation_coverage": min(coverage_values) if coverage_values else 0.0,
-        "evaluation_shape": "scripted_artifact_adoption_not_empty_store_success",
+        "evaluation_shape": "scripted_artifact_adoption_with_fixed_counterfactual",
         "not_a_market_claim": True,
+        "requires_blind_review_for_value_claim": True,
         "results": task_results,
     }
 
@@ -1032,6 +1036,15 @@ def run_external_review_gate(out_dir: Path) -> dict[str, Any]:
         raise ProductValidationFailure(f"missing review example: {review_path}")
     review = json.loads(review_path.read_text())
     validation = validate_review(review)
+    tasks = review.get("tasks", [])
+    blind_task_count = sum(
+        1
+        for task in tasks
+        if isinstance(task, dict) and task.get("condition_labels_blinded") is True
+    )
+    all_tasks_blinded = bool(tasks) and blind_task_count == len(tasks)
+    reviewer_is_author = bool(review.get("reviewer_is_project_author"))
+    third_party_claim = bool(review.get("third_party_claim"))
     copied_review = out_dir / "P6-product-validation-review.example.json"
     copied_review.write_text(json.dumps(review, indent=2, sort_keys=True) + "\n")
     return {
@@ -1039,12 +1052,16 @@ def run_external_review_gate(out_dir: Path) -> dict[str, Any]:
         "ok": validation["ok"],
         "example_review_valid": validation["ok"],
         "reviewer_count": 1 if validation["ok"] else 0,
-        "task_review_count": len(review.get("tasks", [])),
+        "task_review_count": len(tasks),
+        "all_tasks_blinded": all_tasks_blinded,
+        "reviewer_is_project_author": reviewer_is_author,
         "raw_transcript_included": bool(review.get("raw_transcript_included")),
-        "third_party_claim": bool(review.get("third_party_claim")),
+        "third_party_claim": third_party_claim,
         "external_claim_allowed": validation["ok"]
+        and all_tasks_blinded
+        and not reviewer_is_author
         and not review.get("raw_transcript_included")
-        and bool(review.get("third_party_claim")),
+        and third_party_claim,
         "ready_for_external_review": validation["ok"],
         "validation_errors": validation["errors"],
         "review_artifact": str(copied_review.relative_to(out_dir)),
@@ -1061,6 +1078,8 @@ def validate_review(review: dict[str, Any]) -> dict[str, Any]:
         errors.append("public_safe must be true")
     if review.get("raw_transcript_included") is not False:
         errors.append("raw_transcript_included must be false")
+    if not isinstance(review.get("reviewer_is_project_author"), bool):
+        errors.append("reviewer_is_project_author must be boolean")
     if "third_party_claim" not in review:
         errors.append("third_party_claim must be explicit")
     tasks = review.get("tasks")
@@ -1085,10 +1104,19 @@ def validate_review_task(task: dict[str, Any], index: int, errors: list[str]) ->
     for field in ["condition_labels_blinded", "memory_helped", "memory_harmed", "public_safe"]:
         if not isinstance(task.get(field), bool):
             errors.append(f"{prefix}.{field} must be boolean")
-    for field in ["score_without_memory", "score_with_memory"]:
+    for field in ["score_without_memory", "score_with_memory", "citation_fidelity"]:
         value = task.get(field)
         if not isinstance(value, int) or value < 0 or value > 3:
             errors.append(f"{prefix}.{field} must be integer 0..3")
+    for field in [
+        "correction_count_without_memory",
+        "correction_count_with_memory",
+        "rework_count_without_memory",
+        "rework_count_with_memory",
+    ]:
+        value = task.get(field)
+        if not isinstance(value, int) or value < 0:
+            errors.append(f"{prefix}.{field} must be a non-negative integer")
     if task.get("memory_harmed") and task.get("memory_helped"):
         errors.append(f"{prefix} cannot mark memory_helped and memory_harmed together")
 
@@ -1101,13 +1129,13 @@ def run_full(args: argparse.Namespace) -> dict[str, Any]:
         shutil.rmtree(out_dir)
     out_dir.mkdir(parents=True)
     binary = ensure_cli(args.no_build)
-    causal = run_causal_usefulness(binary, out_dir)
+    scripted_adoption = run_scripted_artifact_adoption(binary, out_dir)
     privacy_cost = run_privacy_cost_extractor(out_dir)
     long_horizon = run_long_horizon_lifecycle(binary, out_dir, args.record_count)
     ranking = run_ranking_decision()
     migration = run_migration_safety(binary, out_dir)
     review = run_external_review_gate(out_dir)
-    phases = [causal, privacy_cost, long_horizon, ranking, migration, review]
+    phases = [scripted_adoption, privacy_cost, long_horizon, ranking, migration, review]
     report = {
         "schema_version": SCHEMA_VERSION,
         "command": "product-validation-loop",
@@ -1115,7 +1143,7 @@ def run_full(args: argparse.Namespace) -> dict[str, Any]:
         "run_label": args.run_label,
         "record_count": args.record_count,
         "phases": {
-            "P1_causal_memory_usefulness": causal,
+            "P1_scripted_artifact_adoption": scripted_adoption,
             "P2_privacy_cost_extraction": privacy_cost,
             "P3_long_horizon_lifecycle": long_horizon,
             "P4_ranking_decision": ranking,
@@ -1123,9 +1151,12 @@ def run_full(args: argparse.Namespace) -> dict[str, Any]:
             "P6_external_review_gate": review,
         },
         "summary": {
-            "causal_memory_adoption_rate": causal["memory_adoption_rate"],
-            "causal_decision_change_rate": causal["decision_change_rate"],
-            "harmful_memory_count": causal["harmful_memory_count"],
+            "scripted_memory_adoption_rate": scripted_adoption["memory_adoption_rate"],
+            "scripted_decision_change_rate": scripted_adoption["scripted_decision_change_rate"],
+            "harmful_memory_count": scripted_adoption["harmful_memory_count"],
+            "requires_blind_review_for_value_claim": scripted_adoption[
+                "requires_blind_review_for_value_claim"
+            ],
             "provider_opt_in_required": privacy_cost["provider_opt_in_required"],
             "live_provider_executed": privacy_cost["live_provider_executed"],
             "provider_budget_within_limit": privacy_cost["budget"]["within_budget"],
@@ -1160,7 +1191,7 @@ def markdown_report(report: dict[str, Any]) -> str:
     ]
     phases = report["phases"]
     lines.append(
-        f"| P1 causal usefulness | `{status(phases['P1_causal_memory_usefulness'])}` | adoption `{phases['P1_causal_memory_usefulness']['memory_adoption_rate']:.2f}`, harmful `{phases['P1_causal_memory_usefulness']['harmful_memory_count']}` |"
+        f"| P1 scripted artifact adoption | `{status(phases['P1_scripted_artifact_adoption'])}` | adoption `{phases['P1_scripted_artifact_adoption']['memory_adoption_rate']:.2f}`, harmful `{phases['P1_scripted_artifact_adoption']['harmful_memory_count']}` |"
     )
     lines.append(
         f"| P2 privacy/cost extraction | `{status(phases['P2_privacy_cost_extraction'])}` | provider opt-in `{phases['P2_privacy_cost_extraction']['provider_opt_in_required']}`, live provider `{phases['P2_privacy_cost_extraction']['live_provider_executed']}` |"
@@ -1179,6 +1210,7 @@ def markdown_report(report: dict[str, Any]) -> str:
     )
     lines.append("")
     lines.append("This local report is a product-validation signal, not a market adoption claim.")
+    lines.append("P1 is scripted artifact adoption, not causal productivity evidence.")
     lines.append("P6 validates the review evidence format; it is not third-party validation by itself.")
     lines.append("")
     return "\n".join(lines)
