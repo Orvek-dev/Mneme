@@ -1,0 +1,31 @@
+{
+  "schema_version": "mneme.product_validation_review.v1",
+  "reviewer_id": "example-reviewer-001",
+  "reviewer_is_project_author": false,
+  "third_party_claim": false,
+  "public_safe": true,
+  "raw_transcript_included": false,
+  "notes": "Schema example only. Replace with real blinded reviewer data before claiming external validation.",
+  "tasks": [
+    {
+      "id": "resume-storage-decision",
+      "condition_labels_blinded": true,
+      "score_without_memory": 1,
+      "score_with_memory": 3,
+      "memory_helped": true,
+      "memory_harmed": false,
+      "public_safe": true,
+      "evidence_summary": "The memory condition selected the migration decision with cited evidence; the no-memory condition requested review."
+    },
+    {
+      "id": "stale-correction-avoids-old-plan",
+      "condition_labels_blinded": true,
+      "score_without_memory": 1,
+      "score_with_memory": 3,
+      "memory_helped": true,
+      "memory_harmed": false,
+      "public_safe": true,
+      "evidence_summary": "The memory condition used the current Monday schedule and did not reuse the superseded Friday schedule."
+    }
+  ]
+}

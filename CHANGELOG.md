@@ -2,6 +2,26 @@
 
 This project follows the spirit of Keep a Changelog.
 
+## [0.68.0] - 2026-05-29
+
+### Added
+
+- Reworked the product validation loop into a P1-P6 gate that checks causal
+  memory adoption in downstream artifacts, provider privacy/cost constraints,
+  long-horizon lifecycle behavior, ranking-decision evidence, migration safety,
+  and public-safe external review evidence shape.
+- Added a public-safe product-validation review example schema so real-use or
+  third-party value claims require reviewable evidence instead of self-scored
+  local metrics alone.
+
+### Changed
+
+- Removed the old empty-store product-value assertion from the release gate and
+  replaced it with artifact-level memory adoption, cited-source, harmful-memory,
+  and decision-change checks.
+- Updated public evidence docs to state that P6 validates review format only;
+  it does not claim external validation by itself.
+
 ## [0.67.0] - 2026-05-29
 
 ### Added

@@ -1,11 +1,12 @@
 #!/usr/bin/env python3
 """Run Mneme's product-value validation loop.
 
-This script is deliberately product-facing rather than capability-facing. It
-checks whether Mneme's memory layer can improve a scripted downstream task,
-whether provider-backed extraction remains opt-in and private by default,
-whether long-horizon memory stays usable, whether a semantic ranker would add
-measurable value, and whether store migration preserves existing memory.
+This loop is intentionally stricter than a retrieval smoke test. It checks
+whether returned memory is adopted into downstream artifacts, whether provider
+extraction remains opt-in and budgeted, whether lifecycle operations hold up
+under accumulation, whether a semantic-ranking candidate is worth shipping,
+whether store migration remains safe, and whether external review evidence has
+a public-safe schema before Mneme claims real-world value.
 """
 
 from __future__ import annotations
@@ -14,17 +15,18 @@ import argparse
 import json
 import math
 import os
+import re
 import shutil
 import subprocess
 import sys
-import tempfile
 import time
 from pathlib import Path
 from typing import Any
 
-SCHEMA_VERSION = 1
+SCHEMA_VERSION = 2
 STATE_SCHEMA_VERSION = 2
 DEFAULT_RECORD_COUNT = 600
+REVIEW_EXAMPLE = Path("examples/product-validation-review.example.json")
 
 
 class ProductValidationFailure(RuntimeError):
@@ -44,68 +46,139 @@ def repo_root() -> Path:
 ROOT = repo_root()
 
 
-VALUE_TASKS: list[dict[str, Any]] = [
+CAUSAL_TASKS: list[dict[str, Any]] = [
     {
         "id": "resume-storage-decision",
-        "phase": "P0/P1",
         "query": "sqlite migration decision",
         "scope": "private",
         "claims": [
-            ("project", "should", "defer sqlite migration until migration evidence exists", "private", "active"),
-            ("migration decision", "requires", "product-validation evidence", "private", "active"),
+            (
+                "project",
+                "should",
+                "defer sqlite migration until migration evidence exists",
+                "private",
+                "active",
+            ),
+            (
+                "migration decision",
+                "requires",
+                "product-validation evidence",
+                "private",
+                "active",
+            ),
         ],
-        "must_include": ["defer sqlite migration", "migration evidence"],
-        "must_not_include": [],
-        "expected_control_success": False,
+        "expected_decision": "defer_sqlite_migration",
+        "required_memory": ["defer sqlite migration", "migration evidence"],
+        "forbidden_memory": [],
     },
     {
         "id": "agent-handoff-next-action",
-        "phase": "P0/P1",
         "query": "next agent mcp extractor",
         "scope": "private",
         "claims": [
-            ("next agent", "should", "update MCP guide before extractor work", "private", "active"),
-            ("handoff", "carries", "finish summary and next actions", "private", "active"),
+            (
+                "next agent",
+                "should",
+                "update MCP guide before extractor work",
+                "private",
+                "active",
+            ),
+            (
+                "handoff",
+                "carries",
+                "finish summary and next actions",
+                "private",
+                "active",
+            ),
         ],
-        "must_include": ["update MCP guide", "next actions"],
-        "must_not_include": [],
-        "expected_control_success": False,
+        "expected_decision": "update_mcp_guide_first",
+        "required_memory": ["update MCP guide", "next actions"],
+        "forbidden_memory": [],
     },
     {
         "id": "stale-correction-avoids-old-plan",
-        "phase": "P0/P1",
         "query": "current eval report schedule",
         "scope": "private",
         "claims": [
-            ("user", "prefers", "weekly eval reports on Friday", "private", "superseded"),
-            ("user", "prefers", "weekly eval reports on Monday mornings", "private", "active"),
-            ("weekly eval reports", "schedule", "Monday mornings", "private", "active"),
+            (
+                "user",
+                "prefers",
+                "weekly eval reports on Friday",
+                "private",
+                "superseded",
+            ),
+            (
+                "user",
+                "prefers",
+                "weekly eval reports on Monday mornings",
+                "private",
+                "active",
+            ),
+            (
+                "weekly eval reports",
+                "schedule",
+                "Monday mornings",
+                "private",
+                "active",
+            ),
         ],
-        "must_include": ["Monday mornings"],
-        "must_not_include": ["Friday"],
-        "expected_control_success": False,
+        "expected_decision": "schedule_monday_morning_report",
+        "required_memory": ["Monday mornings"],
+        "forbidden_memory": ["Friday"],
     },
     {
         "id": "scope-bound-project-recall",
-        "phase": "P0/P1",
         "query": "rollback proof",
         "scope": "project-alpha",
         "claims": [
-            ("project alpha deploy", "requires", "rollback proof before release", "project-alpha", "active"),
-            ("project beta finance", "contains", "private budget notes", "project-beta", "active"),
+            (
+                "project alpha deploy",
+                "requires",
+                "rollback proof before release",
+                "project-alpha",
+                "active",
+            ),
+            (
+                "project beta finance",
+                "contains",
+                "private budget notes",
+                "project-beta",
+                "active",
+            ),
         ],
-        "must_include": ["rollback proof"],
-        "must_not_include": ["private budget notes"],
-        "expected_control_success": False,
+        "expected_decision": "require_rollback_proof",
+        "required_memory": ["rollback proof"],
+        "forbidden_memory": ["private budget notes"],
     },
 ]
 
 
-PRIVACY_CASES = [
-    "wrapper_requires_explicit_provider_opt_in",
-    "dry_run_works_without_network_or_api_key",
-    "secret_prefilter_runs_before_provider_call",
-    "quality_gate_uses_dry_run_for_provider_wrapper",
+PRIVACY_COST_EVENTS: list[dict[str, Any]] = [
+    {
+        "id": "normal-preference",
+        "text": "I work best with local-first tools.",
+        "expect_provider_allowed_after_opt_in": True,
+    },
+    {
+        "id": "long-project-note",
+        "text": " ".join(
+            [
+                "Project Atlas prefers release notes grouped by owner and risk."
+                for _ in range(32)
+            ]
+        ),
+        "expect_provider_allowed_after_opt_in": True,
+    },
+    {
+        "id": "api-key-secret",
+        "text": "Please remember API_KEY=FAKE_PRODUCT_VALIDATION_VALUE",
+        "expect_provider_allowed_after_opt_in": False,
+    },
+    {
+        "id": "bearer-token-secret",
+        "text": "Authorization: Bearer fake-product-validation-token should never leave local checks.",
+        "expect_provider_allowed_after_opt_in": False,
+    },
 ]
 
 
@@ -165,58 +238,66 @@ SEMANTIC_ALIASES: dict[str, list[str]] = {
 }
 
 
+SECRET_RE = re.compile(
+    r"(?i)(api[_ -]?key\s*[:=]\s*[a-z0-9_./+=-]+|"
+    r"authorization\s*:\s*bearer\s+[a-z0-9_./+=-]+|"
+    r"\btoken\s*[:=]\s*[a-z0-9_./+=-]+|"
+    r"\bpassword\s*[:=]\s*[a-z0-9_./+=-]+|"
+    r"\bsecret\s*[:=]\s*[a-z0-9_./+=-]+|"
+    r"\bsk-[a-z0-9_-]+|"
+    r"\bghp_[a-z0-9_]+|"
+    r"\bAKIA[0-9A-Z]{16}\b)"
+)
+
+
 def contract() -> dict[str, Any]:
     return {
         "schema_version": SCHEMA_VERSION,
         "command": "product-validation-loop-contract",
         "phases": [
             {
-                "id": "P0",
-                "name": "real_use_value_dogfood",
-                "purpose": "Measure whether scoped memory changes scripted downstream decisions.",
+                "id": "P1",
+                "name": "causal_memory_usefulness",
+                "purpose": "Check that retrieved memory is adopted into a downstream artifact with citations.",
                 "primary_metrics": [
-                    "with_memory_success_rate",
-                    "control_success_rate",
-                    "memory_caused_decision_rate",
+                    "memory_adoption_rate",
+                    "decision_change_rate",
+                    "harmful_memory_count",
                     "citation_coverage",
                 ],
             },
             {
-                "id": "P1",
-                "name": "downstream_usefulness",
-                "purpose": "Prefer task outcome evidence over extraction F1 alone.",
-                "primary_metrics": [
-                    "task_outcome_delta",
-                    "wrong_memory_count",
-                    "manual_reexplanation_count",
-                ],
-            },
-            {
                 "id": "P2",
-                "name": "privacy_preserving_extraction",
-                "purpose": "Keep provider-backed extraction opt-in and private-by-default.",
+                "name": "privacy_cost_extraction_readiness",
+                "purpose": "Keep provider extraction opt-in, pre-redacted, no-network by default, and bounded by token/latency budgets.",
                 "primary_metrics": [
                     "provider_opt_in_required",
-                    "dry_run_without_api_key",
+                    "live_provider_executed",
                     "secret_prefilter_before_provider",
+                    "within_budget",
                 ],
             },
             {
                 "id": "P3",
-                "name": "long_horizon_memory",
-                "purpose": "Check stale, noisy, duplicate, and scoped memory under accumulation.",
+                "name": "long_horizon_lifecycle",
+                "purpose": "Exercise actual remember/correct/forget operations before noisy accumulation checks.",
                 "primary_metrics": [
+                    "actual_lifecycle_operations",
                     "stale_reuse_count",
                     "scope_leak_count",
-                    "noise_record_count",
-                    "current_memory_recall",
+                    "forgotten_recall_count",
                 ],
             },
             {
                 "id": "P4",
                 "name": "retrieval_ranking_decision",
-                "purpose": "Measure whether semantic ranking would beat term matching before adding it.",
-                "primary_metrics": ["term_mrr", "semantic_candidate_mrr", "mrr_delta"],
+                "purpose": "Measure whether a semantic-ranking candidate beats term matching before shipping embeddings.",
+                "primary_metrics": [
+                    "term_mrr",
+                    "semantic_candidate_mrr",
+                    "mrr_delta",
+                    "requires_external_embedding_eval_before_shipping",
+                ],
             },
             {
                 "id": "P5",
@@ -229,6 +310,17 @@ def contract() -> dict[str, Any]:
                     "migration_history_recorded",
                 ],
             },
+            {
+                "id": "P6",
+                "name": "external_review_gate",
+                "purpose": "Require a public-safe review schema before claiming real-world or third-party value.",
+                "primary_metrics": [
+                    "example_review_valid",
+                    "raw_transcript_included",
+                    "third_party_claim",
+                    "external_claim_allowed",
+                ],
+            },
         ],
         "default_output": "evals/runs/product-validation-loop/<run-label>",
         "privacy_policy": "full run artifacts are local-only; public docs should include reduced summaries only",
@@ -239,12 +331,13 @@ def dataset_summary(record_count: int = DEFAULT_RECORD_COUNT) -> dict[str, Any]:
     return {
         "schema_version": SCHEMA_VERSION,
         "command": "product-validation-loop-dataset",
-        "value_task_count": len(VALUE_TASKS),
-        "privacy_case_count": len(PRIVACY_CASES),
+        "causal_task_count": len(CAUSAL_TASKS),
+        "privacy_cost_event_count": len(PRIVACY_COST_EVENTS),
         "long_horizon_record_count": record_count,
         "ranking_case_count": len(RANKING_CASES),
         "migration_case_count": 2,
-        "phases": ["P0", "P1", "P2", "P3", "P4", "P5"],
+        "external_review_case_count": 1,
+        "phases": ["P1", "P2", "P3", "P4", "P5", "P6"],
     }
 
 
@@ -278,11 +371,12 @@ def ensure_cli(no_build: bool) -> Path:
     return binary
 
 
-def claim_text(claim: dict[str, Any]) -> str:
-    return f"{claim['subject']} {claim['predicate']} {claim['object']}"
-
-
-def make_store(path: Path, claims: list[tuple[str, str, str, str, str]], *, schema_version: int = STATE_SCHEMA_VERSION) -> None:
+def make_store(
+    path: Path,
+    claims: list[tuple[str, str, str, str, str]],
+    *,
+    schema_version: int = STATE_SCHEMA_VERSION,
+) -> None:
     now = int(time.time())
     events = []
     claim_records = []
@@ -377,57 +471,116 @@ def contains_any_text(text: str, phrases: list[str]) -> bool:
     return any(phrase.lower() in lower for phrase in phrases)
 
 
-def run_value_dogfood(binary: Path, out_dir: Path) -> dict[str, Any]:
+def synthesize_artifact(task: dict[str, Any], context: dict[str, Any]) -> dict[str, Any]:
+    items = context.get("context_pack", {}).get("items", [])
+    text = selected_text(context)
+    has_required_memory = contains_all_text(text, task["required_memory"])
+    has_forbidden_memory = contains_any_text(text, task["forbidden_memory"])
+    citations = [
+        source_id
+        for item in items
+        for source_id in item.get("source_event_ids", [])
+        if source_id
+    ]
+    if has_required_memory and citations and not has_forbidden_memory:
+        decision = task["expected_decision"]
+    else:
+        decision = "needs_manual_review"
+    return {
+        "task_id": task["id"],
+        "decision": decision,
+        "uses_memory": decision == task["expected_decision"],
+        "body": f"decision={decision}\nselected_memory=\n{text}",
+        "cited_source_event_ids": citations,
+        "partial_context_warning": context.get("context_pack", {})
+        .get("metadata", {})
+        .get("partial_context", False),
+        "not_full_transcript": context.get("context_pack", {})
+        .get("metadata", {})
+        .get("not_full_transcript", False),
+    }
+
+
+def no_memory_artifact(task: dict[str, Any]) -> dict[str, Any]:
+    return {
+        "task_id": task["id"],
+        "decision": "needs_manual_review",
+        "uses_memory": False,
+        "body": "No cited Mneme memory was provided; do not infer project truth.",
+        "cited_source_event_ids": [],
+        "partial_context_warning": True,
+        "not_full_transcript": True,
+    }
+
+
+def run_causal_usefulness(binary: Path, out_dir: Path) -> dict[str, Any]:
     task_results = []
-    for task in VALUE_TASKS:
+    artifact_dir = out_dir / "P1-causal-artifacts"
+    artifact_dir.mkdir()
+    for task in CAUSAL_TASKS:
         store = out_dir / f"{task['id']}.json"
-        control_store = out_dir / f"{task['id']}.control.json"
         make_store(store, task["claims"])
-        make_store(control_store, [])
-        with_context = run_context(binary, store, task["query"], task["scope"])
-        control_context = run_context(binary, control_store, task["query"], task["scope"])
-        text = selected_text(with_context)
-        control_text = selected_text(control_context)
-        with_success = contains_all_text(text, task["must_include"]) and not contains_any_text(
-            text, task["must_not_include"]
+        context = run_context(binary, store, task["query"], task["scope"])
+        with_memory = synthesize_artifact(task, context)
+        without_memory = no_memory_artifact(task)
+        artifact_path = artifact_dir / f"{task['id']}.json"
+        artifact_path.write_text(
+            json.dumps(
+                {
+                    "task": {
+                        "id": task["id"],
+                        "query": task["query"],
+                        "scope": task["scope"],
+                        "expected_decision": task["expected_decision"],
+                    },
+                    "with_memory_artifact": with_memory,
+                    "counterfactual_without_memory_artifact": without_memory,
+                },
+                indent=2,
+                sort_keys=True,
+            )
+            + "\n"
         )
-        control_success = contains_all_text(control_text, task["must_include"])
+        text = with_memory["body"]
+        evidence_adopted = (
+            with_memory["decision"] == task["expected_decision"]
+            and contains_all_text(text, task["required_memory"])
+            and not contains_any_text(text, task["forbidden_memory"])
+            and bool(with_memory["cited_source_event_ids"])
+        )
         task_results.append(
             {
                 "id": task["id"],
                 "query": task["query"],
                 "scope": task["scope"],
-                "with_memory_success": with_success,
-                "control_success": control_success,
-                "memory_changed_outcome": with_success and not control_success,
-                "citation_coverage": citation_coverage(with_context),
-                "selected_item_count": with_context.get("item_count", 0),
-                "control_item_count": control_context.get("item_count", 0),
-                "wrong_memory": contains_any_text(text, task["must_not_include"]),
+                "memory_read": context.get("item_count", 0) > 0,
+                "memory_adopted_in_artifact": evidence_adopted,
+                "decision_changed_by_memory": with_memory["decision"] != without_memory["decision"],
+                "harmful_memory_used": contains_any_text(text, task["forbidden_memory"]),
+                "citation_coverage": citation_coverage(context),
+                "artifact_path": str(artifact_path.relative_to(out_dir)),
             }
         )
     total = len(task_results)
-    with_success_count = sum(1 for result in task_results if result["with_memory_success"])
-    control_success_count = sum(1 for result in task_results if result["control_success"])
-    changed_count = sum(1 for result in task_results if result["memory_changed_outcome"])
-    wrong_memory_count = sum(1 for result in task_results if result["wrong_memory"])
-    coverage_values = [result["citation_coverage"] for result in task_results if result["selected_item_count"]]
+    adopted = sum(1 for result in task_results if result["memory_adopted_in_artifact"])
+    changed = sum(1 for result in task_results if result["decision_changed_by_memory"])
+    harmful = sum(1 for result in task_results if result["harmful_memory_used"])
+    coverage_values = [result["citation_coverage"] for result in task_results]
     return {
-        "phase": "P0/P1",
-        "ok": with_success_count == total and control_success_count == 0 and wrong_memory_count == 0,
+        "phase": "P1",
+        "ok": adopted == total and changed == total and harmful == 0,
         "task_count": total,
-        "with_memory_success_rate": with_success_count / total,
-        "control_success_rate": control_success_count / total,
-        "memory_caused_decision_rate": changed_count / total,
-        "task_outcome_delta": (with_success_count - control_success_count) / total,
-        "wrong_memory_count": wrong_memory_count,
-        "manual_reexplanation_count": total - changed_count,
+        "memory_adoption_rate": adopted / total,
+        "decision_change_rate": changed / total,
+        "harmful_memory_count": harmful,
         "citation_coverage": min(coverage_values) if coverage_values else 0.0,
+        "evaluation_shape": "scripted_artifact_adoption_not_empty_store_success",
+        "not_a_market_claim": True,
         "results": task_results,
     }
 
 
-def run_privacy_extractor(out_dir: Path) -> dict[str, Any]:
+def run_privacy_cost_extractor(out_dir: Path) -> dict[str, Any]:
     wrapper = ROOT / "wrappers" / "openai_extractor.py"
     request = {
         "schema_version": "mneme.extractor.command.v1",
@@ -463,6 +616,7 @@ def run_privacy_extractor(out_dir: Path) -> dict[str, Any]:
     secret_json = json.loads(secret_prefilter.stdout)
     quality_gate = (ROOT / "scripts" / "quality-gate.sh").read_text()
     docs = (ROOT / "docs" / "eval-harness" / "openai-provider-wrapper.md").read_text()
+    budget_report = provider_budget_report(PRIVACY_COST_EVENTS)
     provider_opt_in_required = no_key.returncode != 0 and "OPENAI_API_KEY is required" in no_key.stderr
     dry_run_ok = dry_json.get("claim", {}).get("object") == "local-first tools"
     secret_prefilter_ok = "API_KEY=FAKE_PRODUCT_VALIDATION_VALUE" in secret_json.get("claim", {}).get("object", "")
@@ -477,66 +631,264 @@ def run_privacy_extractor(out_dir: Path) -> dict[str, Any]:
                 secret_prefilter_ok,
                 quality_gate_dry,
                 docs_opt_in,
+                budget_report["within_budget"],
             ]
         ),
         "provider_opt_in_required": provider_opt_in_required,
+        "live_provider_executed": False,
         "dry_run_without_api_key": dry_run_ok,
         "secret_prefilter_before_provider": secret_prefilter_ok,
         "quality_gate_uses_dry_run": quality_gate_dry,
         "docs_state_opt_in_policy": docs_opt_in,
+        "budget": budget_report,
     }
-    (out_dir / "privacy-wrapper-dry-run.json").write_text(json.dumps(dry_json, indent=2) + "\n")
+    (out_dir / "P2-privacy-wrapper-dry-run.json").write_text(json.dumps(dry_json, indent=2) + "\n")
     return report
 
 
-def long_horizon_claims(record_count: int) -> list[tuple[str, str, str, str, str]]:
-    claims = [
-        ("user", "prefers", "weekly eval reports on Friday", "private", "superseded"),
-        ("user", "prefers", "weekly eval reports on Monday mornings", "private", "active"),
-        ("weekly eval reports", "schedule", "Monday mornings", "private", "active"),
-        ("project alpha deploy", "requires", "rollback proof before release", "project-alpha", "active"),
-        ("project beta finance", "contains", "private budget notes", "project-beta", "active"),
-        ("agent handoff", "requires", "finish summary and cited next actions", "private", "active"),
-    ]
-    noise_needed = max(0, record_count - len(claims))
-    for index in range(noise_needed):
-        scope = "private" if index % 3 else "project-noise"
-        claims.append((f"noise item {index:04d}", "mentions", f"unrelated archive marker {index:04d}", scope, "active"))
-    return claims
-
-
-def run_long_horizon(binary: Path, out_dir: Path, record_count: int) -> dict[str, Any]:
-    store = out_dir / "long-horizon-store.json"
-    claims = long_horizon_claims(record_count)
-    make_store(store, claims)
-    eval_context = run_context(binary, store, "current eval report Monday", "private")
-    deploy_context = run_context(binary, store, "rollback proof", "project-alpha")
-    eval_text = selected_text(eval_context)
-    deploy_text = selected_text(deploy_context)
-    stale_reuse = int("Friday" in eval_text)
-    scope_leak = int("private budget notes" in deploy_text)
-    current_recall = "Monday mornings" in eval_text and "rollback proof" in deploy_text
-    duplicate_groups = duplicate_active_group_count(claims)
+def provider_budget_report(events: list[dict[str, Any]]) -> dict[str, Any]:
+    max_event_token_units = 520
+    max_batch_token_units = 720
+    latency_budget_ms = 30_000
+    event_reports = []
+    provider_calls_allowed = 0
+    provider_calls_blocked = 0
+    total_token_units = 0
+    redaction_count = 0
+    for event in events:
+        redacted, redactions = redact_sensitive_text(event["text"])
+        token_units = estimate_token_units(redacted)
+        total_token_units += token_units
+        redaction_count += redactions
+        provider_allowed = redactions == 0 and event["expect_provider_allowed_after_opt_in"]
+        provider_calls_allowed += int(provider_allowed)
+        provider_calls_blocked += int(not provider_allowed)
+        event_reports.append(
+            {
+                "id": event["id"],
+                "token_units": token_units,
+                "redaction_count": redactions,
+                "provider_allowed_after_opt_in": provider_allowed,
+                "within_event_budget": token_units <= max_event_token_units,
+            }
+        )
     return {
-        "phase": "P3",
-        "ok": current_recall and stale_reuse == 0 and scope_leak == 0,
-        "record_count": len(claims),
-        "noise_record_count": max(0, len(claims) - 6),
-        "current_memory_recall": current_recall,
-        "stale_reuse_count": stale_reuse,
-        "scope_leak_count": scope_leak,
-        "duplicate_active_group_count": duplicate_groups,
-        "eval_selected_item_count": eval_context.get("item_count", 0),
-        "deploy_selected_item_count": deploy_context.get("item_count", 0),
+        "within_budget": all(event["within_event_budget"] for event in event_reports)
+        and total_token_units <= max_batch_token_units,
+        "max_event_token_units": max_event_token_units,
+        "max_batch_token_units": max_batch_token_units,
+        "total_token_units": total_token_units,
+        "latency_budget_ms": latency_budget_ms,
+        "provider_calls_allowed_after_opt_in": provider_calls_allowed,
+        "provider_calls_blocked_before_provider": provider_calls_blocked,
+        "redaction_count": redaction_count,
+        "events": event_reports,
     }
 
 
-def duplicate_active_group_count(claims: list[tuple[str, str, str, str, str]]) -> int:
+def redact_sensitive_text(text: str) -> tuple[str, int]:
+    redactions = 0
+
+    def replace(_match: re.Match[str]) -> str:
+        nonlocal redactions
+        redactions += 1
+        return "[REDACTED_SECRET]"
+
+    return SECRET_RE.sub(replace, text), redactions
+
+
+def estimate_token_units(text: str) -> int:
+    return max(1, math.ceil(len(text) / 4))
+
+
+def run_long_horizon_lifecycle(binary: Path, out_dir: Path, record_count: int) -> dict[str, Any]:
+    store = out_dir / "P3-long-horizon-store.json"
+    operations = []
+    operations.append(
+        json.loads(
+            run_command(
+                [
+                    str(binary),
+                    "remember",
+                    "user prefers weekly eval reports on Friday",
+                    "--store",
+                    str(store),
+                    "--json",
+                ]
+            ).stdout
+        )
+    )
+    operations.append(
+        json.loads(
+            run_command(
+                [
+                    str(binary),
+                    "correct",
+                    "user prefers weekly eval reports on Friday",
+                    "user prefers weekly eval reports on Monday mornings",
+                    "--store",
+                    str(store),
+                    "--json",
+                ]
+            ).stdout
+        )
+    )
+    operations.append(
+        json.loads(
+            run_command(
+                [
+                    str(binary),
+                    "remember",
+                    "project alpha deploy requires rollback proof before release",
+                    "--scope",
+                    "project-alpha",
+                    "--store",
+                    str(store),
+                    "--json",
+                ]
+            ).stdout
+        )
+    )
+    operations.append(
+        json.loads(
+            run_command(
+                [
+                    str(binary),
+                    "remember",
+                    "project beta finance contains private budget notes",
+                    "--scope",
+                    "project-beta",
+                    "--store",
+                    str(store),
+                    "--json",
+                ]
+            ).stdout
+        )
+    )
+    operations.append(
+        json.loads(
+            run_command(
+                [
+                    str(binary),
+                    "remember",
+                    "scratch note can be forgotten after validation",
+                    "--store",
+                    str(store),
+                    "--json",
+                ]
+            ).stdout
+        )
+    )
+    operations.append(
+        json.loads(
+            run_command(
+                [
+                    str(binary),
+                    "forget",
+                    "scratch note can be forgotten after validation",
+                    "--store",
+                    str(store),
+                    "--json",
+                ]
+            ).stdout
+        )
+    )
+    claim_count_after_lifecycle = len(json.loads(store.read_text()).get("claims", []))
+    noise_added = append_noise_records(store, max(0, record_count - claim_count_after_lifecycle))
+    eval_context = run_context(binary, store, "current eval report Monday", "private")
+    deploy_context = run_context(binary, store, "rollback proof", "project-alpha")
+    scratch_context = run_context(binary, store, "scratch note validation", "private")
+    eval_text = selected_text(eval_context)
+    deploy_text = selected_text(deploy_context)
+    scratch_text = selected_text(scratch_context)
+    stale_reuse = int("Friday" in eval_text)
+    scope_leak = int("private budget notes" in deploy_text)
+    forgotten_recall = int("forgotten after validation" in scratch_text)
+    current_recall = "Monday mornings" in eval_text and "rollback proof" in deploy_text
+    state = json.loads(store.read_text())
+    duplicate_groups = duplicate_active_group_count(state.get("claims", []))
+    actual_lifecycle = any(
+        result.get("command") == "correct" and result.get("latest_claim", {}).get("status") == "active"
+        for result in operations
+    ) and any(
+        result.get("command") == "forget" and result.get("latest_claim", {}).get("status") == "forgotten"
+        for result in operations
+    )
+    return {
+        "phase": "P3",
+        "ok": actual_lifecycle
+        and current_recall
+        and stale_reuse == 0
+        and scope_leak == 0
+        and forgotten_recall == 0,
+        "record_count": len(state.get("claims", [])),
+        "noise_record_count": noise_added,
+        "noise_insert_mode": "direct_store_fixture_after_cli_lifecycle",
+        "actual_lifecycle_operations": actual_lifecycle,
+        "cli_operation_count": len(operations),
+        "current_memory_recall": current_recall,
+        "stale_reuse_count": stale_reuse,
+        "scope_leak_count": scope_leak,
+        "forgotten_recall_count": forgotten_recall,
+        "duplicate_active_group_count": duplicate_groups,
+        "eval_selected_item_count": eval_context.get("item_count", 0),
+        "deploy_selected_item_count": deploy_context.get("item_count", 0),
+        "scratch_selected_item_count": scratch_context.get("item_count", 0),
+    }
+
+
+def append_noise_records(store: Path, count: int) -> int:
+    state = json.loads(store.read_text())
+    now = int(time.time())
+    events = state.setdefault("events", [])
+    claims = state.setdefault("claims", [])
+    audit = state.setdefault("audit", [])
+    for index in range(count):
+        event_id = f"event-noise-{index + 1:04d}"
+        claim_id = f"claim-noise-{index + 1:04d}"
+        scope = "private" if index % 3 else "project-noise"
+        text = f"noise item {index:04d} mentions unrelated archive marker {index:04d}"
+        events.append(
+            {
+                "id": event_id,
+                "speaker_id": "user",
+                "actor_agent_id": "product-validation-noise",
+                "text": text,
+                "scope": scope,
+                "trust_level": "trusted_user",
+            }
+        )
+        claims.append(
+            {
+                "id": claim_id,
+                "subject": f"noise item {index:04d}",
+                "predicate": "mentions",
+                "object": f"unrelated archive marker {index:04d}",
+                "status": "active",
+                "scope": scope,
+                "source_event_ids": [event_id],
+            }
+        )
+        audit.append({"kind": "event_append", "target_id": f"{event_id}:product-validation-noise:trusted_user"})
+        audit.append({"kind": "claim_write", "target_id": claim_id})
+    metadata = state.setdefault("metadata", {})
+    metadata["updated_at_unix_seconds"] = now
+    metadata["generation"] = int(metadata.get("generation", 1)) + 1
+    store.write_text(json.dumps(state, indent=2, sort_keys=True) + "\n")
+    return count
+
+
+def duplicate_active_group_count(claims: list[dict[str, Any]]) -> int:
     seen: dict[tuple[str, str, str, str], int] = {}
-    for subject, predicate, obj, scope, status in claims:
-        if status != "active":
+    for claim in claims:
+        if claim.get("status") != "active":
             continue
-        key = (subject, predicate, obj, scope)
+        key = (
+            str(claim.get("subject", "")),
+            str(claim.get("predicate", "")),
+            str(claim.get("object", "")),
+            str(claim.get("scope", "")),
+        )
         seen[key] = seen.get(key, 0) + 1
     return sum(1 for count in seen.values() if count > 1)
 
@@ -620,20 +972,22 @@ def run_ranking_decision() -> dict[str, Any]:
     semantic_ndcg_mean = sum(semantic_ndcg) / len(semantic_ndcg)
     return {
         "phase": "P4",
-        "ok": semantic_mrr >= term_mrr,
+        "ok": semantic_mrr > term_mrr,
         "term_mrr": term_mrr,
         "semantic_candidate_mrr": semantic_mrr,
         "mrr_delta": semantic_mrr - term_mrr,
         "term_ndcg_at_3": term_ndcg_mean,
         "semantic_candidate_ndcg_at_3": semantic_ndcg_mean,
         "ndcg_delta": semantic_ndcg_mean - term_ndcg_mean,
-        "decision": "measure_before_embedding; do_not_ship_embedding_without_positive_delta",
+        "ranking_claim": "alias_probe_not_embedding_proof",
+        "requires_external_embedding_eval_before_shipping": True,
+        "decision": "do_not_ship_embedding_without_positive_delta_on_held_out_queries",
         "results": results,
     }
 
 
 def run_migration_safety(binary: Path, out_dir: Path) -> dict[str, Any]:
-    store = out_dir / "legacy-v1-store.json"
+    store = out_dir / "P5-legacy-v1-store.json"
     make_store(store, [("user", "prefers", "migration-safe local memory", "private", "active")], schema_version=1)
     validate_before = json.loads(
         run_command([str(binary), "validate", "--store", str(store), "--json"]).stdout
@@ -672,6 +1026,73 @@ def run_migration_safety(binary: Path, out_dir: Path) -> dict[str, Any]:
     }
 
 
+def run_external_review_gate(out_dir: Path) -> dict[str, Any]:
+    review_path = ROOT / REVIEW_EXAMPLE
+    if not review_path.exists():
+        raise ProductValidationFailure(f"missing review example: {review_path}")
+    review = json.loads(review_path.read_text())
+    validation = validate_review(review)
+    copied_review = out_dir / "P6-product-validation-review.example.json"
+    copied_review.write_text(json.dumps(review, indent=2, sort_keys=True) + "\n")
+    return {
+        "phase": "P6",
+        "ok": validation["ok"],
+        "example_review_valid": validation["ok"],
+        "reviewer_count": 1 if validation["ok"] else 0,
+        "task_review_count": len(review.get("tasks", [])),
+        "raw_transcript_included": bool(review.get("raw_transcript_included")),
+        "third_party_claim": bool(review.get("third_party_claim")),
+        "external_claim_allowed": validation["ok"]
+        and not review.get("raw_transcript_included")
+        and bool(review.get("third_party_claim")),
+        "ready_for_external_review": validation["ok"],
+        "validation_errors": validation["errors"],
+        "review_artifact": str(copied_review.relative_to(out_dir)),
+    }
+
+
+def validate_review(review: dict[str, Any]) -> dict[str, Any]:
+    errors: list[str] = []
+    if review.get("schema_version") != "mneme.product_validation_review.v1":
+        errors.append("schema_version must be mneme.product_validation_review.v1")
+    if not isinstance(review.get("reviewer_id"), str) or not review["reviewer_id"].strip():
+        errors.append("reviewer_id is required")
+    if review.get("public_safe") is not True:
+        errors.append("public_safe must be true")
+    if review.get("raw_transcript_included") is not False:
+        errors.append("raw_transcript_included must be false")
+    if "third_party_claim" not in review:
+        errors.append("third_party_claim must be explicit")
+    tasks = review.get("tasks")
+    if not isinstance(tasks, list) or not tasks:
+        errors.append("tasks must be a non-empty list")
+    else:
+        for index, task in enumerate(tasks, start=1):
+            validate_review_task(task, index, errors)
+    serialized = json.dumps(review, ensure_ascii=False)
+    if SECRET_RE.search(serialized):
+        errors.append("review contains secret-like text")
+    if re.search(r"/Users/|/home/|[A-Za-z]:\\\\", serialized):
+        errors.append("review contains local filesystem path")
+    return {"ok": not errors, "errors": errors}
+
+
+def validate_review_task(task: dict[str, Any], index: int, errors: list[str]) -> None:
+    prefix = f"tasks[{index}]"
+    for field in ["id", "evidence_summary"]:
+        if not isinstance(task.get(field), str) or not task[field].strip():
+            errors.append(f"{prefix}.{field} is required")
+    for field in ["condition_labels_blinded", "memory_helped", "memory_harmed", "public_safe"]:
+        if not isinstance(task.get(field), bool):
+            errors.append(f"{prefix}.{field} must be boolean")
+    for field in ["score_without_memory", "score_with_memory"]:
+        value = task.get(field)
+        if not isinstance(value, int) or value < 0 or value > 3:
+            errors.append(f"{prefix}.{field} must be integer 0..3")
+    if task.get("memory_harmed") and task.get("memory_helped"):
+        errors.append(f"{prefix} cannot mark memory_helped and memory_harmed together")
+
+
 def run_full(args: argparse.Namespace) -> dict[str, Any]:
     out_dir = args.out_dir
     if out_dir.exists():
@@ -680,12 +1101,13 @@ def run_full(args: argparse.Namespace) -> dict[str, Any]:
         shutil.rmtree(out_dir)
     out_dir.mkdir(parents=True)
     binary = ensure_cli(args.no_build)
-    value = run_value_dogfood(binary, out_dir)
-    privacy = run_privacy_extractor(out_dir)
-    long_horizon = run_long_horizon(binary, out_dir, args.record_count)
+    causal = run_causal_usefulness(binary, out_dir)
+    privacy_cost = run_privacy_cost_extractor(out_dir)
+    long_horizon = run_long_horizon_lifecycle(binary, out_dir, args.record_count)
     ranking = run_ranking_decision()
     migration = run_migration_safety(binary, out_dir)
-    phases = [value, privacy, long_horizon, ranking, migration]
+    review = run_external_review_gate(out_dir)
+    phases = [causal, privacy_cost, long_horizon, ranking, migration, review]
     report = {
         "schema_version": SCHEMA_VERSION,
         "command": "product-validation-loop",
@@ -693,18 +1115,31 @@ def run_full(args: argparse.Namespace) -> dict[str, Any]:
         "run_label": args.run_label,
         "record_count": args.record_count,
         "phases": {
-            "P0_P1_value_dogfood": value,
-            "P2_privacy_extraction": privacy,
-            "P3_long_horizon": long_horizon,
+            "P1_causal_memory_usefulness": causal,
+            "P2_privacy_cost_extraction": privacy_cost,
+            "P3_long_horizon_lifecycle": long_horizon,
             "P4_ranking_decision": ranking,
             "P5_migration_safety": migration,
+            "P6_external_review_gate": review,
         },
         "summary": {
-            "value_task_outcome_delta": value["task_outcome_delta"],
-            "provider_opt_in_required": privacy["provider_opt_in_required"],
+            "causal_memory_adoption_rate": causal["memory_adoption_rate"],
+            "causal_decision_change_rate": causal["decision_change_rate"],
+            "harmful_memory_count": causal["harmful_memory_count"],
+            "provider_opt_in_required": privacy_cost["provider_opt_in_required"],
+            "live_provider_executed": privacy_cost["live_provider_executed"],
+            "provider_budget_within_limit": privacy_cost["budget"]["within_budget"],
+            "long_horizon_actual_lifecycle_operations": long_horizon["actual_lifecycle_operations"],
             "long_horizon_scope_leak_count": long_horizon["scope_leak_count"],
+            "long_horizon_stale_reuse_count": long_horizon["stale_reuse_count"],
             "ranking_mrr_delta": ranking["mrr_delta"],
+            "requires_external_embedding_eval_before_shipping": ranking[
+                "requires_external_embedding_eval_before_shipping"
+            ],
             "migration_memory_preserved": migration["memory_preserved_after_migration"],
+            "external_review_schema_valid": review["example_review_valid"],
+            "third_party_claim": review["third_party_claim"],
+            "external_claim_allowed": review["external_claim_allowed"],
         },
     }
     (out_dir / "summary.json").write_text(json.dumps(report, indent=2, sort_keys=True) + "\n")
@@ -725,13 +1160,13 @@ def markdown_report(report: dict[str, Any]) -> str:
     ]
     phases = report["phases"]
     lines.append(
-        f"| P0/P1 value dogfood | `{status(phases['P0_P1_value_dogfood'])}` | outcome delta `{phases['P0_P1_value_dogfood']['task_outcome_delta']:.2f}` |"
+        f"| P1 causal usefulness | `{status(phases['P1_causal_memory_usefulness'])}` | adoption `{phases['P1_causal_memory_usefulness']['memory_adoption_rate']:.2f}`, harmful `{phases['P1_causal_memory_usefulness']['harmful_memory_count']}` |"
     )
     lines.append(
-        f"| P2 privacy extraction | `{status(phases['P2_privacy_extraction'])}` | provider opt-in `{phases['P2_privacy_extraction']['provider_opt_in_required']}` |"
+        f"| P2 privacy/cost extraction | `{status(phases['P2_privacy_cost_extraction'])}` | provider opt-in `{phases['P2_privacy_cost_extraction']['provider_opt_in_required']}`, live provider `{phases['P2_privacy_cost_extraction']['live_provider_executed']}` |"
     )
     lines.append(
-        f"| P3 long horizon | `{status(phases['P3_long_horizon'])}` | stale `{phases['P3_long_horizon']['stale_reuse_count']}`, scope leaks `{phases['P3_long_horizon']['scope_leak_count']}` |"
+        f"| P3 long horizon lifecycle | `{status(phases['P3_long_horizon_lifecycle'])}` | stale `{phases['P3_long_horizon_lifecycle']['stale_reuse_count']}`, scope leaks `{phases['P3_long_horizon_lifecycle']['scope_leak_count']}` |"
     )
     lines.append(
         f"| P4 ranking decision | `{status(phases['P4_ranking_decision'])}` | MRR delta `{phases['P4_ranking_decision']['mrr_delta']:.2f}` |"
@@ -739,8 +1174,12 @@ def markdown_report(report: dict[str, Any]) -> str:
     lines.append(
         f"| P5 migration safety | `{status(phases['P5_migration_safety'])}` | memory preserved `{phases['P5_migration_safety']['memory_preserved_after_migration']}` |"
     )
+    lines.append(
+        f"| P6 external review gate | `{status(phases['P6_external_review_gate'])}` | example valid `{phases['P6_external_review_gate']['example_review_valid']}`, third-party claim `{phases['P6_external_review_gate']['third_party_claim']}` |"
+    )
     lines.append("")
     lines.append("This local report is a product-validation signal, not a market adoption claim.")
+    lines.append("P6 validates the review evidence format; it is not third-party validation by itself.")
     lines.append("")
     return "\n".join(lines)
 

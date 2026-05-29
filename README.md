@@ -3,7 +3,7 @@
 </p>
 
 <p align="center">
-  <a href="https://github.com/Orvek-dev/Mneme/releases/tag/v0.67.0"><img alt="Version" src="https://img.shields.io/badge/version-0.67.0-2ea44f"></a>
+  <a href="https://github.com/Orvek-dev/Mneme/releases/tag/v0.68.0"><img alt="Version" src="https://img.shields.io/badge/version-0.68.0-2ea44f"></a>
   <a href="./LICENSE"><img alt="License" src="https://img.shields.io/badge/license-MIT-0969da"></a>
   <img alt="Rust" src="https://img.shields.io/badge/Rust-CLI-b7410e">
   <img alt="Local first" src="https://img.shields.io/badge/local--first-JSON%20stores-6f42c1">
@@ -145,7 +145,7 @@ the reduced public-safe summary.
 | MCP client smoke | Actual Codex, Claude Code, and Cursor CLI setup with isolated temporary stores | Registration, health, tool discovery, and protocol continuity passed |
 | MCP V2 handoff dogfood | 30 local-only scripted handoff episodes across projects and reader agents | scripted loop passed; retrieval scores are local regression signals, not semantic-search benchmarks |
 | MCP dogfood safety | Scope, secret-like, quarantined, and unauthorized-write probes in the local-only handoff loop | `0` scope leaks, `0` secret leaks, `0` quarantine leaks |
-| Product validation loop | P0-P5 value, privacy, long-horizon, ranking-decision, and migration-safety checks | local loop passed; semantic search remains gated by measured ranking delta |
+| Product validation loop | P1-P6 causal artifact adoption, privacy/cost, lifecycle, ranking-decision, migration, and review-schema checks | local loop passed; semantic search and third-party value claims remain gated |
 | Reduced real-session ledger | 3 public-safe development-session summaries, no raw transcript included | `3/3` scripted continuity checks passed with required citations |
 | Local edge dogfood | Concurrent writes, concurrent handoffs, noisy scope retrieval, injection guard, restart guard | 80 V1 writers, 24 V2 handoffs, 300 noise records, and MCP restart guards passed |
 | V2 seeded faults | ACL bypass, secret leak, dropped citations, unapproved promotion, ignored revocation, quarantined leak | `6/6` detected |
@@ -162,9 +162,10 @@ public-safe; the quality gate also runs `scripts/eval-integrity-check.py` so
 golden input text cannot be copied into runtime source code.
 
 The product validation loop is intentionally stricter about feature creep: LLM
-extraction remains opt-in, semantic retrieval is not shipped unless ranking
-evidence improves over term matching, and storage changes must preserve legacy
-local stores.
+extraction remains opt-in, provider use is budgeted and local-dry-run by
+default, semantic retrieval is not shipped unless ranking evidence improves
+over term matching, storage changes must preserve legacy local stores, and
+external value claims require a separate public-safe review artifact.
 
 ## Commands
 

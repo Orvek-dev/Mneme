@@ -34,12 +34,13 @@ PRODUCT_VALIDATION_STDOUT="${TMP_ROOT}/mneme-quality-gate-product-validation.std
 rm -rf "$PRODUCT_VALIDATION_OUT"
 scripts/product-validation-loop.py --check-contract > "$PRODUCT_VALIDATION_CONTRACT"
 grep -q '"command": "product-validation-loop-contract"' "$PRODUCT_VALIDATION_CONTRACT"
-grep -q '"id": "P0"' "$PRODUCT_VALIDATION_CONTRACT"
-grep -q '"id": "P5"' "$PRODUCT_VALIDATION_CONTRACT"
+grep -q '"id": "P1"' "$PRODUCT_VALIDATION_CONTRACT"
+grep -q '"id": "P6"' "$PRODUCT_VALIDATION_CONTRACT"
 scripts/product-validation-loop.py --check-dataset --record-count 180 > "$PRODUCT_VALIDATION_DATASET"
-grep -q '"value_task_count": 4' "$PRODUCT_VALIDATION_DATASET"
-grep -q '"privacy_case_count": 4' "$PRODUCT_VALIDATION_DATASET"
+grep -q '"causal_task_count": 4' "$PRODUCT_VALIDATION_DATASET"
+grep -q '"privacy_cost_event_count": 4' "$PRODUCT_VALIDATION_DATASET"
 grep -q '"ranking_case_count": 4' "$PRODUCT_VALIDATION_DATASET"
+grep -q '"external_review_case_count": 1' "$PRODUCT_VALIDATION_DATASET"
 scripts/product-validation-loop.py \
   --out-dir "$PRODUCT_VALIDATION_OUT" \
   --run-label quality-gate \
@@ -47,10 +48,18 @@ scripts/product-validation-loop.py \
   --force \
   --no-build > "$PRODUCT_VALIDATION_STDOUT"
 grep -q '"ok": true' "$PRODUCT_VALIDATION_STDOUT"
-grep -q '"value_task_outcome_delta": 1.0' "$PRODUCT_VALIDATION_STDOUT"
+grep -q '"causal_memory_adoption_rate": 1.0' "$PRODUCT_VALIDATION_STDOUT"
+grep -q '"causal_decision_change_rate": 1.0' "$PRODUCT_VALIDATION_STDOUT"
+grep -q '"harmful_memory_count": 0' "$PRODUCT_VALIDATION_STDOUT"
 grep -q '"provider_opt_in_required": true' "$PRODUCT_VALIDATION_STDOUT"
+grep -q '"live_provider_executed": false' "$PRODUCT_VALIDATION_STDOUT"
+grep -q '"provider_budget_within_limit": true' "$PRODUCT_VALIDATION_STDOUT"
+grep -q '"long_horizon_actual_lifecycle_operations": true' "$PRODUCT_VALIDATION_STDOUT"
 grep -q '"long_horizon_scope_leak_count": 0' "$PRODUCT_VALIDATION_STDOUT"
+grep -q '"requires_external_embedding_eval_before_shipping": true' "$PRODUCT_VALIDATION_STDOUT"
 grep -q '"migration_memory_preserved": true' "$PRODUCT_VALIDATION_STDOUT"
+grep -q '"external_review_schema_valid": true' "$PRODUCT_VALIDATION_STDOUT"
+grep -q '"third_party_claim": false' "$PRODUCT_VALIDATION_STDOUT"
 MCP_READINESS_REPORT="${TMP_ROOT}/mneme-quality-gate-mcp-readiness.json"
 MCP_AGENT_USABILITY_REPORT="${TMP_ROOT}/mneme-quality-gate-mcp-agent-usability.json"
 cargo run -q -p mneme-eval -- validate --suite mcp >/dev/null
