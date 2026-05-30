@@ -19,6 +19,7 @@ const STORE_LOCK_STALE_SECONDS: u64 = 60 * 60;
 const PARTIAL_CONTEXT_WARNING: &str = "Mneme returned scoped, ranked memory, not the full conversation transcript. Treat this as partial context and verify decisions against cited source events.";
 const ACCEPTANCE_CONTRACT_SCHEMA_VERSION: &str = "mneme.acceptance.v1";
 const VERIFIER_REPORT_SCHEMA_VERSION: &str = "mneme.verifier.v1";
+const JUDGMENT_REPORT_SCHEMA_VERSION: &str = "mneme.judgment.v1";
 const OUTCOME_GATE_RESULT_SCHEMA_VERSION: &str = "mneme.gate_result.v1";
 
 /// Current persisted state schema version for v1 local stores.
@@ -583,6 +584,56 @@ impl MnemeEngine {
             session: session.clone(),
             remembered_event_ids,
             remembered_claim_ids,
+        })
+    }
+
+    /// Applies an external verdict to a pending judgment outcome gate.
+    ///
+    /// Mneme does not judge subjective criteria itself. External reviewers or
+    /// model judges submit a `mneme.judgment.v1` report, and the core validates
+    /// ids, schema, lineage, evidence redaction, and the stored `gate_result`.
+    pub fn apply_outcome_judgment(
+        &mut self,
+        session_id: &str,
+        report: OutcomeJudgmentReport,
+    ) -> Result<OutcomeJudgmentApplyReport, SessionError> {
+        let position = self
+            .sessions
+            .iter()
+            .position(|session| session.id == session_id)
+            .ok_or_else(|| SessionError::new(format!("unknown session: {session_id}")))?;
+        let session = &mut self.sessions[position];
+        if session.status != SessionStatus::Closed {
+            return Err(SessionError::new(format!(
+                "session {session_id} must be closed before applying judgment"
+            )));
+        }
+        let Some(acceptance) = session.acceptance.as_ref() else {
+            return Err(SessionError::new(format!(
+                "session {session_id} has no acceptance contract"
+            )));
+        };
+        let Some(current_gate) = session.gate_result.as_ref() else {
+            return Err(SessionError::new(format!(
+                "session {session_id} has no outcome gate result"
+            )));
+        };
+        if current_gate.status != OutcomeGateStatus::PendingJudgment {
+            return Err(SessionError::new(format!(
+                "session {session_id} outcome gate is {}, not pending_judgment",
+                current_gate.status.as_str()
+            )));
+        }
+
+        let gate_result = apply_judgment_to_gate(acceptance, current_gate, &report);
+        session.gate_result = Some(gate_result.clone());
+        self.audit.push(AuditRecord {
+            kind: AuditKind::OutcomeJudgment,
+            target_id: session.id.clone(),
+        });
+        Ok(OutcomeJudgmentApplyReport {
+            session: session.clone(),
+            gate_result,
         })
     }
 
@@ -1280,6 +1331,53 @@ pub struct VerifierCriterionResult {
     pub evidence: Option<String>,
 }
 
+/// External judgment report proposed to the core after a pending gate.
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct OutcomeJudgmentReport {
+    /// Judgment schema identifier.
+    pub schema_version: String,
+    /// Optional task id; when both sides set one, it must match the acceptance contract.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub task_id: Option<String>,
+    /// Reviewer or judge identifier. Do not put secrets here.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub reviewer: Option<String>,
+    /// One verdict per judgment criterion being resolved.
+    #[serde(default)]
+    pub results: Vec<OutcomeJudgmentCriterionResult>,
+}
+
+/// Result for one subjective judgment criterion.
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct OutcomeJudgmentCriterionResult {
+    /// Criterion id from the acceptance contract.
+    pub id: String,
+    /// External verdict for this criterion.
+    pub verdict: OutcomeJudgmentVerdict,
+    /// Short public-safe evidence. The core truncates and redacts before storing.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub evidence: Option<String>,
+}
+
+/// External judgment verdict.
+#[derive(Debug, Clone, Copy, Eq, PartialEq, Serialize, Deserialize)]
+#[serde(rename_all = "snake_case")]
+pub enum OutcomeJudgmentVerdict {
+    /// The external reviewer accepted the criterion.
+    Pass,
+    /// The external reviewer rejected the criterion.
+    Fail,
+}
+
+impl OutcomeJudgmentVerdict {
+    const fn as_verifier_status(self) -> VerifierCriterionStatus {
+        match self {
+            Self::Pass => VerifierCriterionStatus::Pass,
+            Self::Fail => VerifierCriterionStatus::Fail,
+        }
+    }
+}
+
 /// External verifier result status.
 #[derive(Debug, Clone, Copy, Eq, PartialEq, Serialize, Deserialize)]
 #[serde(rename_all = "snake_case")]
@@ -1369,9 +1467,21 @@ pub struct OutcomeGateEvidence {
     pub id: String,
     /// Criterion status.
     pub status: VerifierCriterionStatus,
+    /// Verifier, reviewer, or judge that proposed this evidence.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub source: Option<String>,
     /// Public-safe evidence text.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub evidence: Option<String>,
+}
+
+/// Report returned after applying an external judgment.
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct OutcomeJudgmentApplyReport {
+    /// Persisted session record after judgment intake.
+    pub session: SessionRecord,
+    /// Updated first-class outcome gate result.
+    pub gate_result: OutcomeGateResult,
 }
 
 /// Input used to backfill earlier context that was not captured live.
@@ -1605,6 +1715,7 @@ fn evaluate_outcome_gate(
             evidence.push(OutcomeGateEvidence {
                 id: result.id.clone(),
                 status: result.status,
+                source: report.verifier.clone().and_then(non_empty_string),
                 evidence: result.evidence.as_deref().map(sanitize_gate_evidence),
             });
         }
@@ -1659,6 +1770,122 @@ fn evaluate_outcome_gate(
         evidence,
         warnings: contract.baseline.warnings.clone(),
     }))
+}
+
+fn apply_judgment_to_gate(
+    acceptance: &AcceptanceContract,
+    current_gate: &OutcomeGateResult,
+    report: &OutcomeJudgmentReport,
+) -> OutcomeGateResult {
+    let mut violations = Vec::new();
+    if report.schema_version != JUDGMENT_REPORT_SCHEMA_VERSION {
+        violations.push(format!(
+            "judgment schema_version must be {JUDGMENT_REPORT_SCHEMA_VERSION}, got {}",
+            report.schema_version
+        ));
+    }
+    if let (Some(expected), Some(actual)) = (&acceptance.task_id, &report.task_id) {
+        if expected != actual {
+            violations.push(format!(
+                "judgment task_id mismatch: expected {expected}, got {actual}"
+            ));
+        }
+    }
+
+    let judgment_ids = acceptance
+        .criteria
+        .iter()
+        .filter(|criterion| criterion.kind == AcceptanceCriterionKind::Judgment)
+        .map(|criterion| criterion.id.clone())
+        .collect::<BTreeSet<_>>();
+    let mut pending = current_gate
+        .pending_criterion_ids
+        .iter()
+        .cloned()
+        .collect::<BTreeSet<_>>();
+    let mut seen_results = BTreeSet::new();
+    let mut passed = current_gate
+        .passed_criterion_ids
+        .iter()
+        .cloned()
+        .collect::<BTreeSet<_>>();
+    let mut failed = current_gate
+        .failed_criterion_ids
+        .iter()
+        .cloned()
+        .collect::<BTreeSet<_>>();
+    let mut errored = current_gate
+        .errored_criterion_ids
+        .iter()
+        .cloned()
+        .collect::<BTreeSet<_>>();
+    let mut evidence = current_gate.evidence.clone();
+
+    for result in &report.results {
+        if result.id.trim().is_empty() {
+            violations.push("judgment result id cannot be empty".to_owned());
+            continue;
+        }
+        if !seen_results.insert(result.id.clone()) {
+            violations.push(format!("duplicate judgment result id: {}", result.id));
+            errored.insert(result.id.clone());
+            continue;
+        }
+        if !judgment_ids.contains(&result.id) {
+            violations.push(format!("unknown judgment result id: {}", result.id));
+            errored.insert(result.id.clone());
+            continue;
+        }
+        if !pending.contains(&result.id) {
+            violations.push(format!("judgment result id {} is not pending", result.id));
+            errored.insert(result.id.clone());
+            continue;
+        }
+        pending.remove(&result.id);
+        match result.verdict {
+            OutcomeJudgmentVerdict::Pass => {
+                passed.insert(result.id.clone());
+            }
+            OutcomeJudgmentVerdict::Fail => {
+                failed.insert(result.id.clone());
+            }
+        }
+        evidence.push(OutcomeGateEvidence {
+            id: result.id.clone(),
+            status: result.verdict.as_verifier_status(),
+            source: report.reviewer.clone().and_then(non_empty_string),
+            evidence: result.evidence.as_deref().map(sanitize_gate_evidence),
+        });
+    }
+
+    violations.sort();
+    violations.dedup();
+
+    let status = if !violations.is_empty() || !errored.is_empty() {
+        OutcomeGateStatus::Error
+    } else if !failed.is_empty() {
+        OutcomeGateStatus::Failed
+    } else if !pending.is_empty() {
+        OutcomeGateStatus::PendingJudgment
+    } else {
+        OutcomeGateStatus::Passed
+    };
+
+    OutcomeGateResult {
+        schema_version: OUTCOME_GATE_RESULT_SCHEMA_VERSION.to_owned(),
+        status,
+        passed: status == OutcomeGateStatus::Passed,
+        completed: status == OutcomeGateStatus::Passed,
+        evaluated_at_unix_seconds: unix_timestamp(),
+        criterion_count: current_gate.criterion_count,
+        passed_criterion_ids: passed.into_iter().collect(),
+        failed_criterion_ids: failed.into_iter().collect(),
+        errored_criterion_ids: errored.into_iter().collect(),
+        pending_criterion_ids: pending.into_iter().collect(),
+        contract_violations: violations,
+        evidence,
+        warnings: current_gate.warnings.clone(),
+    }
 }
 
 fn sanitize_gate_evidence(text: &str) -> String {
@@ -2468,6 +2695,8 @@ pub enum AuditKind {
     SessionEnd,
     /// Outcome gate evaluation operation.
     OutcomeGate,
+    /// External outcome judgment intake operation.
+    OutcomeJudgment,
 }
 
 impl AuditKind {
@@ -2484,6 +2713,7 @@ impl AuditKind {
             Self::SessionBegin => "session.begin",
             Self::SessionEnd => "session.end",
             Self::OutcomeGate => "outcome.gate",
+            Self::OutcomeJudgment => "outcome.judgment",
         }
     }
 }
@@ -4442,6 +4672,153 @@ mod tests {
             .contract_violations
             .iter()
             .any(|violation| violation.contains("missing verifier result")));
+        Ok(())
+    }
+
+    #[test]
+    fn outcome_judgment_resolves_pending_gate() -> Result<(), Box<dyn std::error::Error>> {
+        let mut engine = MnemeEngine::new(MnemeConfig::default());
+        let begin = engine.begin_session(SessionBeginInput {
+            task: "Review landing page polish".to_owned(),
+            lineage_id: None,
+            actor_agent_id: Some("codex".to_owned()),
+            query: None,
+            allowed_scopes: vec!["private".to_owned()],
+            max_items: DEFAULT_CONTEXT_MAX_ITEMS,
+            acceptance: Some(AcceptanceContract {
+                schema_version: "mneme.acceptance.v1".to_owned(),
+                task_id: Some("task-judgment".to_owned()),
+                baseline: AcceptanceBaseline::default(),
+                criteria: vec![
+                    AcceptanceCriterion {
+                        id: "tests".to_owned(),
+                        kind: AcceptanceCriterionKind::Command,
+                        description: None,
+                        config: serde_json::json!({"argv": ["cargo", "test"]}),
+                    },
+                    AcceptanceCriterion {
+                        id: "ux-review".to_owned(),
+                        kind: AcceptanceCriterionKind::Judgment,
+                        description: Some("External reviewer accepts the UX".to_owned()),
+                        config: serde_json::json!({"rubric": "clear and useful"}),
+                    },
+                ],
+            }),
+        });
+
+        let end = engine.end_session(SessionEndInput {
+            session_id: begin.session.id.clone(),
+            actor_agent_id: Some("codex".to_owned()),
+            scope: None,
+            summary: Some("Implemented landing page polish".to_owned()),
+            remember: Vec::new(),
+            verifier_report: Some(VerifierReport {
+                schema_version: "mneme.verifier.v1".to_owned(),
+                task_id: Some("task-judgment".to_owned()),
+                verifier: Some("unit-test".to_owned()),
+                results: vec![VerifierCriterionResult {
+                    id: "tests".to_owned(),
+                    status: VerifierCriterionStatus::Pass,
+                    evidence: Some("cargo test exited 0".to_owned()),
+                }],
+            }),
+        })?;
+
+        let pending_gate = end.session.gate_result.expect("gate result");
+        assert_eq!(pending_gate.status, OutcomeGateStatus::PendingJudgment);
+        assert_eq!(pending_gate.pending_criterion_ids, vec!["ux-review"]);
+
+        let judged = engine.apply_outcome_judgment(
+            &begin.session.id,
+            OutcomeJudgmentReport {
+                schema_version: "mneme.judgment.v1".to_owned(),
+                task_id: Some("task-judgment".to_owned()),
+                reviewer: Some("external-reviewer".to_owned()),
+                results: vec![OutcomeJudgmentCriterionResult {
+                    id: "ux-review".to_owned(),
+                    verdict: OutcomeJudgmentVerdict::Pass,
+                    evidence: Some("reviewer accepted the final UX".to_owned()),
+                }],
+            },
+        )?;
+
+        assert_eq!(judged.gate_result.status, OutcomeGateStatus::Passed);
+        assert!(judged.gate_result.completed);
+        assert_eq!(
+            judged.gate_result.passed_criterion_ids,
+            vec!["tests", "ux-review"]
+        );
+        assert!(engine
+            .snapshot()
+            .audit
+            .iter()
+            .any(|event| event.kind == AuditKind::OutcomeJudgment));
+        Ok(())
+    }
+
+    #[test]
+    fn outcome_judgment_failure_blocks_completion() -> Result<(), Box<dyn std::error::Error>> {
+        let mut engine = MnemeEngine::new(MnemeConfig::default());
+        let begin = engine.begin_session(SessionBeginInput {
+            task: "Review docs clarity".to_owned(),
+            lineage_id: None,
+            actor_agent_id: Some("codex".to_owned()),
+            query: None,
+            allowed_scopes: vec!["private".to_owned()],
+            max_items: DEFAULT_CONTEXT_MAX_ITEMS,
+            acceptance: Some(AcceptanceContract {
+                schema_version: "mneme.acceptance.v1".to_owned(),
+                task_id: None,
+                baseline: AcceptanceBaseline::default(),
+                criteria: vec![AcceptanceCriterion {
+                    id: "human-review".to_owned(),
+                    kind: AcceptanceCriterionKind::Judgment,
+                    description: None,
+                    config: serde_json::json!({"rubric": "docs are clear"}),
+                }],
+            }),
+        });
+
+        let end = engine.end_session(SessionEndInput {
+            session_id: begin.session.id.clone(),
+            actor_agent_id: Some("codex".to_owned()),
+            scope: None,
+            summary: Some("Drafted docs".to_owned()),
+            remember: Vec::new(),
+            verifier_report: Some(VerifierReport {
+                schema_version: "mneme.verifier.v1".to_owned(),
+                task_id: None,
+                verifier: Some("unit-test".to_owned()),
+                results: Vec::new(),
+            }),
+        })?;
+        let pending_gate = end
+            .session
+            .gate_result
+            .as_ref()
+            .ok_or("missing pending gate result")?;
+        assert_eq!(pending_gate.status, OutcomeGateStatus::PendingJudgment);
+
+        let judged = engine.apply_outcome_judgment(
+            &begin.session.id,
+            OutcomeJudgmentReport {
+                schema_version: "mneme.judgment.v1".to_owned(),
+                task_id: None,
+                reviewer: Some("external-reviewer".to_owned()),
+                results: vec![OutcomeJudgmentCriterionResult {
+                    id: "human-review".to_owned(),
+                    verdict: OutcomeJudgmentVerdict::Fail,
+                    evidence: Some("reviewer found the docs unclear".to_owned()),
+                }],
+            },
+        )?;
+
+        assert_eq!(judged.gate_result.status, OutcomeGateStatus::Failed);
+        assert!(!judged.gate_result.completed);
+        assert_eq!(
+            judged.gate_result.failed_criterion_ids,
+            vec!["human-review"]
+        );
         Ok(())
     }
 

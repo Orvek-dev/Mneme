@@ -6,7 +6,8 @@ use std::path::{Path, PathBuf};
 
 use mneme_core::{
     validate_state, validate_team_state, ClaimStatus, ContextQuery, EventInput, JsonFileStore,
-    JsonTeamFileStore, MnemeConfig, MnemeEngine, SessionBackfillInput, SessionBeginInput,
+    JsonTeamFileStore, MnemeConfig, MnemeEngine, OutcomeJudgmentCriterionResult,
+    OutcomeJudgmentReport, OutcomeJudgmentVerdict, SessionBackfillInput, SessionBeginInput,
     SessionEndInput, StoreError, TeamActor, TeamAgentInput, TeamContextQuery, TeamMemoryConfig,
     TeamMemoryEngine, TeamProjectInput, TeamPromotionCreateInput, TeamPromotionReviewInput,
     TeamRememberInput, TeamRole, TeamRunBeginInput, TeamRunEndInput, TeamRunHandoffInput,
@@ -223,6 +224,7 @@ impl McpServer {
             "mneme_v1_correct" => self.v1_lifecycle(arguments, "correct"),
             "mneme_v1_quality" => self.v1_quality(),
             "mneme_v1_outcome_status" => self.v1_outcome_status(arguments),
+            "mneme_v1_outcome_judge" => self.v1_outcome_judge(arguments),
             "mneme_v1_validate" => self.v1_validate(),
             "mneme_v1_snapshot" => self.v1_snapshot(),
             "mneme_v2_team_init" => self.v2_init(arguments),
@@ -813,6 +815,37 @@ impl McpServer {
             "session_id": session.id,
             "status": status,
             "gate_result": session.gate_result,
+            "next_recommended_actions": outcome_status_next_actions(),
+        }))
+    }
+
+    fn v1_outcome_judge(&self, arguments: &Map<String, Value>) -> Result<Value, McpError> {
+        let mut engine = self.load_v1_engine()?;
+        let session_id = required_string(arguments, "session_id")?;
+        let id = required_string(arguments, "id")?;
+        let verdict = parse_judgment_verdict(&required_string(arguments, "verdict")?)?;
+        let report = OutcomeJudgmentReport {
+            schema_version: "mneme.judgment.v1".to_owned(),
+            task_id: optional_string(arguments, "task_id"),
+            reviewer: optional_string(arguments, "reviewer"),
+            results: vec![OutcomeJudgmentCriterionResult {
+                id,
+                verdict,
+                evidence: optional_string(arguments, "evidence"),
+            }],
+        };
+        let apply_report = engine
+            .apply_outcome_judgment(&session_id, report)
+            .map_err(McpError::tool)?;
+        self.persist_v1(&engine)?;
+        Ok(json!({
+            "command": "v1.outcome.judge",
+            "schema_version": "mneme.v1_outcome_judge.v1",
+            "store": self.config.v1_store.display().to_string(),
+            "session_id": apply_report.session.id,
+            "status": apply_report.gate_result.status.as_str(),
+            "completed": apply_report.gate_result.completed,
+            "gate_result": apply_report.gate_result,
             "next_recommended_actions": outcome_status_next_actions(),
         }))
     }
@@ -1551,6 +1584,16 @@ fn optional_string_vec(arguments: &Map<String, Value>, key: &str) -> Option<Vec<
     )
 }
 
+fn parse_judgment_verdict(value: &str) -> Result<OutcomeJudgmentVerdict, McpError> {
+    match value {
+        "pass" | "passed" | "accept" | "accepted" => Ok(OutcomeJudgmentVerdict::Pass),
+        "fail" | "failed" | "reject" | "rejected" => Ok(OutcomeJudgmentVerdict::Fail),
+        _ => Err(McpError::invalid_request(format!(
+            "unknown judgment verdict: {value}; expected pass or fail"
+        ))),
+    }
+}
+
 fn actor(arguments: &Map<String, Value>) -> Result<TeamActor, McpError> {
     Ok(TeamActor {
         user_id: required_string(arguments, "actor")?,
@@ -2040,6 +2083,21 @@ fn personal_tools() -> Vec<ToolDefinition> {
             "mneme_v1_outcome_status",
             "Inspect the first-class V1 outcome gate result for a session. Use before treating gated work as completed.",
             object_schema(&["session_id"], vec![("session_id", string_schema())]),
+        ),
+        tool_definition(
+            "mneme_v1_outcome_judge",
+            "Apply an external reviewer/model verdict to a pending V1 judgment gate. Use only when a user or reviewer has provided an explicit pass/fail verdict.",
+            object_schema(
+                &["session_id", "id", "verdict"],
+                vec![
+                    ("session_id", string_schema()),
+                    ("id", string_schema()),
+                    ("verdict", string_schema()),
+                    ("evidence", string_schema()),
+                    ("reviewer", string_schema()),
+                    ("task_id", string_schema()),
+                ],
+            ),
         ),
         tool_definition(
             "mneme_v1_validate",

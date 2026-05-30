@@ -77,7 +77,8 @@ V1 tools cover personal memory:
 - retrieve cited context;
 - begin and end task sessions;
 - begin, end, and hand off continuity sessions with explicit lineage/scope;
-- inspect V1 outcome gate status for sessions closed through CLI or hooks;
+- inspect V1 outcome gate status and apply external reviewer verdicts for
+  pending judgment gates;
 - correct, forget, validate, quality-check, and snapshot the store.
 
 V2 tools cover team handoff memory:

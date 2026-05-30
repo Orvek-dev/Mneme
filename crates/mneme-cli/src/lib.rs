@@ -19,7 +19,8 @@ use mneme_core::{
     AcceptanceCriterionKind, BuildStage, ClaimRecord, ClaimStatus, CommandExtractor,
     CompactionReport, ContextPack, ContextQuery, EngineSnapshot, EventInput, ExtractorError,
     JsonFileStore, JsonTeamFileStore, MnemeConfig, MnemeEngine, MnemeExtractor, MnemeState,
-    MnemeStore, OutcomeGateResult, RuleBasedExtractor, SessionBeginInput, SessionBeginReport,
+    MnemeStore, OutcomeGateResult, OutcomeJudgmentCriterionResult, OutcomeJudgmentReport,
+    OutcomeJudgmentVerdict, RuleBasedExtractor, SessionBeginInput, SessionBeginReport,
     SessionEndInput, SessionEndReport, SessionError, SessionMemoryInputMode, SessionRecord,
     StateValidationReport, StoreError, StoreErrorKind, StoreFileInspection, StoreFileStatus,
     StoreInspection, StoreRepairReport, StoreRestoreReport, TeamActor, TeamAdapterManifest,
@@ -390,6 +391,7 @@ Examples:
   mneme context "local-first" --store /tmp/mneme.json --json
   mneme team init --store /tmp/mneme-team.json --json
   mneme outcome status session-001 --store /tmp/mneme.json --json
+  mneme outcome judge session-001 --id ux-review --verdict pass --reviewer lee --store /tmp/mneme.json --json
   mneme mcp config --client all --json
   mneme team remember "Atlas deploys require rollback notes" --actor alice --scope team --store /tmp/mneme-team.json
   mneme hook begin "Draft setup plan" --query "local-first" --store /tmp/mneme.json
@@ -529,13 +531,17 @@ Example:
 
 const MNEME_OUTCOME_HELP: &str = r#"Usage:
   mneme outcome status <session-id> [--store <path>] [--json]
+  mneme outcome judge <session-id> [--judgment-report <path> | --id <criterion-id> --verdict pass|fail] [--evidence <text>] [--reviewer <id>] [--task-id <id>] [--store <path>] [--json]
 
-Inspect the first-class outcome gate result for a session. This is read-only
-and reports whether the work is completed, failed, errored, pending judgment,
-or has no acceptance gate.
+Inspect or resolve the first-class outcome gate result for a session.
+`status` is read-only. `judge` applies an external human/model verdict to a
+pending judgment criterion. Mneme validates and stores the verdict, but does not
+perform the subjective judgment itself. If the updated gate is not completed,
+`judge` writes output and exits non-zero.
 
 Example:
-  mneme outcome status session-001 --store /tmp/mneme.json --json"#;
+  mneme outcome status session-001 --store /tmp/mneme.json --json
+  mneme outcome judge session-001 --id ux-review --verdict pass --evidence "Reviewer accepted the UX" --reviewer lee --store /tmp/mneme.json --json"#;
 
 const MNEME_HOOK_HELP: &str = r#"Usage:
   mneme hook doctor [--store <path>]
@@ -1023,6 +1029,17 @@ struct EndOptions {
 }
 
 #[derive(Debug, Clone, Default)]
+struct OutcomeJudgeOptions {
+    common: CommonOptions,
+    judgment_report_path: Option<PathBuf>,
+    task_id: Option<String>,
+    reviewer: Option<String>,
+    id: Option<String>,
+    verdict: Option<OutcomeJudgmentVerdict>,
+    evidence: Option<String>,
+}
+
+#[derive(Debug, Clone, Default)]
 enum ExtractorOptions {
     #[default]
     Rule,
@@ -1410,6 +1427,17 @@ struct OutcomeStatusReport {
     session_id: String,
     status: String,
     gate_result: Option<OutcomeGateResult>,
+    session: SessionRecord,
+}
+
+#[derive(Debug, Serialize)]
+struct OutcomeJudgeCliReport {
+    command: &'static str,
+    store: String,
+    session_id: String,
+    status: String,
+    completed: bool,
+    gate_result: OutcomeGateResult,
     session: SessionRecord,
 }
 
@@ -2211,34 +2239,59 @@ fn run_end(raw_args: Vec<String>, writer: &mut impl Write) -> Result<(), CliErro
 fn run_outcome(mut raw_args: Vec<String>, writer: &mut impl Write) -> Result<(), CliError> {
     if raw_args.first().is_some_and(|arg| arg == "status") {
         raw_args.remove(0);
-    } else {
-        return Err(CliError::invalid_cli(
-            "usage: mneme outcome status <session-id> [--store <path>] [--json]",
-        ));
+        let (session_id, options) = parse_outcome_status_args(raw_args)?;
+        let store_path = resolve_store_path(&options)?;
+        let engine = load_engine(&store_path)?;
+        let session = engine
+            .snapshot()
+            .sessions
+            .into_iter()
+            .find(|session| session.id == session_id)
+            .ok_or_else(|| CliError::lifecycle(format!("unknown session: {session_id}")))?;
+        let status = session
+            .gate_result
+            .as_ref()
+            .map(|gate| gate.status.as_str().to_owned())
+            .unwrap_or_else(|| "no_acceptance_gate".to_owned());
+        let report = OutcomeStatusReport {
+            command: "outcome.status",
+            store: store_path.display().to_string(),
+            session_id: session.id.clone(),
+            status,
+            gate_result: session.gate_result.clone(),
+            session,
+        };
+        return emit_outcome_status_report(&report, options.json, writer);
     }
-    let (session_id, options) = parse_outcome_status_args(raw_args)?;
-    let store_path = resolve_store_path(&options)?;
-    let engine = load_engine(&store_path)?;
-    let session = engine
-        .snapshot()
-        .sessions
-        .into_iter()
-        .find(|session| session.id == session_id)
-        .ok_or_else(|| CliError::lifecycle(format!("unknown session: {session_id}")))?;
-    let status = session
-        .gate_result
-        .as_ref()
-        .map(|gate| gate.status.as_str().to_owned())
-        .unwrap_or_else(|| "no_acceptance_gate".to_owned());
-    let report = OutcomeStatusReport {
-        command: "outcome.status",
-        store: store_path.display().to_string(),
-        session_id: session.id.clone(),
-        status,
-        gate_result: session.gate_result.clone(),
-        session,
-    };
-    emit_outcome_status_report(&report, options.json, writer)
+    if raw_args.first().is_some_and(|arg| arg == "judge") {
+        raw_args.remove(0);
+        let (session_id, options) = parse_outcome_judge_args(raw_args)?;
+        let store_path = resolve_store_path(&options.common)?;
+        let judgment_report = load_or_build_judgment_report(&options)?;
+        let mut engine = load_engine(&store_path)?;
+        let apply_report = engine
+            .apply_outcome_judgment(&session_id, judgment_report)
+            .map_err(CliError::session)?;
+        let gate_result = apply_report.gate_result;
+        let report = OutcomeJudgeCliReport {
+            command: "outcome.judge",
+            store: store_path.display().to_string(),
+            session_id: apply_report.session.id.clone(),
+            status: gate_result.status.as_str().to_owned(),
+            completed: gate_result.completed,
+            gate_result,
+            session: apply_report.session,
+        };
+        persist_engine(&store_path, &engine)?;
+        emit_outcome_judge_report(&report, options.common.json, writer)?;
+        if !report.completed {
+            return Err(CliError::reported(1));
+        }
+        return Ok(());
+    }
+    Err(CliError::invalid_cli(
+        "usage: mneme outcome <status|judge> ...",
+    ))
 }
 
 fn end_session_for_cli(
@@ -4948,6 +5001,82 @@ fn parse_outcome_status_args(raw_args: Vec<String>) -> Result<(String, CommonOpt
     ))
 }
 
+fn parse_outcome_judge_args(
+    raw_args: Vec<String>,
+) -> Result<(String, OutcomeJudgeOptions), CliError> {
+    let mut options = OutcomeJudgeOptions::default();
+    let mut positionals = Vec::new();
+    let mut idx = 0;
+    while idx < raw_args.len() {
+        if parse_common_option(&raw_args, &mut idx, &mut options.common)? {
+            idx += 1;
+            continue;
+        }
+        match raw_args[idx].as_str() {
+            "--judgment-report" => {
+                idx += 1;
+                options.judgment_report_path = Some(PathBuf::from(required_arg(
+                    &raw_args,
+                    idx,
+                    "--judgment-report",
+                )?));
+            }
+            "--task-id" => {
+                idx += 1;
+                options.task_id = Some(required_arg(&raw_args, idx, "--task-id")?);
+            }
+            "--reviewer" => {
+                idx += 1;
+                options.reviewer = Some(required_arg(&raw_args, idx, "--reviewer")?);
+            }
+            "--id" => {
+                idx += 1;
+                options.id = Some(required_arg(&raw_args, idx, "--id")?);
+            }
+            "--verdict" => {
+                idx += 1;
+                options.verdict = Some(parse_judgment_verdict(required_arg(
+                    &raw_args,
+                    idx,
+                    "--verdict",
+                )?)?);
+            }
+            "--pass" => options.verdict = Some(OutcomeJudgmentVerdict::Pass),
+            "--fail" => options.verdict = Some(OutcomeJudgmentVerdict::Fail),
+            "--evidence" => {
+                idx += 1;
+                options.evidence = Some(required_arg(&raw_args, idx, "--evidence")?);
+            }
+            value if value.starts_with('-') => {
+                return Err(CliError::invalid_cli(format!(
+                    "unknown outcome judge option: {value}"
+                )));
+            }
+            value => positionals.push(value.to_owned()),
+        }
+        idx += 1;
+    }
+    if positionals.len() != 1 {
+        return Err(CliError::invalid_cli(
+            "usage: mneme outcome judge <session-id> [--judgment-report <path> | --id <criterion-id> --verdict pass|fail] [--evidence <text>] [--reviewer <id>] [--task-id <id>] [--store <path>] [--json]",
+        ));
+    }
+    Ok((
+        require_nonempty(positionals.remove(0), "session id")?,
+        options,
+    ))
+}
+
+fn parse_judgment_verdict(value: String) -> Result<OutcomeJudgmentVerdict, CliError> {
+    match value.as_str() {
+        "pass" | "passed" | "accept" | "accepted" => Ok(OutcomeJudgmentVerdict::Pass),
+        "fail" | "failed" | "reject" | "rejected" => Ok(OutcomeJudgmentVerdict::Fail),
+        _ => Err(CliError::invalid_cli(format!(
+            "unknown judgment verdict: {value}\navailable verdicts: pass, fail"
+        ))),
+    }
+}
+
 fn parse_no_position_args(
     raw_args: Vec<String>,
     command: &'static str,
@@ -5196,6 +5325,39 @@ fn load_or_run_verifier_report(
         VerifierOptions::None => Vec::new(),
     };
     run_verifier_command(store_path, engine, session_id, &program, &args).map(Some)
+}
+
+fn load_or_build_judgment_report(
+    options: &OutcomeJudgeOptions,
+) -> Result<OutcomeJudgmentReport, CliError> {
+    if let Some(path) = &options.judgment_report_path {
+        if options.id.is_some() || options.verdict.is_some() || options.evidence.is_some() {
+            return Err(CliError::invalid_cli(
+                "--judgment-report cannot be combined with inline --id/--verdict/--evidence",
+            ));
+        }
+        let text = std::fs::read_to_string(path)
+            .map_err(|source| CliError::io("read judgment report", path, source))?;
+        return serde_json::from_str(&text)
+            .map_err(|source| CliError::json_file("parse", path, source));
+    }
+    let id = options
+        .id
+        .clone()
+        .ok_or_else(|| CliError::invalid_cli("outcome judge requires --id or --judgment-report"))?;
+    let verdict = options.verdict.ok_or_else(|| {
+        CliError::invalid_cli("outcome judge requires --verdict pass|fail, --pass, or --fail")
+    })?;
+    Ok(OutcomeJudgmentReport {
+        schema_version: "mneme.judgment.v1".to_owned(),
+        task_id: options.task_id.clone(),
+        reviewer: options.reviewer.clone(),
+        results: vec![OutcomeJudgmentCriterionResult {
+            id,
+            verdict,
+            evidence: options.evidence.clone(),
+        }],
+    })
 }
 
 fn run_verifier_command(
@@ -7211,6 +7373,22 @@ fn emit_outcome_status_report(
         writer,
         "mneme: outcome {} for {} ({})",
         report.status, report.session_id, report.store
+    )
+    .map_err(|source| CliError::io("write", Path::new("<stdout>"), source))
+}
+
+fn emit_outcome_judge_report(
+    report: &OutcomeJudgeCliReport,
+    json: bool,
+    writer: &mut impl Write,
+) -> Result<(), CliError> {
+    if json {
+        return write_json(writer, report);
+    }
+    writeln!(
+        writer,
+        "mneme: outcome judgment {} for {} (completed={}, {})",
+        report.status, report.session_id, report.completed, report.store
     )
     .map_err(|source| CliError::io("write", Path::new("<stdout>"), source))
 }

@@ -3,7 +3,7 @@
 This scorecard uses GitHub-native Markdown so the public evidence summary stays
 readable without generated images or renderer-specific SVG behavior.
 
-Measured for `v0.70.0` on 2026-05-30.
+Measured for `v0.71.0` on 2026-05-30.
 
 ## Summary
 
@@ -11,7 +11,7 @@ Measured for `v0.70.0` on 2026-05-30.
 | --- | --- | --- |
 | Ontology fixture regression | 14 committed ontology cases, including one paraphrase canary | committed fixture passes; not an open-domain ontology claim |
 | Hard dogfood | 100 normal records, 150 adversarial records, 30 agent handoff workflows with non-exact retrieval queries | `30/30` workflows passed |
-| Outcome gate | Acceptance contract, external verifier report, first-class `gate_result`, CLI status, and non-zero failed gate path | MVP1 smoke passed locally |
+| Outcome gate | Acceptance contract, external verifier report, external judgment verdict intake, first-class `gate_result`, CLI/MCP status, and non-zero failed gate path | MVP1/MVP2 smoke passed locally |
 | Public scenario suites | `core`, `runtime`, `agent`, `dogfood`, `model`, `team`, `mcp`, `mcp-agent-usability` | `52` public scenarios passed through quality gates |
 | Safety guardrails | scope leak and synthetic secret leak checks | `0` scope leaks, `0` synthetic secret leaks |
 | Product validation | P1-P6 scripted artifact adoption, privacy/cost, lifecycle, ranking-decision, migration, review-schema, dogfood-bundle, held-out-claim, and scale checks | local product loop passed; causal productivity, semantic search, open-domain extraction, and third-party value are not claimed |
@@ -31,7 +31,7 @@ Measured for `v0.70.0` on 2026-05-30.
 | Scope Leak | `[----------] 0` |
 | Secret Leak | `[----------] 0` |
 | Product Validation Loop | P1-P6 plus dogfood-bundle, held-out-claim, review-summary, and scale checks required by quality gate |
-| Outcome Gate | acceptance/verifier/gate_result smoke required by quality gate |
+| Outcome Gate | acceptance/verifier/judgment/gate_result smoke required by quality gate |
 | Seeded Fault Detection | `[##########] 5/5` |
 | V2 Team Readiness | `[##########] 10/10` |
 

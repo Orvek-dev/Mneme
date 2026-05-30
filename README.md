@@ -3,7 +3,7 @@
 </p>
 
 <p align="center">
-  <a href="https://github.com/Orvek-dev/Mneme/releases/tag/v0.70.0"><img alt="Version" src="https://img.shields.io/badge/version-0.70.0-2ea44f"></a>
+  <a href="https://github.com/Orvek-dev/Mneme/releases/tag/v0.71.0"><img alt="Version" src="https://img.shields.io/badge/version-0.71.0-2ea44f"></a>
   <a href="./LICENSE"><img alt="License" src="https://img.shields.io/badge/license-MIT-0969da"></a>
   <img alt="Rust" src="https://img.shields.io/badge/Rust-CLI-b7410e">
   <img alt="Local first" src="https://img.shields.io/badge/local--first-JSON%20stores-6f42c1">
@@ -136,7 +136,7 @@ the reduced public-safe summary.
 | Public eval surface | Core, runtime, agent, dogfood, model, team, MCP, and MCP agent-usability suites | `52` public scenarios |
 | V1 ontology fixture regression | 14 committed ontology cases, including one paraphrase canary | committed fixture passes; not an open-domain ontology claim |
 | V1 hard dogfood | 100 normal records, 150 adversarial records, 30 handoff workflows with non-exact retrieval queries | `30/30` workflows passed |
-| V1 outcome gate | Acceptance contract, external verifier, gate_result storage, CLI status, and non-zero failed gate path | MVP1 smoke passed locally |
+| V1 outcome gate | Acceptance contract, external verifier, judgment intake, gate_result storage, CLI/MCP status, and non-zero failed gate path | MVP1/MVP2 smoke passed locally |
 | Safety guardrails | Pattern-based scope leak and synthetic secret leak checks | `0` scope leaks, `0` synthetic secret leaks |
 | V2 team readiness | ACL, promotion, revoke, secret, sync, firewall, handoff, run, quality, checksum, ontology | `10/10` team scenarios passed |
 | MCP readiness | V1/V2 tools through the local stdio server | `5/5` MCP scenarios passed |

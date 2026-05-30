@@ -2,6 +2,26 @@
 
 This project follows the spirit of Keep a Changelog.
 
+## [0.71.0] - 2026-05-30
+
+### Added
+
+- Added MVP2 external judgment intake for V1 outcome gates:
+  `mneme.judgment.v1` reports can resolve `pending_judgment` criteria after
+  an external human/model reviewer supplies a pass/fail verdict.
+- Added `mneme outcome judge <session-id>` with both report-file and inline
+  verdict modes. The command stores the updated `gate_result` and exits
+  non-zero when the judged gate is still not completed.
+- Added `mneme_v1_outcome_judge` to the MCP server so MCP clients can apply an
+  explicit external verdict without treating Mneme as the judge.
+
+### Changed
+
+- Extended the outcome gate smoke to cover `pending_judgment -> passed` and
+  `pending_judgment -> failed` paths.
+- Updated public outcome gate documentation and evidence summaries to describe
+  the verifier/judgment boundary.
+
 ## [0.70.0] - 2026-05-30
 
 ### Added

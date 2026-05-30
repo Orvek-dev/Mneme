@@ -4,9 +4,11 @@ set -eu
 ROOT="$(git rev-parse --show-toplevel 2>/dev/null || pwd)"
 TMP_ROOT="${RUNNER_TEMP:-${TMPDIR:-/tmp}}"
 WORKSPACE="$(mktemp -d "${TMP_ROOT}/mneme-outcome-gate.XXXXXX")"
-MNEME_BIN="${MNEME_BIN:-$ROOT/target/debug/mneme}"
 
-if [ ! -x "$MNEME_BIN" ]; then
+if [ "${MNEME_BIN:-}" = "" ]; then
+  MNEME_BIN="$ROOT/target/debug/mneme"
+  (cd "$ROOT" && cargo build -q -p mneme-cli)
+elif [ ! -x "$MNEME_BIN" ]; then
   (cd "$ROOT" && cargo build -q -p mneme-cli)
 fi
 
@@ -97,5 +99,77 @@ if [ "$FAIL_EXIT" -eq 0 ]; then
 fi
 grep -q '"status": "failed"' "$END_FAIL"
 grep -q '"completed": false' "$END_FAIL"
+
+git add README.md
+git commit -q -m "out of scope readme"
+
+ACCEPTANCE_JUDGMENT_PASS="$WORKSPACE/.mneme-test/acceptance-judgment-pass.json"
+END_JUDGMENT_PASS="$WORKSPACE/.mneme-test/end-judgment-pass.json"
+JUDGE_PASS="$WORKSPACE/.mneme-test/judge-pass.json"
+cat > "$ACCEPTANCE_JUDGMENT_PASS" <<'JSON'
+{
+  "schema_version": "mneme.acceptance.v1",
+  "task_id": "judgment-pass-task",
+  "criteria": [
+    {
+      "id": "external-ux-review",
+      "kind": "judgment",
+      "judgment": {"rubric": "external reviewer accepts the task outcome"}
+    }
+  ]
+}
+JSON
+
+"$MNEME_BIN" begin "Need external review pass" --acceptance "$ACCEPTANCE_JUDGMENT_PASS" --store "$STORE" --json > /dev/null
+set +e
+"$MNEME_BIN" end session-003 --summary "Prepared reviewable outcome" --store "$STORE" --json > "$END_JUDGMENT_PASS"
+PENDING_EXIT="$?"
+set -e
+if [ "$PENDING_EXIT" -eq 0 ]; then
+  echo "outcome-gate-smoke: expected pending judgment to exit non-zero" >&2
+  exit 1
+fi
+grep -q '"status": "pending_judgment"' "$END_JUDGMENT_PASS"
+"$MNEME_BIN" outcome judge session-003 --id external-ux-review --verdict pass --evidence "external reviewer accepted outcome" --reviewer smoke-reviewer --task-id judgment-pass-task --store "$STORE" --json > "$JUDGE_PASS"
+grep -q '"command": "outcome.judge"' "$JUDGE_PASS"
+grep -q '"status": "passed"' "$JUDGE_PASS"
+grep -q '"completed": true' "$JUDGE_PASS"
+
+ACCEPTANCE_JUDGMENT_FAIL="$WORKSPACE/.mneme-test/acceptance-judgment-fail.json"
+END_JUDGMENT_FAIL="$WORKSPACE/.mneme-test/end-judgment-fail.json"
+JUDGE_FAIL="$WORKSPACE/.mneme-test/judge-fail.json"
+cat > "$ACCEPTANCE_JUDGMENT_FAIL" <<'JSON'
+{
+  "schema_version": "mneme.acceptance.v1",
+  "task_id": "judgment-fail-task",
+  "criteria": [
+    {
+      "id": "external-doc-review",
+      "kind": "judgment",
+      "judgment": {"rubric": "external reviewer accepts documentation clarity"}
+    }
+  ]
+}
+JSON
+
+"$MNEME_BIN" begin "Need external review fail" --acceptance "$ACCEPTANCE_JUDGMENT_FAIL" --store "$STORE" --json > /dev/null
+set +e
+"$MNEME_BIN" end session-004 --summary "Prepared unclear docs" --store "$STORE" --json > "$END_JUDGMENT_FAIL"
+PENDING_FAIL_EXIT="$?"
+set -e
+if [ "$PENDING_FAIL_EXIT" -eq 0 ]; then
+  echo "outcome-gate-smoke: expected pending judgment fail fixture to exit non-zero" >&2
+  exit 1
+fi
+set +e
+"$MNEME_BIN" outcome judge session-004 --id external-doc-review --verdict fail --evidence "reviewer rejected docs clarity" --reviewer smoke-reviewer --task-id judgment-fail-task --store "$STORE" --json > "$JUDGE_FAIL"
+JUDGE_FAIL_EXIT="$?"
+set -e
+if [ "$JUDGE_FAIL_EXIT" -eq 0 ]; then
+  echo "outcome-gate-smoke: expected failing judgment to exit non-zero" >&2
+  exit 1
+fi
+grep -q '"status": "failed"' "$JUDGE_FAIL"
+grep -q '"completed": false' "$JUDGE_FAIL"
 
 echo "outcome-gate-smoke: ok"
