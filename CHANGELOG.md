@@ -2,6 +2,29 @@
 
 This project follows the spirit of Keep a Changelog.
 
+## [0.75.0] - 2026-05-30
+
+### Added
+
+- Added `mneme outcome next`, a read-only outcome-loop report that turns the
+  latest failed or pending `gate_result` into deterministic retry instructions,
+  failed/pending criterion lists, public-safe evidence, `last_gate_failure_id`,
+  and `retry_count`/`max_attempts` loop guards.
+- Added `loop_advice` to failed `mneme hook end` output so agent wrappers can
+  re-enter the same task from the stored gate evidence instead of treating a
+  failed session as completed.
+- Added `scripts/mneme-agent-hook.sh stop` for Claude Code-style Stop hooks.
+  It reads Stop-hook JSON from stdin, emits `decision:block` when Mneme has an
+  incomplete gated session, and allows stop when `stop_hook_active=true` or the
+  retry cap is exhausted.
+
+### Changed
+
+- Extended the wrapper runtime profile with verifier policy/manifest and
+  Stop-hook loop settings.
+- Extended outcome and wrapper smokes to cover `mneme outcome next`,
+  Stop-hook block output, and the `stop_hook_active` anti-recursion path.
+
 ## [0.74.0] - 2026-05-30
 
 ### Added

@@ -19,7 +19,7 @@ use mneme_core::{
     AcceptanceCriterion, AcceptanceCriterionKind, AcceptanceValidationReport, BuildStage,
     ClaimRecord, ClaimStatus, CommandExtractor, CompactionReport, ContextPack, ContextQuery,
     EngineSnapshot, EventInput, ExtractorError, JsonFileStore, JsonTeamFileStore, MnemeConfig,
-    MnemeEngine, MnemeExtractor, MnemeState, MnemeStore, OutcomeGateResult,
+    MnemeEngine, MnemeExtractor, MnemeState, MnemeStore, OutcomeGateEvidence, OutcomeGateResult,
     OutcomeJudgmentCriterionResult, OutcomeJudgmentReport, OutcomeJudgmentVerdict,
     RuleBasedExtractor, SessionBeginInput, SessionBeginReport, SessionEndInput, SessionEndReport,
     SessionError, SessionMemoryInputMode, SessionRecord, StateValidationReport, StoreError,
@@ -42,6 +42,7 @@ const AGENT_HOOK_SCHEMA_VERSION: &str = "mneme.agent_hook.v1";
 const VERIFIER_MANIFEST_SCHEMA_VERSION: &str = "mneme.verifier_manifest.v1";
 const STORE_MUTATION_RETRY_ATTEMPTS: usize = 80;
 const STORE_MUTATION_RETRY_BASE_MS: u64 = 5;
+const DEFAULT_LOOP_MAX_ATTEMPTS: usize = 3;
 
 /// Error type returned by the Mneme local CLI.
 #[derive(Debug)]
@@ -397,6 +398,7 @@ Examples:
   mneme outcome template --kind rust --include-judgment --output acceptance.json
   mneme outcome validate acceptance.json --json
   mneme outcome status session-001 --store /tmp/mneme.json --json
+  mneme outcome next --latest --store /tmp/mneme.json --json
   mneme outcome judge session-001 --id ux-review --verdict pass --reviewer lee --store /tmp/mneme.json --json
   mneme mcp config --client all --json
   mneme team remember "Atlas deploys require rollback notes" --actor alice --scope team --store /tmp/mneme-team.json
@@ -539,6 +541,7 @@ const MNEME_OUTCOME_HELP: &str = r#"Usage:
   mneme outcome template [--kind rust|node|docs|generic] [--task-id <id>] [--include-judgment] [--output <path>] [--json]
   mneme outcome validate <acceptance.json> [--json]
   mneme outcome status <session-id> [--store <path>] [--json]
+  mneme outcome next [<session-id>|--latest] [--attempt <n>] [--max-attempts <n>] [--stop-hook-active true|false] [--store <path>] [--json]
   mneme outcome judge <session-id> [--judgment-report <path> | --id <criterion-id> --verdict pass|fail] [--evidence <text>] [--reviewer <id>] [--task-id <id>] [--store <path>] [--json]
 
 Author, validate, inspect, or resolve first-class outcome gates.
@@ -546,13 +549,15 @@ Author, validate, inspect, or resolve first-class outcome gates.
 `validate` checks the contract shape before a session starts. `status` is
 read-only. `judge` applies an external human/model verdict to a pending
 judgment criterion. Mneme validates and stores the verdict, but does not perform
-the subjective judgment itself. If the updated gate is not completed, `judge`
-writes output and exits non-zero.
+the subjective judgment itself. `next` turns a failed or pending gate into
+deterministic retry instructions for Stop-hook or wrapper loops. If the updated
+gate is not completed, `judge` writes output and exits non-zero.
 
 Example:
   mneme outcome template --kind rust --include-judgment --output acceptance.json
   mneme outcome validate acceptance.json --json
   mneme outcome status session-001 --store /tmp/mneme.json --json
+  mneme outcome next --latest --attempt 1 --max-attempts 3 --store /tmp/mneme.json --json
   mneme outcome judge session-001 --id ux-review --verdict pass --evidence "Reviewer accepted the UX" --reviewer lee --store /tmp/mneme.json --json"#;
 
 const MNEME_HOOK_HELP: &str = r#"Usage:
@@ -1064,6 +1069,29 @@ struct OutcomeJudgeOptions {
 }
 
 #[derive(Debug, Clone)]
+struct OutcomeLoopOptions {
+    common: CommonOptions,
+    session_id: Option<String>,
+    latest: bool,
+    attempt: usize,
+    max_attempts: usize,
+    stop_hook_active: bool,
+}
+
+impl Default for OutcomeLoopOptions {
+    fn default() -> Self {
+        Self {
+            common: CommonOptions::default(),
+            session_id: None,
+            latest: false,
+            attempt: 0,
+            max_attempts: DEFAULT_LOOP_MAX_ATTEMPTS,
+            stop_hook_active: false,
+        }
+    }
+}
+
+#[derive(Debug, Clone)]
 struct OutcomeTemplateOptions {
     json: bool,
     kind: OutcomeTemplateKind,
@@ -1190,6 +1218,11 @@ struct AgentHookProfileValues {
     mneme_max_items: Option<String>,
     mneme_extractor_command: Option<String>,
     mneme_verifier_command: Option<String>,
+    mneme_verifier_policy: Option<String>,
+    mneme_verifier_manifest: Option<String>,
+    mneme_loop_max_attempts: Option<String>,
+    mneme_loop_state: Option<String>,
+    mneme_loop_session_id: Option<String>,
 }
 
 #[derive(Debug, Serialize)]
@@ -1481,6 +1514,7 @@ struct AgentHookEndReport {
     remembered_claim_count: usize,
     remembered_event_ids: Vec<String>,
     remembered_claim_ids: Vec<String>,
+    loop_advice: Option<OutcomeLoopReport>,
     report: SessionEndReport,
 }
 
@@ -1503,6 +1537,29 @@ struct OutcomeJudgeCliReport {
     completed: bool,
     gate_result: OutcomeGateResult,
     session: SessionRecord,
+}
+
+#[derive(Debug, Serialize)]
+struct OutcomeLoopReport {
+    command: &'static str,
+    store: String,
+    session_id: Option<String>,
+    found: bool,
+    stop_hook_active: bool,
+    retry_count: usize,
+    max_attempts: usize,
+    exhausted: bool,
+    should_continue: bool,
+    block_stop: bool,
+    reason: String,
+    continuation_prompt: Option<String>,
+    last_gate_failure_id: Option<String>,
+    gate_status: Option<String>,
+    failed_criterion_ids: Vec<String>,
+    pending_criterion_ids: Vec<String>,
+    contract_violations: Vec<String>,
+    evidence: Vec<OutcomeGateEvidence>,
+    gate_result: Option<OutcomeGateResult>,
 }
 
 #[derive(Debug, Serialize)]
@@ -2385,6 +2442,15 @@ fn run_outcome(mut raw_args: Vec<String>, writer: &mut impl Write) -> Result<(),
         };
         return emit_outcome_status_report(&report, options.json, writer);
     }
+    if raw_args.first().is_some_and(|arg| arg == "next") {
+        raw_args.remove(0);
+        let options = parse_outcome_loop_args(raw_args)?;
+        let store_path = resolve_store_path(&options.common)?;
+        let engine = load_engine(&store_path)?;
+        let snapshot = engine.snapshot();
+        let report = build_outcome_loop_report(&store_path, &snapshot.sessions, &options)?;
+        return emit_outcome_loop_report(&report, options.common.json, writer);
+    }
     if raw_args.first().is_some_and(|arg| arg == "judge") {
         raw_args.remove(0);
         let (session_id, options) = parse_outcome_judge_args(raw_args)?;
@@ -2412,8 +2478,194 @@ fn run_outcome(mut raw_args: Vec<String>, writer: &mut impl Write) -> Result<(),
         return Ok(());
     }
     Err(CliError::invalid_cli(
-        "usage: mneme outcome <template|validate|status|judge> ...",
+        "usage: mneme outcome <template|validate|status|next|judge> ...",
     ))
+}
+
+fn build_outcome_loop_report(
+    store_path: &Path,
+    sessions: &[SessionRecord],
+    options: &OutcomeLoopOptions,
+) -> Result<OutcomeLoopReport, CliError> {
+    let session = match &options.session_id {
+        Some(session_id) => sessions.iter().find(|session| session.id == *session_id),
+        None => sessions
+            .iter()
+            .rev()
+            .find(|session| gate_blocks_completion(&session.gate_result)),
+    };
+    let Some(session) = session else {
+        return Ok(OutcomeLoopReport {
+            command: "outcome.next",
+            store: store_path.display().to_string(),
+            session_id: options.session_id.clone(),
+            found: false,
+            stop_hook_active: options.stop_hook_active,
+            retry_count: options.attempt,
+            max_attempts: options.max_attempts,
+            exhausted: false,
+            should_continue: false,
+            block_stop: false,
+            reason: "no incomplete outcome gate found".to_owned(),
+            continuation_prompt: None,
+            last_gate_failure_id: None,
+            gate_status: None,
+            failed_criterion_ids: Vec::new(),
+            pending_criterion_ids: Vec::new(),
+            contract_violations: Vec::new(),
+            evidence: Vec::new(),
+            gate_result: None,
+        });
+    };
+    let gate = session.gate_result.as_ref();
+    let Some(gate) = gate else {
+        return Ok(outcome_loop_terminal_report(
+            store_path,
+            session,
+            options,
+            "session has no outcome gate",
+        ));
+    };
+    if gate.completed {
+        return Ok(outcome_loop_terminal_report(
+            store_path,
+            session,
+            options,
+            "outcome gate already passed",
+        ));
+    }
+    let exhausted = options.attempt > options.max_attempts;
+    let should_continue = !options.stop_hook_active && !exhausted;
+    let failure_id = outcome_gate_failure_id(session, gate);
+    let reason = if options.stop_hook_active {
+        "stop hook is already active; allowing stop to avoid a recursive loop".to_owned()
+    } else if exhausted {
+        format!(
+            "outcome gate still {} after {} attempt(s); max_attempts={} reached",
+            gate.status.as_str(),
+            options.attempt,
+            options.max_attempts
+        )
+    } else {
+        format!(
+            "outcome gate is {}; continue from failed or pending criteria",
+            gate.status.as_str()
+        )
+    };
+    let continuation_prompt = should_continue.then(|| outcome_loop_prompt(session, gate));
+    Ok(OutcomeLoopReport {
+        command: "outcome.next",
+        store: store_path.display().to_string(),
+        session_id: Some(session.id.clone()),
+        found: true,
+        stop_hook_active: options.stop_hook_active,
+        retry_count: options.attempt,
+        max_attempts: options.max_attempts,
+        exhausted,
+        should_continue,
+        block_stop: should_continue,
+        reason,
+        continuation_prompt,
+        last_gate_failure_id: Some(failure_id),
+        gate_status: Some(gate.status.as_str().to_owned()),
+        failed_criterion_ids: gate.failed_criterion_ids.clone(),
+        pending_criterion_ids: gate.pending_criterion_ids.clone(),
+        contract_violations: gate.contract_violations.clone(),
+        evidence: gate.evidence.clone(),
+        gate_result: Some(gate.clone()),
+    })
+}
+
+fn outcome_loop_terminal_report(
+    store_path: &Path,
+    session: &SessionRecord,
+    options: &OutcomeLoopOptions,
+    reason: &str,
+) -> OutcomeLoopReport {
+    OutcomeLoopReport {
+        command: "outcome.next",
+        store: store_path.display().to_string(),
+        session_id: Some(session.id.clone()),
+        found: true,
+        stop_hook_active: options.stop_hook_active,
+        retry_count: options.attempt,
+        max_attempts: options.max_attempts,
+        exhausted: false,
+        should_continue: false,
+        block_stop: false,
+        reason: reason.to_owned(),
+        continuation_prompt: None,
+        last_gate_failure_id: None,
+        gate_status: session
+            .gate_result
+            .as_ref()
+            .map(|gate| gate.status.as_str().to_owned()),
+        failed_criterion_ids: Vec::new(),
+        pending_criterion_ids: Vec::new(),
+        contract_violations: Vec::new(),
+        evidence: Vec::new(),
+        gate_result: session.gate_result.clone(),
+    }
+}
+
+fn outcome_gate_failure_id(session: &SessionRecord, gate: &OutcomeGateResult) -> String {
+    let failed = gate.failed_criterion_ids.join(",");
+    let pending = gate.pending_criterion_ids.join(",");
+    let violations = gate.contract_violations.join("|");
+    format!(
+        "{}:{}:failed={}:pending={}:violations={}",
+        session.id,
+        gate.status.as_str(),
+        failed,
+        pending,
+        violations
+    )
+}
+
+fn outcome_loop_prompt(session: &SessionRecord, gate: &OutcomeGateResult) -> String {
+    let mut lines = Vec::new();
+    lines.push(format!(
+        "Mneme outcome gate blocked completion for session {}.",
+        session.id
+    ));
+    lines.push(format!("Task: {}", session.task));
+    lines.push(format!("Gate status: {}", gate.status.as_str()));
+    if !gate.failed_criterion_ids.is_empty() {
+        lines.push(format!(
+            "Failed criteria: {}",
+            gate.failed_criterion_ids.join(", ")
+        ));
+    }
+    if !gate.pending_criterion_ids.is_empty() {
+        lines.push(format!(
+            "Pending judgment criteria: {}",
+            gate.pending_criterion_ids.join(", ")
+        ));
+    }
+    if !gate.contract_violations.is_empty() {
+        lines.push(format!(
+            "Contract issues: {}",
+            gate.contract_violations.join("; ")
+        ));
+    }
+    let evidence = gate
+        .evidence
+        .iter()
+        .filter_map(|item| {
+            item.evidence
+                .as_ref()
+                .map(|text| format!("{}: {}", item.id, text))
+        })
+        .take(5)
+        .collect::<Vec<_>>();
+    if !evidence.is_empty() {
+        lines.push(format!("Verifier evidence: {}", evidence.join(" | ")));
+    }
+    lines.push(
+        "Continue the task, fix only the failed or pending criteria, then run the verifier and finish the same Mneme session again."
+            .to_owned(),
+    );
+    lines.join("\n")
 }
 
 fn end_session_for_cli(
@@ -2561,6 +2813,23 @@ fn run_agent_hook_end(raw_args: Vec<String>, writer: &mut impl Write) -> Result<
     let gate_status = gate_result
         .as_ref()
         .map(|gate| gate.status.as_str().to_owned());
+    let loop_advice = if gate_blocks_completion(&gate_result) {
+        let snapshot = engine.snapshot();
+        Some(build_outcome_loop_report(
+            &store_path,
+            &snapshot.sessions,
+            &OutcomeLoopOptions {
+                common: CommonOptions::default(),
+                session_id: Some(report.session.id.clone()),
+                latest: false,
+                attempt: 0,
+                max_attempts: DEFAULT_LOOP_MAX_ATTEMPTS,
+                stop_hook_active: false,
+            },
+        )?)
+    } else {
+        None
+    };
     let hook_report = AgentHookEndReport {
         schema_version: AGENT_HOOK_SCHEMA_VERSION,
         ok: !gate_blocks_completion(&gate_result),
@@ -2576,6 +2845,7 @@ fn run_agent_hook_end(raw_args: Vec<String>, writer: &mut impl Write) -> Result<
         remembered_claim_count: report.remembered_claim_ids.len(),
         remembered_event_ids: report.remembered_event_ids.clone(),
         remembered_claim_ids: report.remembered_claim_ids.clone(),
+        loop_advice,
         report,
     };
     write_json(writer, &hook_report)?;
@@ -4984,6 +5254,31 @@ fn parse_max_items(value: String) -> Result<usize, CliError> {
     })
 }
 
+fn parse_nonnegative_usize(value: String) -> Result<usize, CliError> {
+    value
+        .parse::<usize>()
+        .map_err(|source| CliError::invalid_cli(format!("invalid integer value {value}: {source}")))
+}
+
+fn parse_positive_usize(value: String) -> Result<usize, CliError> {
+    let parsed = parse_nonnegative_usize(value)?;
+    if parsed == 0 {
+        Err(CliError::invalid_cli("value must be greater than zero"))
+    } else {
+        Ok(parsed)
+    }
+}
+
+fn parse_bool_arg(value: String) -> Result<bool, CliError> {
+    match value.as_str() {
+        "true" | "1" | "yes" | "on" => Ok(true),
+        "false" | "0" | "no" | "off" => Ok(false),
+        _ => Err(CliError::invalid_cli(format!(
+            "invalid boolean value {value}; expected true or false"
+        ))),
+    }
+}
+
 fn parse_claim_status(value: String) -> Result<ClaimStatus, CliError> {
     match value.as_str() {
         "active" => Ok(ClaimStatus::Active),
@@ -5140,6 +5435,72 @@ fn parse_outcome_status_args(raw_args: Vec<String>) -> Result<(String, CommonOpt
         require_nonempty(positionals.remove(0), "session id")?,
         options,
     ))
+}
+
+fn parse_outcome_loop_args(raw_args: Vec<String>) -> Result<OutcomeLoopOptions, CliError> {
+    let mut options = OutcomeLoopOptions::default();
+    let mut positionals = Vec::new();
+    let mut idx = 0;
+    while idx < raw_args.len() {
+        if parse_common_option(&raw_args, &mut idx, &mut options.common)? {
+            idx += 1;
+            continue;
+        }
+        match raw_args[idx].as_str() {
+            "--latest" => options.latest = true,
+            "--session-id" => {
+                idx += 1;
+                options.session_id = Some(require_nonempty(
+                    required_arg(&raw_args, idx, "--session-id")?,
+                    "session id",
+                )?);
+            }
+            "--attempt" => {
+                idx += 1;
+                options.attempt =
+                    parse_nonnegative_usize(required_arg(&raw_args, idx, "--attempt")?)?;
+            }
+            "--max-attempts" => {
+                idx += 1;
+                options.max_attempts =
+                    parse_positive_usize(required_arg(&raw_args, idx, "--max-attempts")?)?;
+            }
+            "--stop-hook-active" => {
+                idx += 1;
+                options.stop_hook_active =
+                    parse_bool_arg(required_arg(&raw_args, idx, "--stop-hook-active")?)?;
+            }
+            value if value.starts_with('-') => {
+                return Err(CliError::invalid_cli(format!(
+                    "unknown outcome next option: {value}"
+                )));
+            }
+            value => positionals.push(value.to_owned()),
+        }
+        idx += 1;
+    }
+    if positionals.len() > 1 {
+        return Err(CliError::invalid_cli(
+            "usage: mneme outcome next [<session-id>|--latest] [--attempt <n>] [--max-attempts <n>] [--stop-hook-active true|false] [--store <path>] [--json]",
+        ));
+    }
+    if let Some(session_id) = positionals.pop() {
+        if options.session_id.is_some() {
+            return Err(CliError::invalid_cli(
+                "mneme outcome next accepts only one session id",
+            ));
+        }
+        options.session_id = Some(require_nonempty(session_id, "session id")?);
+    }
+    if options.session_id.is_some() && options.latest {
+        return Err(CliError::invalid_cli(
+            "mneme outcome next accepts either <session-id> or --latest, not both",
+        ));
+    }
+    if options.session_id.is_none() {
+        options.latest = true;
+    }
+    Ok(options)
 }
 
 fn parse_outcome_validate_args(
@@ -6242,6 +6603,36 @@ fn inspect_agent_hook_profile(
                 key,
                 &mut inspection.issues,
             ),
+            "MNEME_VERIFIER_POLICY" => assign_profile_value(
+                &mut inspection.values.mneme_verifier_policy,
+                value,
+                key,
+                &mut inspection.issues,
+            ),
+            "MNEME_VERIFIER_MANIFEST" => assign_profile_value(
+                &mut inspection.values.mneme_verifier_manifest,
+                value,
+                key,
+                &mut inspection.issues,
+            ),
+            "MNEME_LOOP_MAX_ATTEMPTS" => assign_profile_value(
+                &mut inspection.values.mneme_loop_max_attempts,
+                value,
+                key,
+                &mut inspection.issues,
+            ),
+            "MNEME_LOOP_STATE" => assign_profile_value(
+                &mut inspection.values.mneme_loop_state,
+                value,
+                key,
+                &mut inspection.issues,
+            ),
+            "MNEME_LOOP_SESSION_ID" => assign_profile_value(
+                &mut inspection.values.mneme_loop_session_id,
+                value,
+                key,
+                &mut inspection.issues,
+            ),
             unknown => inspection
                 .issues
                 .push(format!("unknown profile key: {unknown}")),
@@ -6350,6 +6741,33 @@ fn validate_profile_values(
                     command_path.display()
                 ));
             }
+        }
+    }
+    if let Some(policy) = &values.mneme_verifier_policy {
+        if parse_verifier_trust_mode(policy.clone()).is_err() {
+            inspection
+                .issues
+                .push("MNEME_VERIFIER_POLICY must be off, warn, or strict".to_owned());
+        }
+    }
+    if let Some(manifest) = &values.mneme_verifier_manifest {
+        let manifest_path = profile_value_path(manifest, workspace);
+        if !manifest_path.is_file() {
+            inspection.issues.push(format!(
+                "MNEME_VERIFIER_MANIFEST is not a file: {}",
+                manifest_path.display()
+            ));
+        }
+    }
+    if let Some(max_attempts) = &values.mneme_loop_max_attempts {
+        match max_attempts.parse::<usize>() {
+            Ok(0) => inspection
+                .issues
+                .push("MNEME_LOOP_MAX_ATTEMPTS must be greater than zero".to_owned()),
+            Ok(_) => {}
+            Err(source) => inspection.issues.push(format!(
+                "MNEME_LOOP_MAX_ATTEMPTS is not a positive integer: {source}"
+            )),
         }
     }
 }
@@ -6637,6 +7055,12 @@ fn render_agent_hook_profile(
     }
     profile.push_str("# Optional session-end outcome verifier for gated sessions.\n");
     profile.push_str("# MNEME_VERIFIER_COMMAND=scripts/mneme-outcome-verifier.py\n");
+    profile.push_str("# Optional verifier trust policy and manifest.\n");
+    profile.push_str("# MNEME_VERIFIER_POLICY=warn\n");
+    profile.push_str("# MNEME_VERIFIER_MANIFEST=.mneme/verifiers.json\n");
+    profile.push_str("# Optional Stop-hook loop guard for failed outcome gates.\n");
+    profile.push_str("# MNEME_LOOP_MAX_ATTEMPTS=3\n");
+    profile.push_str("# MNEME_LOOP_STATE=.mneme/mneme-loop-state.json\n");
     Ok(profile)
 }
 
@@ -7956,6 +8380,31 @@ fn emit_outcome_status_report(
         report.status, report.session_id, report.store
     )
     .map_err(|source| CliError::io("write", Path::new("<stdout>"), source))
+}
+
+fn emit_outcome_loop_report(
+    report: &OutcomeLoopReport,
+    json: bool,
+    writer: &mut impl Write,
+) -> Result<(), CliError> {
+    if json {
+        return write_json(writer, report);
+    }
+    writeln!(
+        writer,
+        "mneme: outcome loop {} (session={}, continue={}, attempt={}/{})",
+        report.reason,
+        report.session_id.as_deref().unwrap_or("<none>"),
+        report.should_continue,
+        report.retry_count,
+        report.max_attempts
+    )
+    .map_err(|source| CliError::io("write", Path::new("<stdout>"), source))?;
+    if let Some(prompt) = &report.continuation_prompt {
+        writeln!(writer, "{prompt}")
+            .map_err(|source| CliError::io("write", Path::new("<stdout>"), source))?;
+    }
+    Ok(())
 }
 
 fn emit_outcome_validate_report(
@@ -10417,6 +10866,137 @@ mod tests {
 
         let _ = std::fs::remove_file(&path);
         let _ = std::fs::remove_file(format!("{}.bak", path.display()));
+        Ok(())
+    }
+
+    #[test]
+    fn outcome_next_and_hook_end_emit_loop_advice() -> Result<(), Box<dyn std::error::Error>> {
+        let path = temp_store_path("outcome-loop-advice");
+        let acceptance_path = temp_store_path("outcome-loop-advice-acceptance");
+        let verifier_path = temp_store_path("outcome-loop-advice-verifier");
+        let _ = std::fs::remove_file(&path);
+        let _ = std::fs::remove_file(format!("{}.bak", path.display()));
+        let _ = std::fs::remove_file(&acceptance_path);
+        let _ = std::fs::remove_file(&verifier_path);
+
+        std::fs::write(
+            &acceptance_path,
+            r#"{
+  "schema_version": "mneme.acceptance.v1",
+  "task_id": "loop-advice-task",
+  "criteria": [
+    {
+      "id": "unit-test-failed-criterion",
+      "kind": "command",
+      "command": {"argv": ["sh", "-c", "exit 0"], "expect_exit": 0}
+    }
+  ]
+}
+"#,
+        )?;
+        std::fs::write(
+            &verifier_path,
+            r#"{
+  "schema_version": "mneme.verifier.v1",
+  "task_id": "loop-advice-task",
+  "verifier": "unit-test",
+  "results": [
+    {
+      "id": "unit-test-failed-criterion",
+      "status": "fail",
+      "evidence": "expected file was not updated"
+    }
+  ]
+}
+"#,
+        )?;
+
+        run_cli_with_writer(
+            vec![
+                "mneme".to_owned(),
+                "hook".to_owned(),
+                "begin".to_owned(),
+                "Implement loop advice".to_owned(),
+                "--acceptance".to_owned(),
+                acceptance_path.display().to_string(),
+                "--store".to_owned(),
+                path.display().to_string(),
+            ],
+            &mut Vec::new(),
+        )?;
+
+        let mut end_output = Vec::new();
+        let end_result = run_cli_with_writer(
+            vec![
+                "mneme".to_owned(),
+                "hook".to_owned(),
+                "end".to_owned(),
+                "session-001".to_owned(),
+                "--summary".to_owned(),
+                "First pass failed".to_owned(),
+                "--verifier-report".to_owned(),
+                verifier_path.display().to_string(),
+                "--store".to_owned(),
+                path.display().to_string(),
+            ],
+            &mut end_output,
+        );
+        assert!(end_result.is_err());
+        let end_text = String::from_utf8(end_output)?;
+        assert!(end_text.contains("\"ok\": false"));
+        assert!(end_text.contains("\"loop_advice\""));
+        assert!(end_text.contains("\"block_stop\": true"));
+        assert!(end_text.contains("unit-test-failed-criterion"));
+
+        let mut next_output = Vec::new();
+        run_cli_with_writer(
+            vec![
+                "mneme".to_owned(),
+                "outcome".to_owned(),
+                "next".to_owned(),
+                "--latest".to_owned(),
+                "--attempt".to_owned(),
+                "1".to_owned(),
+                "--max-attempts".to_owned(),
+                "3".to_owned(),
+                "--store".to_owned(),
+                path.display().to_string(),
+                "--json".to_owned(),
+            ],
+            &mut next_output,
+        )?;
+        let next_text = String::from_utf8(next_output)?;
+        assert!(next_text.contains("\"command\": \"outcome.next\""));
+        assert!(next_text.contains("\"block_stop\": true"));
+        assert!(next_text.contains("\"retry_count\": 1"));
+
+        let mut active_output = Vec::new();
+        run_cli_with_writer(
+            vec![
+                "mneme".to_owned(),
+                "outcome".to_owned(),
+                "next".to_owned(),
+                "session-001".to_owned(),
+                "--attempt".to_owned(),
+                "1".to_owned(),
+                "--max-attempts".to_owned(),
+                "3".to_owned(),
+                "--stop-hook-active".to_owned(),
+                "true".to_owned(),
+                "--store".to_owned(),
+                path.display().to_string(),
+                "--json".to_owned(),
+            ],
+            &mut active_output,
+        )?;
+        let active_text = String::from_utf8(active_output)?;
+        assert!(active_text.contains("\"block_stop\": false"));
+        assert!(active_text.contains("already active"));
+
+        let _ = std::fs::remove_file(&path);
+        let _ = std::fs::remove_file(format!("{}.bak", path.display()));
+        let _ = std::fs::remove_file(&acceptance_path);
+        let _ = std::fs::remove_file(&verifier_path);
         Ok(())
     }
 

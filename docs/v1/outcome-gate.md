@@ -157,6 +157,58 @@ non-zero after writing JSON. The failed session is still stored, including
 public-safe evidence, so a later agent can continue from the failed criterion
 instead of receiving a fake completed handoff.
 
+## Outcome Loop
+
+`mneme outcome next` converts the latest failed or pending gate into a
+deterministic retry instruction. It does not call an LLM, mutate the store, or
+decide whether the work is good. It only reads the stored `gate_result` and
+returns the failed criteria, pending judgment criteria, public-safe evidence,
+and a continuation prompt.
+
+```sh
+mneme outcome next --latest \
+  --attempt 1 \
+  --max-attempts 3 \
+  --store .mneme/mneme-v1.json \
+  --json
+```
+
+The report includes:
+
+- `block_stop`: whether a Stop-hook wrapper should block completion;
+- `should_continue`: whether the agent should continue the same task;
+- `last_gate_failure_id`: stable id for retry-loop state;
+- `retry_count` and `max_attempts`: anti-loop guard values;
+- `continuation_prompt`: the public-safe instruction to feed back to the agent.
+
+If `--stop-hook-active true` is passed, `block_stop` is always false. This keeps
+Claude Code Stop hooks from recursively blocking their own retry attempt.
+
+The repository wrapper exposes the same behavior for clients that support Stop
+hooks:
+
+```sh
+printf '{"hook_event_name":"Stop","stop_hook_active":false}' |
+  MNEME_STORE=.mneme/mneme-v1.json \
+  scripts/mneme-agent-hook.sh stop
+```
+
+When a gate is incomplete, the wrapper emits a Claude Code-compatible JSON
+decision:
+
+```json
+{
+  "decision": "block",
+  "reason": "Mneme outcome gate blocked completion..."
+}
+```
+
+Use `MNEME_LOOP_MAX_ATTEMPTS` or `--max-attempts` to cap repeated blocks for the
+same `last_gate_failure_id`. The default is `3`. Use `MNEME_LOOP_STATE` or
+`--state` to choose the local ignored state file. When a client does not support
+Stop hooks reliably, keep using `scripts/mneme-agent-hook.sh end`; failed gates
+still exit non-zero and include `loop_advice` in the hook JSON envelope.
+
 ## MCP Agent Flow
 
 MCP agents should use the high-level workflow tools:
@@ -252,12 +304,16 @@ Run the dedicated outcome gate smoke:
 ```sh
 cargo build -p mneme-cli
 scripts/outcome-gate-smoke.sh
+scripts/mneme-agent-hook.sh doctor --check-stop-hook
 ```
 
 The smoke creates an isolated git repo, checks template generation and
 validation, rejects a malformed acceptance contract before begin, checks a
 passing gated session with a strict pinned verifier manifest, checks
 `mneme outcome status`, verifies that an out-of-scope diff produces a non-zero
-failed gate, and checks both passing and failing external judgment verdicts. The
-MCP client smoke additionally checks that a failed gated task returns
-`handoff_allowed=false` before another agent is allowed to continue.
+failed gate, verifies `mneme outcome next` loop advice, and checks both passing
+and failing external judgment verdicts. The Stop-hook smoke simulates Claude
+Code Stop JSON locally and verifies both block output and the `stop_hook_active`
+anti-recursion path. The MCP client smoke additionally checks that a failed
+gated task returns `handoff_allowed=false` before another agent is allowed to
+continue.

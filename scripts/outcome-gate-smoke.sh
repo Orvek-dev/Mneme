@@ -146,6 +146,7 @@ git commit -q -m "outcome marker"
 
 ACCEPTANCE_FAIL="$WORKSPACE/.mneme-test/acceptance-fail.json"
 END_FAIL="$WORKSPACE/.mneme-test/end-fail.json"
+NEXT_FAIL="$WORKSPACE/.mneme-test/next-fail.json"
 cat > "$ACCEPTANCE_FAIL" <<'JSON'
 {
   "schema_version": "mneme.acceptance.v1",
@@ -172,6 +173,10 @@ if [ "$FAIL_EXIT" -eq 0 ]; then
 fi
 grep -q '"status": "failed"' "$END_FAIL"
 grep -q '"completed": false' "$END_FAIL"
+"$MNEME_BIN" outcome next --latest --attempt 1 --max-attempts 3 --store "$STORE" --json > "$NEXT_FAIL"
+grep -q '"command": "outcome.next"' "$NEXT_FAIL"
+grep -q '"block_stop": true' "$NEXT_FAIL"
+grep -q 'diff-scope-src-only' "$NEXT_FAIL"
 
 git add README.md
 git commit -q -m "out of scope readme"

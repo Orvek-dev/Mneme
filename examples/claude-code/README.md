@@ -31,6 +31,20 @@ Use an absolute `mneme-mcp` path if it is not on your `PATH`.
 For task-start/task-end continuity instructions, see
 [`CLAUDE.example.md`](CLAUDE.example.md).
 
+## Optional Stop Hook
+
+If you use Mneme outcome gates, wire the local wrapper as a Claude Code Stop
+hook so failed gates can block premature completion and feed the failed
+criteria back into the same session:
+
+```sh
+scripts/mneme-agent-hook.sh stop
+```
+
+The wrapper reads Claude Code Stop-hook JSON on stdin. It exits without
+blocking when `stop_hook_active=true` or when `MNEME_LOOP_MAX_ATTEMPTS` has
+already been reached for the same `last_gate_failure_id`.
+
 ## Verify
 
 ```sh

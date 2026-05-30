@@ -39,6 +39,11 @@ Supported keys:
 - `MNEME_MAX_ITEMS`
 - `MNEME_EXTRACTOR_COMMAND`
 - `MNEME_VERIFIER_COMMAND`
+- `MNEME_VERIFIER_POLICY`
+- `MNEME_VERIFIER_MANIFEST`
+- `MNEME_LOOP_MAX_ATTEMPTS`
+- `MNEME_LOOP_STATE`
+- `MNEME_LOOP_SESSION_ID`
 
 `MNEME_EXTRACTOR_COMMAND` is optional. When set, wrapper `end` calls use
 `--extractor command` for `--remember` notes unless an explicit `--extractor`
@@ -51,6 +56,17 @@ example.
 `--verifier-command` unless an explicit verifier report or verifier command is
 already present. Use it only for sessions started with `--acceptance`; ungated
 sessions do not need a verifier.
+
+`MNEME_VERIFIER_POLICY` and `MNEME_VERIFIER_MANIFEST` are optional verifier
+trust settings. They are passed through the environment to `mneme end` and
+`mneme hook end`, so strict verifier pinning can be configured once in the
+profile.
+
+`MNEME_LOOP_MAX_ATTEMPTS`, `MNEME_LOOP_STATE`, and `MNEME_LOOP_SESSION_ID`
+control Stop-hook loop behavior. The wrapper stores only the last
+`last_gate_failure_id` and retry count in `MNEME_LOOP_STATE`; it does not store
+transcripts. `MNEME_LOOP_SESSION_ID` is optional and is only needed when a
+client cannot infer the latest incomplete gated session from the store.
 
 ## Precedence
 
@@ -95,3 +111,16 @@ MNEME_AGENT_HOOK_CONFIG=.mneme/mneme-agent-hook.env \
 
 Use `MNEME_OPENAI_DRY_RUN=1` or a fixture command when checking provider-backed
 wrappers without spending live API budget.
+
+Run a local Stop-hook smoke when you want to verify the automatic failed-gate
+loop without touching real client settings:
+
+```sh
+MNEME_AGENT_HOOK_CONFIG=.mneme/mneme-agent-hook.env \
+  scripts/mneme-agent-hook.sh doctor --check-stop-hook
+```
+
+For Claude Code Stop hooks, wire the wrapper command as the Stop hook and pipe
+the hook JSON to stdin. If the current gate is incomplete, the wrapper emits
+`{"decision":"block","reason":"..."}`. If `stop_hook_active` is already true or
+the retry cap is exceeded, it exits zero without blocking.

@@ -52,6 +52,7 @@ Successful `hook end` output includes:
 - `remembered_claim_count`
 - `remembered_event_ids`
 - `remembered_claim_ids`
+- `loop_advice` when an attached outcome gate is failed, errored, or pending
 - `report`
 
 Failure output includes:
@@ -75,7 +76,10 @@ stderr for hook failures that were already reported in the JSON envelope.
 When a session has an outcome gate, `hook end` writes the normal end envelope
 with `ok: false`, `gate_ok: false`, and `gate_status` set to `failed`,
 `error`, or `pending_judgment`; it then exits non-zero. The failed session and
-its `gate_result` remain stored for the next agent loop.
+its `gate_result` remain stored for the next agent loop. The same envelope
+includes `loop_advice`, which is the `mneme outcome next` report for that
+session. Agents should use `loop_advice.continuation_prompt` as the next input
+instead of treating the task as completed.
 
 ## Error Kinds
 
@@ -134,10 +138,13 @@ hard-coding cargo commands:
 ```sh
 scripts/mneme-agent-hook.sh doctor
 scripts/mneme-agent-hook.sh doctor --check-extractor
+scripts/mneme-agent-hook.sh doctor --check-stop-hook
 MNEME_STORE=/tmp/mneme.json MNEME_AGENT_ID=codex \
   scripts/mneme-agent-hook.sh begin "Draft setup plan" --query "local-first"
 MNEME_STORE=/tmp/mneme.json \
   scripts/mneme-agent-hook.sh end session-001 --summary "Prepared setup plan"
+printf '{"hook_event_name":"Stop","stop_hook_active":false}' |
+  MNEME_STORE=/tmp/mneme.json scripts/mneme-agent-hook.sh stop
 ```
 
 The wrapper uses `MNEME_BIN` when set, otherwise runs
@@ -145,6 +152,9 @@ The wrapper uses `MNEME_BIN` when set, otherwise runs
 `target/debug/mneme` only when cargo is unavailable. The wrapper applies
 `MNEME_STORE`, `MNEME_AGENT_ID`, `MNEME_SCOPE`, `MNEME_MAX_ITEMS`, and
 `MNEME_EXTRACTOR_COMMAND` when the same CLI options are not already present.
+For gated work, `MNEME_VERIFIER_COMMAND` can run the verifier on hook end, and
+`MNEME_LOOP_MAX_ATTEMPTS`, `MNEME_LOOP_STATE`, or `MNEME_LOOP_SESSION_ID` tune
+the Stop-hook loop guard.
 
 Profiles can be loaded with `MNEME_AGENT_HOOK_CONFIG`, `MNEME_CONFIG`, or the
 default ignored `.mneme/mneme-agent-hook.env` path. The file format is
@@ -154,3 +164,9 @@ Wrapper doctor diagnostics print loaded runtime settings and run only the
 isolated hook doctor/begin/end smoke by default. Configured command extractors
 are skipped unless `doctor --check-extractor` is passed, because provider-backed
 extractors may use network or API budget.
+
+`doctor --check-stop-hook` runs a local synthetic Stop-hook smoke. It does not
+modify Claude Code, Cursor, or Codex settings. It creates an isolated failed
+outcome gate, verifies that `scripts/mneme-agent-hook.sh stop` emits
+`decision:block`, and verifies that `stop_hook_active=true` allows the client to
+stop instead of entering a recursive loop.
