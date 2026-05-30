@@ -1,5 +1,5 @@
 <p align="center">
-  <img src="./assets/mneme-readme-banner-v2.png" width="900" alt="Mneme: memory safety and handoff control for AI agent teams" />
+  <img src="./assets/mneme-readme-banner-v2.png" width="900" alt="Mneme: Local-first memory runtime for safe AI agent handoff" />
 </p>
 
 <p align="center">
