@@ -10,10 +10,9 @@
 //! state through a [`MnemeStore`] implementation such as [`JsonFileStore`] or
 //! [`InMemoryStore`].
 //!
-//! Mneme is pre-1.0, so Rust type names can still change. The intended current
-//! extension points are [`MnemeStore`] for persistence and [`MnemeExtractor`] for
-//! claim extraction. Behavior changes should remain covered by specs, tests,
-//! eval scenarios, and the release quality gate.
+//! Mneme v1.0.0 treats [`MnemeStore`] for persistence and [`MnemeExtractor`] for
+//! claim extraction as the intended extension points. Behavior changes should
+//! remain covered by specs, tests, eval scenarios, and the release quality gate.
 //!
 //! # Example
 //!

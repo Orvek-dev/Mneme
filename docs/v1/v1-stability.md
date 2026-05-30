@@ -1,8 +1,7 @@
 # Mneme v1 Stability
 
-Mneme is pre-1.0, so Rust API names may still change. The contracts below are
-the current v1 behavior that changes should preserve unless a spec update and
-eval update land in the same PR.
+Mneme v1.0.0 defines the current local-first v1 behavior. The contracts below
+should be preserved unless a spec update and eval update land in the same PR.
 
 ## Stable Behavior
 

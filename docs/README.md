@@ -38,3 +38,5 @@ Start here:
 - [Eval Harness](eval-harness/README.md) for deterministic and provider evals.
 - [Project and Release](project/README.md) for roadmap, policy, and release
   process.
+- [V1 Final Readiness](project/v1-final-readiness.md) for the v1.0.0 source
+  release boundary and public claim limits.

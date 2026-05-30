@@ -98,7 +98,7 @@ checksum = "f8ca58f447f06ed17d5fc4043ce1b10dd205e060fb3ce5b979b8ed8e59ff3f79"
 
 [[package]]
 name = "mneme-cli"
-version = "0.75.0"
+version = "1.0.0"
 dependencies = [
  "mneme-core",
  "serde",
@@ -108,7 +108,7 @@ dependencies = [
 
 [[package]]
 name = "mneme-core"
-version = "0.75.0"
+version = "1.0.0"
 dependencies = [
  "serde",
  "serde_json",
@@ -116,7 +116,7 @@ dependencies = [
 
 [[package]]
 name = "mneme-eval"
-version = "0.75.0"
+version = "1.0.0"
 dependencies = [
  "mneme-core",
  "mneme-mcp",
@@ -127,7 +127,7 @@ dependencies = [
 
 [[package]]
 name = "mneme-mcp"
-version = "0.75.0"
+version = "1.0.0"
 dependencies = [
  "mneme-core",
  "serde",

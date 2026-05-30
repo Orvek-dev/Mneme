@@ -19,7 +19,9 @@ intentionally completes the registry publication decision.
 - Crate package metadata inherits the workspace license.
 - Workspace crates must keep `publish = false`.
 - GitHub `v0.x` releases are prerelease source snapshots for development
-  tracking, not registry publication events.
+  tracking.
+- GitHub `v1.x` releases are public source releases, not registry publication
+  events.
 - Public package checks may assemble package contents locally, but they must
   not publish anything.
 

@@ -215,7 +215,7 @@ def handle_request(request: dict[str, Any]) -> dict[str, Any]:
             {
                 "protocolVersion": "2024-11-05",
                 "capabilities": {"tools": {}},
-                "serverInfo": {"name": "mneme-team-memory", "version": "0.75.0"},
+                "serverInfo": {"name": "mneme-team-memory", "version": "1.0.0"},
             },
         )
     if method == "tools/list":

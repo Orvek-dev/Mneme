@@ -2,6 +2,39 @@
 
 This project follows the spirit of Keep a Changelog.
 
+## [1.0.0] - 2026-05-30
+
+### Added
+
+- Added a final public readiness contract for the source release:
+  `docs/project/v1-final-readiness.md` defines what v1.0.0 is ready for, what
+  it does not claim, and which local gates must pass before release.
+- Added `scripts/v1-final-readiness-check.sh` and wired it into
+  `scripts/quality-gate.sh` so version, README, evidence-scorecard, release
+  checklist, and anti-overclaim language stay aligned.
+
+### Changed
+
+- Promoted the workspace version to `1.0.0` across Cargo metadata, lockfile
+  package entries, the MCP legacy bridge, README badge, evidence scorecard,
+  package policy, API contract, and user-facing v1 docs.
+- Updated README status from pre-1.0 development wording to a v1.0 source
+  release boundary: local CLI, local MCP, local JSON stores, outcome gates, and
+  eval harness are the supported public surface; hosted sync, dashboard,
+  billing, registry publication, broad semantic search, open-domain extraction,
+  causal productivity, and third-party production claims remain outside the
+  public claim.
+- Updated release policy docs to distinguish GitHub source releases from
+  registry publication. Workspace crates still keep `publish = false`.
+
+### Verified
+
+- Final readiness is intended to be verified by `./scripts/quality-gate.sh full`
+  before tagging. The release gate includes Rust fmt/clippy/tests/docs,
+  install/package/public-safety checks, MCP/client smokes, hard dogfood
+  contracts, product validation guardrails, outcome-gate smokes, and the new
+  v1 final-readiness check.
+
 ## [0.75.0] - 2026-05-30
 
 ### Added

@@ -1,8 +1,9 @@
 # API Contract
 
-Mneme is pre-1.0, so Rust API names and module placement are not yet semantic
-versioning commitments. This document defines the intended public API surface
-for the current local-first MVP and the verification required before releases.
+Mneme v1.0.0 defines the current local-first source-release API boundary. Rust
+API names and module placement should change only through a documented spec
+update and matching release-gate update. This document defines the intended
+public API surface and the verification required before releases.
 
 ## Intended Public Crates
 

@@ -1,7 +1,7 @@
 # Personal Runtime
 
-Mneme v1 is still pre-1.0, but the local personal runtime now has a stable
-maintenance surface for single-user development.
+Mneme v1.0.0 exposes a stable local personal-runtime maintenance surface for
+single-user development.
 
 ## Store Format
 

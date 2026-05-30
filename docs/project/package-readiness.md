@@ -1,9 +1,9 @@
 # Package Readiness
 
-Mneme is pre-1.0 and the workspace crates are not published to a registry.
-Each crate is marked `publish = false` to prevent accidental crates.io
-publication while the project is still stabilizing its public license,
-distribution, and API policy.
+Mneme v1.0.0 is a public source release, but the workspace crates are not
+published to a registry. Each crate is marked `publish = false` to prevent
+accidental crates.io publication while the owner separately prepares any
+registry distribution path.
 The current distribution policy is documented in `docs/project/distribution-policy.md`.
 
 ## Current Packages

@@ -32,6 +32,7 @@ python3 -m py_compile scripts/mneme-outcome-verifier.py
 scripts/mneme-mcp-stdio.py --self-test | grep -q '"tool_count": 13'
 cargo run -q -p mneme-mcp -- --self-test | grep -q '"tool_count":47'
 scripts/outcome-gate-smoke.sh | grep -q 'outcome-gate-smoke: ok'
+scripts/v1-final-readiness-check.sh | grep -q 'v1-final-readiness: ok'
 scripts/eval-integrity-check.py | grep -q '"ok": true'
 PRODUCT_VALIDATION_CONTRACT="${TMP_ROOT}/mneme-quality-gate-product-validation-contract.json"
 PRODUCT_VALIDATION_DATASET="${TMP_ROOT}/mneme-quality-gate-product-validation-dataset.json"

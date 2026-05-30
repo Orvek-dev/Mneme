@@ -16,10 +16,10 @@ scripts/quickstart-smoke.sh
 - Git.
 - Optional: GitHub CLI `gh` for release inspection and PR work.
 
-Mneme is pre-1.0 and currently optimized for local development, deterministic
-evals, and provider-wrapper experiments. The repository is MIT licensed, while
-the crates remain intentionally marked `publish = false` until a registry
-publication path is prepared.
+Mneme v1.0.0 is optimized for local development, deterministic evals,
+outcome-gated agent workflows, and provider-wrapper experiments. The repository
+is MIT licensed, while the crates remain intentionally marked `publish = false`
+until a registry publication path is prepared.
 The current distribution state is documented in
 `docs/project/distribution-policy.md`.
 

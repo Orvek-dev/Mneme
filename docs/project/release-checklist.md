@@ -80,8 +80,8 @@ git push origin vX.Y.Z
 
 The release workflow verifies the workspace again. Release publication requires
 the workflow-scoped `GITHUB_TOKEN` to have `contents: write` permission. The
-workflow requests that permission explicitly and marks `v0.x` tags as GitHub
-prereleases.
+workflow requests that permission explicitly. It marks `v0.x` tags as GitHub
+prereleases; `v1.x` tags are normal public source releases.
 
 CI runs on pull requests and `main` pushes only. Feature branch pushes are
 intentionally not full CI triggers; run `scripts/quality-gate.sh` locally before
@@ -91,4 +91,10 @@ After the workflow completes, verify the public release:
 
 ```sh
 gh release view vX.Y.Z --json tagName,isPrerelease,url
+```
+
+For the v1.0.0 readiness boundary, also run:
+
+```sh
+scripts/v1-final-readiness-check.sh
 ```

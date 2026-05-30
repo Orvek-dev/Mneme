@@ -9,6 +9,7 @@ the v1 and eval-harness usage docs.
 - [API Contract](api-contract.md)
 - [Distribution Policy](distribution-policy.md)
 - [Package Readiness](package-readiness.md)
+- [V1 Final Readiness](v1-final-readiness.md)
 - [CI Cost Policy](ci-cost-policy.md)
 - [Release Checklist](release-checklist.md)
 - [Phase 3 Readiness](phase-3-readiness.md)

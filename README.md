@@ -3,7 +3,7 @@
 </p>
 
 <p align="center">
-  <a href="https://github.com/Orvek-dev/Mneme/releases/tag/v0.75.0"><img alt="Version" src="https://img.shields.io/badge/version-0.75.0-2ea44f"></a>
+  <a href="https://github.com/Orvek-dev/Mneme/releases/tag/v1.0.0"><img alt="Version" src="https://img.shields.io/badge/version-1.0.0-2ea44f"></a>
   <a href="./LICENSE"><img alt="License" src="https://img.shields.io/badge/license-MIT-0969da"></a>
   <img alt="Rust" src="https://img.shields.io/badge/Rust-CLI-b7410e">
   <img alt="Local first" src="https://img.shields.io/badge/local--first-JSON%20stores-6f42c1">
@@ -16,6 +16,7 @@
   <a href="#quickstart">Quickstart</a> ·
   <a href="#v1-vs-v2">V1 vs V2</a> ·
   <a href="#how-v2-works">How V2 Works</a> ·
+  <a href="#v100-readiness">v1.0.0 Readiness</a> ·
   <a href="#evidence">Evidence</a> ·
   <a href="#docs">Docs</a>
 </p>
@@ -169,6 +170,26 @@ retrieval is not shipped unless ranking evidence improves over term matching,
 open-domain extraction claims require live-provider or independently reviewed
 extractor evidence, storage changes must preserve legacy local stores, and
 external value claims require a separate public-safe blind review artifact.
+
+## v1.0.0 Readiness
+
+v1.0.0 is the first public source release for Mneme's local agent-memory
+runtime. The supported public surface is:
+
+- local V1 personal memory through `mneme`;
+- local V2 team handoff memory through `mneme team`;
+- local stdio MCP for V1/V2 agent clients through `mneme-mcp`;
+- outcome gates that turn "done" into stored verifier or reviewer evidence;
+- public-safe eval, dogfood, package, install, and release quality gates.
+
+This release does not claim hosted SaaS readiness, registry publication, broad
+semantic search, open-domain natural-language extraction, causal productivity
+improvement, or third-party production validation. Those claims remain blocked
+until the corresponding external evidence exists.
+
+The final readiness contract is documented in
+[V1 Final Readiness](docs/project/v1-final-readiness.md) and enforced locally by
+`scripts/v1-final-readiness-check.sh`, which is part of the full quality gate.
 
 ## Commands
 
@@ -332,7 +353,8 @@ RUSTDOCFLAGS="-D warnings" cargo doc --workspace --no-deps
 
 ## Status
 
-Mneme is pre-1.0. The useful surface today is local development and evaluation:
+Mneme v1.0.0 is a public source release for local development and evaluation.
+The supported surface today is:
 
 - local JSON stores with schema metadata, write locks, atomic writes, backups,
   import/export, repair, and restore;
