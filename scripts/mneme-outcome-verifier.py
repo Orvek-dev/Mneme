@@ -12,10 +12,15 @@ import json
 import os
 import subprocess
 import sys
+import time
 from pathlib import Path
 from typing import Any
 
 REPORT_SCHEMA = "mneme.verifier.v1"
+DEFAULT_COMMAND_TIMEOUT_SECONDS = 120
+DEFAULT_GIT_TIMEOUT_SECONDS = 30
+DEFAULT_GLOBAL_TIMEOUT_SECONDS = 900
+MAX_TIMEOUT_SECONDS = 3600
 
 
 def main() -> int:
@@ -25,17 +30,24 @@ def main() -> int:
     workspace = Path(baseline.get("worktree") or request.get("workspace") or os.getcwd())
     task_id = acceptance.get("task_id")
     results: list[dict[str, Any]] = []
-    changed_files = get_changed_files(workspace, baseline.get("diff_base") or baseline.get("git_head"))
+    deadline = time.monotonic() + bounded_timeout(
+        os.environ.get("MNEME_VERIFIER_GLOBAL_TIMEOUT_SECONDS"),
+        DEFAULT_GLOBAL_TIMEOUT_SECONDS,
+    )
+    changed_files = get_changed_files(workspace, baseline.get("diff_base") or baseline.get("git_head"), deadline)
 
     for criterion in acceptance.get("criteria") or []:
         criterion_id = str(criterion.get("id") or "")
         kind = criterion.get("kind")
         config = criterion.get("config") or {}
+        if time.monotonic() >= deadline:
+            results.append(result(criterion_id, "error", "global verifier timeout exceeded"))
+            continue
         if kind == "judgment":
             continue
         try:
             if kind == "command":
-                results.append(check_command(criterion_id, config, workspace))
+                results.append(check_command(criterion_id, config, workspace, deadline))
             elif kind == "diff_touches":
                 results.append(check_diff_touches(criterion_id, config, changed_files))
             elif kind == "diff_scope":
@@ -61,20 +73,27 @@ def main() -> int:
     return 0
 
 
-def check_command(criterion_id: str, config: dict[str, Any], workspace: Path) -> dict[str, Any]:
+def check_command(criterion_id: str, config: dict[str, Any], workspace: Path, deadline: float) -> dict[str, Any]:
     expect_exit = int(config.get("expect_exit", 0))
     cwd = Path(config.get("cwd") or workspace)
+    timeout = min(
+        bounded_timeout(config.get("timeout_seconds"), DEFAULT_COMMAND_TIMEOUT_SECONDS),
+        remaining_timeout(deadline),
+    )
     if config.get("shell") is True:
+        allow_shell = config.get("allow_shell") is True or os.environ.get("MNEME_VERIFIER_ALLOW_SHELL") == "1"
+        if not allow_shell:
+            return result(criterion_id, "error", "shell command requires allow_shell=true or MNEME_VERIFIER_ALLOW_SHELL=1")
         command = config.get("run")
         if not isinstance(command, str) or not command.strip():
             return result(criterion_id, "error", "shell command requires non-empty run")
-        completed = subprocess.run(command, cwd=cwd, shell=True, capture_output=True, text=True, timeout=120)
+        completed = subprocess.run(command, cwd=cwd, shell=True, capture_output=True, text=True, timeout=timeout)
         label = command
     else:
         argv = config.get("argv")
         if not isinstance(argv, list) or not argv or not all(isinstance(part, str) for part in argv):
             return result(criterion_id, "error", "command criterion requires argv string array")
-        completed = subprocess.run(argv, cwd=cwd, shell=False, capture_output=True, text=True, timeout=120)
+        completed = subprocess.run(argv, cwd=cwd, shell=False, capture_output=True, text=True, timeout=timeout)
         label = " ".join(argv)
     status = "pass" if completed.returncode == expect_exit else "fail"
     evidence = f"{label} exited {completed.returncode}, expected {expect_exit}"
@@ -125,25 +144,44 @@ def check_symbol_present(criterion_id: str, config: dict[str, Any], workspace: P
     return result(criterion_id, status, f"{symbol!r} {'found' if status == 'pass' else 'missing'} in {path_value}")
 
 
-def get_changed_files(workspace: Path, diff_base: str | None) -> set[str]:
+def get_changed_files(workspace: Path, diff_base: str | None, deadline: float) -> set[str]:
     changed: set[str] = set()
     if diff_base and diff_base != "unknown":
-        diff = run_git(workspace, ["diff", "--name-only", diff_base, "--"])
+        diff = run_git(workspace, ["diff", "--name-only", diff_base, "--"], deadline)
         changed.update(line.strip() for line in diff.splitlines() if line.strip())
-    unstaged = run_git(workspace, ["diff", "--name-only", "--"])
+    unstaged = run_git(workspace, ["diff", "--name-only", "--"], deadline)
     changed.update(line.strip() for line in unstaged.splitlines() if line.strip())
-    staged = run_git(workspace, ["diff", "--cached", "--name-only", "--"])
+    staged = run_git(workspace, ["diff", "--cached", "--name-only", "--"], deadline)
     changed.update(line.strip() for line in staged.splitlines() if line.strip())
-    untracked = run_git(workspace, ["ls-files", "--others", "--exclude-standard"])
+    untracked = run_git(workspace, ["ls-files", "--others", "--exclude-standard"], deadline)
     changed.update(line.strip() for line in untracked.splitlines() if line.strip())
     return changed
 
 
-def run_git(workspace: Path, args: list[str]) -> str:
-    completed = subprocess.run(["git", *args], cwd=workspace, capture_output=True, text=True, timeout=30)
+def run_git(workspace: Path, args: list[str], deadline: float) -> str:
+    timeout = min(
+        bounded_timeout(os.environ.get("MNEME_VERIFIER_GIT_TIMEOUT_SECONDS"), DEFAULT_GIT_TIMEOUT_SECONDS),
+        remaining_timeout(deadline),
+    )
+    completed = subprocess.run(["git", *args], cwd=workspace, capture_output=True, text=True, timeout=timeout)
     if completed.returncode != 0:
         return ""
     return completed.stdout
+
+
+def bounded_timeout(value: Any, default: int) -> int:
+    if value is None or value == "":
+        return default
+    try:
+        timeout = int(value)
+    except (TypeError, ValueError):
+        return default
+    return max(1, min(timeout, MAX_TIMEOUT_SECONDS))
+
+
+def remaining_timeout(deadline: float) -> int:
+    remaining = int(deadline - time.monotonic())
+    return max(1, min(remaining, MAX_TIMEOUT_SECONDS))
 
 
 def normalize_paths(value: Any) -> list[str]:

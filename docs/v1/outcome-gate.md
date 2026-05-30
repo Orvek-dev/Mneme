@@ -22,6 +22,51 @@ checks live outside the core in `scripts/mneme-outcome-verifier.py` or another
 compatible verifier. Subjective judgments also live outside the core; Mneme only
 validates and records the verdict.
 
+## Verifier Trust
+
+`mneme end` can pin the verifier executable with a local manifest:
+
+```json
+{
+  "schema_version": "mneme.verifier_manifest.v1",
+  "policy": "strict",
+  "verifiers": [
+    {
+      "name": "mneme-outcome-verifier.py",
+      "path": "scripts/mneme-outcome-verifier.py",
+      "sha256": "<sha256>"
+    }
+  ]
+}
+```
+
+Use it like this:
+
+```sh
+MNEME_VERIFIER_POLICY=strict \
+MNEME_VERIFIER_MANIFEST=.mneme/verifiers.json \
+mneme begin "Implement parser" --acceptance acceptance.json --json
+
+mneme end session-001 \
+  --summary "Implemented parser" \
+  --verifier-command scripts/mneme-outcome-verifier.py \
+  --verifier-policy strict \
+  --verifier-manifest .mneme/verifiers.json \
+  --json
+```
+
+Policy modes:
+
+| Mode | Behavior |
+| --- | --- |
+| `off` | Record verifier hash when available, but do not require a manifest match. |
+| `warn` | Store verifier integrity warnings on `gate_result.warnings` without blocking completion. |
+| `strict` | Refuse untrusted verifier commands before execution; the core also turns missing or untrusted verifier integrity into a gate error. |
+
+The core still does not execute the verifier. The CLI computes the SHA-256 hash,
+compares it with the manifest, and sends `verifier_integrity` with the report;
+the core stores that identity on `gate_result`.
+
 ## Acceptance Contract
 
 Start from a template when possible:
@@ -80,8 +125,11 @@ Pass an acceptance contract at begin:
 }
 ```
 
-`command` uses `argv` by default. `shell: true` with `run` is supported by the
-reference verifier but should stay opt-in.
+`command` uses `argv` by default. `shell: true` with `run` is supported only
+when the criterion also sets `allow_shell: true` or the verifier process has
+`MNEME_VERIFIER_ALLOW_SHELL=1`. Command criteria can set `timeout_seconds`
+between 1 and 3600; the reference verifier also enforces
+`MNEME_VERIFIER_GLOBAL_TIMEOUT_SECONDS` and `MNEME_VERIFIER_GIT_TIMEOUT_SECONDS`.
 
 ## CLI Flow
 
@@ -208,8 +256,8 @@ scripts/outcome-gate-smoke.sh
 
 The smoke creates an isolated git repo, checks template generation and
 validation, rejects a malformed acceptance contract before begin, checks a
-passing gated session, checks `mneme outcome status`, verifies that an
-out-of-scope diff produces a non-zero failed gate, and checks both passing and
-failing external judgment verdicts. The MCP client smoke additionally checks
-that a failed gated task returns `handoff_allowed=false` before another agent is
-allowed to continue.
+passing gated session with a strict pinned verifier manifest, checks
+`mneme outcome status`, verifies that an out-of-scope diff produces a non-zero
+failed gate, and checks both passing and failing external judgment verdicts. The
+MCP client smoke additionally checks that a failed gated task returns
+`handoff_allowed=false` before another agent is allowed to continue.

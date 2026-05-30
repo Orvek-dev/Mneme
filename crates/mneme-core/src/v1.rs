@@ -1259,6 +1259,61 @@ pub struct AcceptanceBaseline {
     /// Non-fatal baseline warnings, for example `git_unavailable`.
     #[serde(default)]
     pub warnings: Vec<String>,
+    /// Verifier trust policy captured when the gated task began.
+    #[serde(default)]
+    pub verifier_policy: VerifierTrustPolicy,
+}
+
+/// Verifier trust policy captured on a gated session.
+#[derive(Debug, Clone, Default, Serialize, Deserialize)]
+pub struct VerifierTrustPolicy {
+    /// Policy mode: off, warn, or strict.
+    #[serde(default)]
+    pub mode: VerifierTrustMode,
+    /// Optional manifest path used to pin verifier implementations.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub manifest_path: Option<String>,
+    /// Allowed verifier identities loaded from the manifest.
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub allowed_verifiers: Vec<VerifierIdentity>,
+}
+
+/// Pinned verifier identity.
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct VerifierIdentity {
+    /// Optional display name.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub name: Option<String>,
+    /// Optional verifier path.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub path: Option<String>,
+    /// Expected SHA-256 hash of the verifier file.
+    pub sha256: String,
+}
+
+/// Verifier trust policy mode.
+#[derive(Debug, Clone, Copy, Default, Eq, PartialEq, Serialize, Deserialize)]
+#[serde(rename_all = "snake_case")]
+pub enum VerifierTrustMode {
+    /// Do not enforce verifier pinning.
+    #[default]
+    Off,
+    /// Record warnings but do not block completion.
+    Warn,
+    /// Require a trusted pinned verifier identity.
+    Strict,
+}
+
+impl VerifierTrustMode {
+    /// Stable mode string.
+    #[must_use]
+    pub const fn as_str(self) -> &'static str {
+        match self {
+            Self::Off => "off",
+            Self::Warn => "warn",
+            Self::Strict => "strict",
+        }
+    }
 }
 
 /// Validation report for an acceptance contract before a gated session starts.
@@ -1334,9 +1389,38 @@ pub struct VerifierReport {
     /// Verifier implementation name.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub verifier: Option<String>,
+    /// Optional verifier file identity and manifest trust result.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub integrity: Option<VerifierIntegrity>,
     /// One result per non-judgment criterion.
     #[serde(default)]
     pub results: Vec<VerifierCriterionResult>,
+}
+
+/// Verifier implementation identity proposed with a verifier report.
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct VerifierIntegrity {
+    /// Optional verifier display name.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub name: Option<String>,
+    /// Optional resolved verifier path.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub path: Option<String>,
+    /// Optional SHA-256 hash of the verifier file.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub sha256: Option<String>,
+    /// Optional manifest path used for this trust decision.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub manifest_path: Option<String>,
+    /// Policy mode used by the caller when producing this report.
+    #[serde(default)]
+    pub policy_mode: VerifierTrustMode,
+    /// True when the verifier matched an allowed manifest entry.
+    #[serde(default)]
+    pub trusted: bool,
+    /// Public-safe verifier trust warnings.
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub warnings: Vec<String>,
 }
 
 /// Result for one acceptance criterion.
@@ -1449,6 +1533,9 @@ pub struct OutcomeGateResult {
     pub contract_violations: Vec<String>,
     /// Redacted and truncated verifier evidence.
     pub evidence: Vec<OutcomeGateEvidence>,
+    /// Verifier implementation identity used for this gate, when provided.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub verifier_integrity: Option<VerifierIntegrity>,
     /// Baseline warnings carried into the result.
     pub warnings: Vec<String>,
 }
@@ -1749,6 +1836,7 @@ fn evaluate_outcome_gate(
 
     let validation = validate_acceptance_contract(contract);
     let mut violations = validation.errors.clone();
+    let mut warnings = validation.warnings.clone();
 
     let mut criterion_ids = BTreeSet::new();
     let mut judgment_ids = BTreeSet::new();
@@ -1774,8 +1862,16 @@ fn evaluate_outcome_gate(
     let mut pending = judgment_ids.iter().cloned().collect::<Vec<_>>();
     let mut evidence = Vec::new();
     let mut seen_results = BTreeSet::new();
+    let mut verifier_integrity = None;
 
     if let Some(report) = verifier_report {
+        verifier_integrity = report.integrity.clone();
+        apply_verifier_integrity_policy(
+            &contract.baseline.verifier_policy,
+            report.integrity.as_ref(),
+            &mut violations,
+            &mut warnings,
+        );
         if report.schema_version != VERIFIER_REPORT_SCHEMA_VERSION {
             violations.push(format!(
                 "verifier schema_version must be {VERIFIER_REPORT_SCHEMA_VERSION}, got {}",
@@ -1820,6 +1916,8 @@ fn evaluate_outcome_gate(
                 evidence: result.evidence.as_deref().map(sanitize_gate_evidence),
             });
         }
+    } else if contract.baseline.verifier_policy.mode == VerifierTrustMode::Strict {
+        violations.push("strict verifier policy requires verifier integrity".to_owned());
     }
 
     for criterion in &contract.criteria {
@@ -1869,8 +1967,64 @@ fn evaluate_outcome_gate(
         pending_criterion_ids: pending,
         contract_violations: violations,
         evidence,
-        warnings: contract.baseline.warnings.clone(),
+        verifier_integrity,
+        warnings,
     }))
+}
+
+fn apply_verifier_integrity_policy(
+    policy: &VerifierTrustPolicy,
+    integrity: Option<&VerifierIntegrity>,
+    violations: &mut Vec<String>,
+    warnings: &mut Vec<String>,
+) {
+    let mode = integrity
+        .map(|value| strongest_verifier_mode(policy.mode, value.policy_mode))
+        .unwrap_or(policy.mode);
+    match (mode, integrity) {
+        (VerifierTrustMode::Off, Some(identity)) => {
+            warnings.extend(identity.warnings.clone());
+        }
+        (VerifierTrustMode::Off, None) => {}
+        (VerifierTrustMode::Warn, Some(identity)) => {
+            warnings.extend(identity.warnings.clone());
+            if identity.sha256.as_deref().map_or(true, str::is_empty) {
+                warnings.push("verifier_integrity_missing_sha256".to_owned());
+            }
+            if !identity.trusted {
+                warnings.push("verifier_integrity_not_manifest_trusted".to_owned());
+            }
+        }
+        (VerifierTrustMode::Warn, None) => {
+            warnings.push("verifier_integrity_missing".to_owned());
+        }
+        (VerifierTrustMode::Strict, Some(identity)) => {
+            warnings.extend(identity.warnings.clone());
+            if identity.sha256.as_deref().map_or(true, str::is_empty) {
+                violations.push("strict verifier policy requires sha256".to_owned());
+            }
+            if !identity.trusted {
+                violations
+                    .push("strict verifier policy requires a trusted manifest match".to_owned());
+            }
+        }
+        (VerifierTrustMode::Strict, None) => {
+            violations.push("strict verifier policy requires verifier integrity".to_owned());
+        }
+    }
+}
+
+const fn strongest_verifier_mode(
+    baseline: VerifierTrustMode,
+    report: VerifierTrustMode,
+) -> VerifierTrustMode {
+    match (baseline, report) {
+        (VerifierTrustMode::Strict, _) | (_, VerifierTrustMode::Strict) => {
+            VerifierTrustMode::Strict
+        }
+        (VerifierTrustMode::Warn, _) | (_, VerifierTrustMode::Warn) => VerifierTrustMode::Warn,
+        _ => VerifierTrustMode::Off,
+    }
 }
 
 fn apply_judgment_to_gate(
@@ -1985,6 +2139,7 @@ fn apply_judgment_to_gate(
         pending_criterion_ids: pending.into_iter().collect(),
         contract_violations: violations,
         evidence,
+        verifier_integrity: current_gate.verifier_integrity.clone(),
         warnings: current_gate.warnings.clone(),
     }
 }
@@ -2017,10 +2172,32 @@ fn validate_command_criterion(
         ));
     }
     if shell_enabled {
-        warnings.push(format!(
-            "command criterion {} uses shell=true; prefer argv[] for deterministic verification",
-            criterion.id
-        ));
+        let allow_shell = config
+            .get("allow_shell")
+            .and_then(serde_json::Value::as_bool)
+            .unwrap_or(false);
+        if allow_shell {
+            warnings.push(format!(
+                "command criterion {} uses shell=true with allow_shell=true; prefer argv[] for deterministic verification",
+                criterion.id
+            ));
+        } else {
+            errors.push(format!(
+                "command criterion {} uses shell=true without allow_shell=true",
+                criterion.id
+            ));
+        }
+    }
+    if let Some(timeout) = config.get("timeout_seconds") {
+        let valid = timeout
+            .as_u64()
+            .is_some_and(|value| (1..=3600).contains(&value));
+        if !valid {
+            errors.push(format!(
+                "command criterion {} timeout_seconds must be between 1 and 3600",
+                criterion.id
+            ));
+        }
     }
     if let Some(expect_exit) = config.get("expect_exit") {
         let valid = expect_exit
@@ -4811,6 +4988,7 @@ mod tests {
                     worktree: "/tmp/mneme".to_owned(),
                     dirty: false,
                     warnings: Vec::new(),
+                    verifier_policy: VerifierTrustPolicy::default(),
                 },
                 criteria: vec![AcceptanceCriterion {
                     id: "build".to_owned(),
@@ -4831,6 +5009,7 @@ mod tests {
                 schema_version: "mneme.verifier.v1".to_owned(),
                 task_id: Some("task-outcome".to_owned()),
                 verifier: Some("unit-test".to_owned()),
+                integrity: None,
                 results: vec![VerifierCriterionResult {
                     id: "build".to_owned(),
                     status: VerifierCriterionStatus::Pass,
@@ -4895,6 +5074,145 @@ mod tests {
     }
 
     #[test]
+    fn strict_verifier_policy_requires_manifest_trusted_integrity(
+    ) -> Result<(), Box<dyn std::error::Error>> {
+        let mut engine = MnemeEngine::new(MnemeConfig::default());
+        let begin = engine.begin_session(SessionBeginInput {
+            task: "Run pinned verifier".to_owned(),
+            lineage_id: None,
+            actor_agent_id: Some("codex".to_owned()),
+            query: None,
+            allowed_scopes: vec!["private".to_owned()],
+            max_items: DEFAULT_CONTEXT_MAX_ITEMS,
+            acceptance: Some(AcceptanceContract {
+                schema_version: "mneme.acceptance.v1".to_owned(),
+                task_id: Some("trusted-task".to_owned()),
+                baseline: AcceptanceBaseline {
+                    verifier_policy: VerifierTrustPolicy {
+                        mode: VerifierTrustMode::Strict,
+                        manifest_path: Some(".mneme/verifiers.json".to_owned()),
+                        allowed_verifiers: vec![VerifierIdentity {
+                            name: Some("unit-test".to_owned()),
+                            path: Some("unit-test".to_owned()),
+                            sha256: "abc123".to_owned(),
+                        }],
+                    },
+                    ..AcceptanceBaseline::default()
+                },
+                criteria: vec![AcceptanceCriterion {
+                    id: "build".to_owned(),
+                    kind: AcceptanceCriterionKind::Command,
+                    description: None,
+                    config: serde_json::json!({"argv": ["cargo", "test"]}),
+                }],
+            }),
+        });
+
+        let end = engine.end_session(SessionEndInput {
+            session_id: begin.session.id,
+            actor_agent_id: Some("codex".to_owned()),
+            scope: None,
+            summary: Some("Verifier report omitted integrity".to_owned()),
+            remember: Vec::new(),
+            verifier_report: Some(VerifierReport {
+                schema_version: "mneme.verifier.v1".to_owned(),
+                task_id: Some("trusted-task".to_owned()),
+                verifier: Some("unit-test".to_owned()),
+                integrity: None,
+                results: vec![VerifierCriterionResult {
+                    id: "build".to_owned(),
+                    status: VerifierCriterionStatus::Pass,
+                    evidence: Some("cargo test exited 0".to_owned()),
+                }],
+            }),
+        })?;
+
+        let gate = end.session.gate_result.expect("gate result");
+        assert_eq!(gate.status, OutcomeGateStatus::Error);
+        assert!(!gate.completed);
+        assert!(gate
+            .contract_violations
+            .iter()
+            .any(|violation| violation.contains("strict verifier policy")));
+        Ok(())
+    }
+
+    #[test]
+    fn trusted_verifier_integrity_is_stored_on_gate_result(
+    ) -> Result<(), Box<dyn std::error::Error>> {
+        let mut engine = MnemeEngine::new(MnemeConfig::default());
+        let integrity = VerifierIntegrity {
+            name: Some("unit-test".to_owned()),
+            path: Some("/tmp/unit-test".to_owned()),
+            sha256: Some("abc123".to_owned()),
+            manifest_path: Some(".mneme/verifiers.json".to_owned()),
+            policy_mode: VerifierTrustMode::Strict,
+            trusted: true,
+            warnings: Vec::new(),
+        };
+        let begin = engine.begin_session(SessionBeginInput {
+            task: "Run pinned verifier".to_owned(),
+            lineage_id: None,
+            actor_agent_id: Some("codex".to_owned()),
+            query: None,
+            allowed_scopes: vec!["private".to_owned()],
+            max_items: DEFAULT_CONTEXT_MAX_ITEMS,
+            acceptance: Some(AcceptanceContract {
+                schema_version: "mneme.acceptance.v1".to_owned(),
+                task_id: Some("trusted-task".to_owned()),
+                baseline: AcceptanceBaseline {
+                    verifier_policy: VerifierTrustPolicy {
+                        mode: VerifierTrustMode::Strict,
+                        manifest_path: Some(".mneme/verifiers.json".to_owned()),
+                        allowed_verifiers: vec![VerifierIdentity {
+                            name: Some("unit-test".to_owned()),
+                            path: Some("/tmp/unit-test".to_owned()),
+                            sha256: "abc123".to_owned(),
+                        }],
+                    },
+                    ..AcceptanceBaseline::default()
+                },
+                criteria: vec![AcceptanceCriterion {
+                    id: "build".to_owned(),
+                    kind: AcceptanceCriterionKind::Command,
+                    description: None,
+                    config: serde_json::json!({"argv": ["cargo", "test"]}),
+                }],
+            }),
+        });
+
+        let end = engine.end_session(SessionEndInput {
+            session_id: begin.session.id,
+            actor_agent_id: Some("codex".to_owned()),
+            scope: None,
+            summary: Some("Verifier report includes integrity".to_owned()),
+            remember: Vec::new(),
+            verifier_report: Some(VerifierReport {
+                schema_version: "mneme.verifier.v1".to_owned(),
+                task_id: Some("trusted-task".to_owned()),
+                verifier: Some("unit-test".to_owned()),
+                integrity: Some(integrity),
+                results: vec![VerifierCriterionResult {
+                    id: "build".to_owned(),
+                    status: VerifierCriterionStatus::Pass,
+                    evidence: Some("cargo test exited 0".to_owned()),
+                }],
+            }),
+        })?;
+
+        let gate = end.session.gate_result.expect("gate result");
+        assert_eq!(gate.status, OutcomeGateStatus::Passed);
+        assert!(gate.completed);
+        assert_eq!(
+            gate.verifier_integrity
+                .as_ref()
+                .and_then(|value| value.sha256.as_deref()),
+            Some("abc123")
+        );
+        Ok(())
+    }
+
+    #[test]
     fn outcome_judgment_resolves_pending_gate() -> Result<(), Box<dyn std::error::Error>> {
         let mut engine = MnemeEngine::new(MnemeConfig::default());
         let begin = engine.begin_session(SessionBeginInput {
@@ -4935,6 +5253,7 @@ mod tests {
                 schema_version: "mneme.verifier.v1".to_owned(),
                 task_id: Some("task-judgment".to_owned()),
                 verifier: Some("unit-test".to_owned()),
+                integrity: None,
                 results: vec![VerifierCriterionResult {
                     id: "tests".to_owned(),
                     status: VerifierCriterionStatus::Pass,
@@ -5008,6 +5327,7 @@ mod tests {
                 schema_version: "mneme.verifier.v1".to_owned(),
                 task_id: None,
                 verifier: Some("unit-test".to_owned()),
+                integrity: None,
                 results: Vec::new(),
             }),
         })?;

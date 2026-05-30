@@ -2,6 +2,28 @@
 
 This project follows the spirit of Keep a Changelog.
 
+## [0.74.0] - 2026-05-30
+
+### Added
+
+- Added verifier trust metadata for V1 outcome gates. `mneme end` and
+  `mneme hook end` can hash the verifier executable, compare it against a
+  `mneme.verifier_manifest.v1` allowlist, and persist verifier integrity on
+  `gate_result`.
+- Added `--verifier-policy off|warn|strict` and `--verifier-manifest <path>`
+  to the CLI/hook end paths. Strict policy refuses untrusted verifier commands
+  before execution and the core treats missing/untrusted integrity as a gate
+  error.
+- Added command verifier hardening: `shell=true` now requires explicit
+  `allow_shell=true` or `MNEME_VERIFIER_ALLOW_SHELL=1`, command criteria can
+  set `timeout_seconds`, and the reference verifier enforces command/git/global
+  timeout budgets.
+
+### Changed
+
+- Extended outcome-gate smoke coverage to prove strict verifier manifest
+  pinning stores a trusted SHA-256 identity in the gate result.
+
 ## [0.73.0] - 2026-05-30
 
 ### Added

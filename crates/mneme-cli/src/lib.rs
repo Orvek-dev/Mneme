@@ -8,7 +8,7 @@
 use std::collections::BTreeMap;
 use std::env;
 use std::fmt::{Display, Formatter};
-use std::io::{self, Write};
+use std::io::{self, Read, Write};
 use std::path::{Path, PathBuf};
 use std::process::{Command, Stdio};
 use std::thread;
@@ -31,12 +31,15 @@ use mneme_core::{
     TeamPromotionReviewReport, TeamRole, TeamRunBeginInput, TeamRunBeginReport, TeamRunEndInput,
     TeamRunEndReport, TeamRunHandoffInput, TeamRunNoteInput, TeamRunNoteReport,
     TeamStateValidationReport, TeamSyncApplyReport, TeamSyncEnvelope, TeamSyncExportInput,
-    TeamUserInput, ValidationSeverity, VerifierReport, DEFAULT_CONTEXT_MAX_ITEMS,
+    TeamUserInput, ValidationSeverity, VerifierIdentity, VerifierIntegrity, VerifierReport,
+    VerifierTrustMode, VerifierTrustPolicy, DEFAULT_CONTEXT_MAX_ITEMS,
     DEFAULT_TEAM_CONTEXT_MAX_ITEMS, PRODUCT_NAME,
 };
 use serde::{Deserialize, Serialize};
+use sha2::{Digest, Sha256};
 
 const AGENT_HOOK_SCHEMA_VERSION: &str = "mneme.agent_hook.v1";
+const VERIFIER_MANIFEST_SCHEMA_VERSION: &str = "mneme.verifier_manifest.v1";
 const STORE_MUTATION_RETRY_ATTEMPTS: usize = 80;
 const STORE_MUTATION_RETRY_BASE_MS: u64 = 5;
 
@@ -518,7 +521,7 @@ Example:
   mneme begin "Draft setup plan" --query "local-first" --scope private --max-items 3 --agent codex --store /tmp/mneme.json --json
   mneme begin "Implement parser" --acceptance acceptance.json --store /tmp/mneme.json --json"#;
 
-const MNEME_END_HELP: &str = r#"Usage: mneme end <session-id> [--summary <text>] [--remember <claim>]... [--verifier-report <path>] [--verifier-command <program>] [--verifier-arg <arg>]... [--agent <id>] [--extractor rule|command] [--extractor-command <program>] [--extractor-arg <arg>]... [--store <path>] [--json]
+const MNEME_END_HELP: &str = r#"Usage: mneme end <session-id> [--summary <text>] [--remember <claim>]... [--verifier-report <path>] [--verifier-command <program>] [--verifier-arg <arg>]... [--verifier-manifest <path>] [--verifier-policy off|warn|strict] [--agent <id>] [--extractor rule|command] [--extractor-command <program>] [--extractor-arg <arg>]... [--store <path>] [--json]
 
 Close an agent task session and optionally write memory claims. The default
 rule extractor treats --remember values as explicit claims; the command
@@ -530,7 +533,7 @@ gate_result is not passed.
 Example:
   mneme end session-001 --summary "Prepared a concise setup plan" --remember "user prefers concise setup plans" --store /tmp/mneme.json --json
   mneme end session-001 --remember "For future plans, keep summaries direct." --extractor command --extractor-command ./mneme-extractor-wrapper --store /tmp/mneme.json
-  mneme end session-001 --summary "Implemented parser" --verifier-command scripts/mneme-outcome-verifier.py --store /tmp/mneme.json --json"#;
+  mneme end session-001 --summary "Implemented parser" --verifier-command scripts/mneme-outcome-verifier.py --verifier-policy strict --verifier-manifest .mneme/verifiers.json --store /tmp/mneme.json --json"#;
 
 const MNEME_OUTCOME_HELP: &str = r#"Usage:
   mneme outcome template [--kind rust|node|docs|generic] [--task-id <id>] [--include-judgment] [--output <path>] [--json]
@@ -555,7 +558,7 @@ Example:
 const MNEME_HOOK_HELP: &str = r#"Usage:
   mneme hook doctor [--store <path>]
   mneme hook begin <task> [--acceptance <path>] [--query <query>] [--scope <scope>]... [--max-items <n>] [--agent <id>] [--store <path>]
-  mneme hook end <session-id> [--summary <text>] [--remember <claim>]... [--verifier-report <path>] [--verifier-command <program>] [--verifier-arg <arg>]... [--agent <id>] [--extractor rule|command] [--extractor-command <program>] [--extractor-arg <arg>]... [--store <path>]
+  mneme hook end <session-id> [--summary <text>] [--remember <claim>]... [--verifier-report <path>] [--verifier-command <program>] [--verifier-arg <arg>]... [--verifier-manifest <path>] [--verifier-policy off|warn|strict] [--agent <id>] [--extractor rule|command] [--extractor-command <program>] [--extractor-arg <arg>]... [--store <path>]
 
 Run agent doctor/begin/end hooks with the stable mneme.agent_hook.v1 JSON envelope.
 Success and failure both write JSON to stdout. Failures exit non-zero.
@@ -1035,6 +1038,18 @@ struct EndOptions {
     extractor: ExtractorOptions,
     verifier_report_path: Option<PathBuf>,
     verifier: VerifierOptions,
+    verifier_policy: Option<VerifierTrustMode>,
+    verifier_manifest_path: Option<PathBuf>,
+}
+
+#[derive(Debug, Clone, Default, Deserialize)]
+struct VerifierManifest {
+    #[serde(default)]
+    schema_version: Option<String>,
+    #[serde(default)]
+    policy: Option<VerifierTrustMode>,
+    #[serde(default)]
+    verifiers: Vec<VerifierIdentity>,
 }
 
 #[derive(Debug, Clone, Default)]
@@ -5056,6 +5071,22 @@ fn parse_end_args(raw_args: Vec<String>) -> Result<(String, EndOptions), CliErro
                     required_arg(&raw_args, idx, "--verifier-arg")?,
                 );
             }
+            "--verifier-manifest" => {
+                idx += 1;
+                options.verifier_manifest_path = Some(PathBuf::from(required_arg(
+                    &raw_args,
+                    idx,
+                    "--verifier-manifest",
+                )?));
+            }
+            "--verifier-policy" => {
+                idx += 1;
+                options.verifier_policy = Some(parse_verifier_trust_mode(required_arg(
+                    &raw_args,
+                    idx,
+                    "--verifier-policy",
+                )?)?);
+            }
             value if value.starts_with('-') => {
                 return Err(CliError::invalid_cli(format!(
                     "unknown end option: {value}"
@@ -5185,6 +5216,17 @@ fn parse_outcome_template_kind(value: String) -> Result<OutcomeTemplateKind, Cli
         "generic" => Ok(OutcomeTemplateKind::Generic),
         _ => Err(CliError::invalid_cli(format!(
             "unknown outcome template kind: {value}\navailable kinds: rust, node, docs, generic"
+        ))),
+    }
+}
+
+fn parse_verifier_trust_mode(value: String) -> Result<VerifierTrustMode, CliError> {
+    match value.as_str() {
+        "off" => Ok(VerifierTrustMode::Off),
+        "warn" => Ok(VerifierTrustMode::Warn),
+        "strict" => Ok(VerifierTrustMode::Strict),
+        _ => Err(CliError::invalid_cli(format!(
+            "unknown verifier policy: {value}\navailable policies: off, warn, strict"
         ))),
     }
 }
@@ -5397,6 +5439,9 @@ fn load_acceptance_contract(path: &Path) -> Result<AcceptanceContract, CliError>
     if baseline.worktree.trim().is_empty() {
         baseline.worktree = captured.worktree;
     }
+    if baseline.verifier_policy.mode == VerifierTrustMode::Off {
+        baseline.verifier_policy = captured.verifier_policy;
+    }
     baseline.dirty |= captured.dirty;
     baseline.warnings.extend(captured.warnings);
     baseline.warnings.sort();
@@ -5578,6 +5623,7 @@ fn capture_acceptance_baseline() -> Result<AcceptanceBaseline, CliError> {
         worktree: worktree.display().to_string(),
         dirty: false,
         warnings: Vec::new(),
+        verifier_policy: capture_verifier_trust_policy(None, None)?,
     };
     match run_git_output(&worktree, &["rev-parse", "HEAD"]) {
         Ok(head) if !head.trim().is_empty() => {
@@ -5619,6 +5665,181 @@ fn run_git_output(worktree: &Path, args: &[&str]) -> Result<String, CliError> {
     })
 }
 
+fn capture_verifier_trust_policy(
+    manifest_path: Option<&Path>,
+    mode: Option<VerifierTrustMode>,
+) -> Result<VerifierTrustPolicy, CliError> {
+    let resolved_manifest = resolve_verifier_manifest_path(manifest_path)?;
+    let manifest = resolved_manifest
+        .as_ref()
+        .map(|path| load_verifier_manifest(path))
+        .transpose()?;
+    let manifest_mode = manifest.as_ref().and_then(|value| value.policy);
+    let env_mode = env::var("MNEME_VERIFIER_POLICY")
+        .ok()
+        .filter(|value| !value.trim().is_empty())
+        .map(parse_verifier_trust_mode)
+        .transpose()?;
+    let effective_mode = mode.or(env_mode).or(manifest_mode).unwrap_or_else(|| {
+        if manifest.is_some() {
+            VerifierTrustMode::Warn
+        } else {
+            VerifierTrustMode::Off
+        }
+    });
+    Ok(VerifierTrustPolicy {
+        mode: effective_mode,
+        manifest_path: resolved_manifest
+            .as_ref()
+            .map(|path| path.display().to_string()),
+        allowed_verifiers: manifest.map(|value| value.verifiers).unwrap_or_default(),
+    })
+}
+
+fn resolve_verifier_manifest_path(
+    manifest_path: Option<&Path>,
+) -> Result<Option<PathBuf>, CliError> {
+    if let Some(path) = manifest_path {
+        return require_existing_manifest(path).map(Some);
+    }
+    if let Some(path) = env::var("MNEME_VERIFIER_MANIFEST")
+        .ok()
+        .filter(|value| !value.trim().is_empty())
+        .map(PathBuf::from)
+    {
+        return require_existing_manifest(&path).map(Some);
+    }
+    let default_path = PathBuf::from(".mneme").join("verifiers.json");
+    if default_path.exists() {
+        require_existing_manifest(&default_path).map(Some)
+    } else {
+        Ok(None)
+    }
+}
+
+fn require_existing_manifest(path: &Path) -> Result<PathBuf, CliError> {
+    if !path.exists() {
+        return Err(CliError::invalid_cli(format!(
+            "verifier manifest does not exist: {}",
+            path.display()
+        )));
+    }
+    Ok(path.to_path_buf())
+}
+
+fn load_verifier_manifest(path: &Path) -> Result<VerifierManifest, CliError> {
+    let text = std::fs::read_to_string(path)
+        .map_err(|source| CliError::io("read verifier manifest", path, source))?;
+    let manifest: VerifierManifest =
+        serde_json::from_str(&text).map_err(|source| CliError::json_file("parse", path, source))?;
+    if manifest
+        .schema_version
+        .as_deref()
+        .is_some_and(|schema| schema != VERIFIER_MANIFEST_SCHEMA_VERSION)
+    {
+        return Err(CliError::invalid_cli(format!(
+            "verifier manifest schema_version must be {VERIFIER_MANIFEST_SCHEMA_VERSION}"
+        )));
+    }
+    Ok(manifest)
+}
+
+fn build_verifier_integrity(
+    program: &str,
+    policy: &VerifierTrustPolicy,
+) -> Result<VerifierIntegrity, CliError> {
+    let mut warnings = Vec::new();
+    let program_path = resolve_verifier_program_path(program, &mut warnings)?;
+    let sha256 = sha256_file(&program_path)?;
+    let trusted = policy
+        .allowed_verifiers
+        .iter()
+        .any(|allowed| allowed.sha256.eq_ignore_ascii_case(&sha256));
+    if !trusted && !policy.allowed_verifiers.is_empty() {
+        warnings.push("verifier_hash_not_in_manifest".to_owned());
+    }
+    if policy.allowed_verifiers.is_empty() && policy.mode != VerifierTrustMode::Off {
+        warnings.push("verifier_manifest_has_no_allowed_entries".to_owned());
+    }
+    Ok(VerifierIntegrity {
+        name: Some(
+            program_path
+                .file_name()
+                .and_then(|value| value.to_str())
+                .unwrap_or(program)
+                .to_owned(),
+        ),
+        path: Some(program_path.display().to_string()),
+        sha256: Some(sha256),
+        manifest_path: policy.manifest_path.clone(),
+        policy_mode: policy.mode,
+        trusted,
+        warnings,
+    })
+}
+
+fn resolve_verifier_program_path(
+    program: &str,
+    warnings: &mut Vec<String>,
+) -> Result<PathBuf, CliError> {
+    let path = PathBuf::from(program);
+    if program.contains('/') || program.contains('\\') || path.exists() {
+        let absolute = if path.is_absolute() {
+            path
+        } else {
+            env::current_dir()
+                .map_err(|source| CliError::io("read current dir", Path::new("."), source))?
+                .join(path)
+        };
+        return canonicalize_with_warning(absolute, warnings);
+    }
+    if let Some(paths) = env::var_os("PATH") {
+        for dir in env::split_paths(&paths) {
+            let candidate = dir.join(program);
+            if candidate.exists() {
+                return canonicalize_with_warning(candidate, warnings);
+            }
+        }
+    }
+    Err(CliError::invalid_cli(format!(
+        "verifier command not found for integrity hashing: {program}"
+    )))
+}
+
+fn canonicalize_with_warning(
+    path: PathBuf,
+    warnings: &mut Vec<String>,
+) -> Result<PathBuf, CliError> {
+    match path.canonicalize() {
+        Ok(path) => Ok(path),
+        Err(source) => {
+            warnings.push(format!("verifier_canonicalize_failed:{source}"));
+            if path.exists() {
+                Ok(path)
+            } else {
+                Err(CliError::io("canonicalize verifier command", &path, source))
+            }
+        }
+    }
+}
+
+fn sha256_file(path: &Path) -> Result<String, CliError> {
+    let mut file = std::fs::File::open(path)
+        .map_err(|source| CliError::io("open verifier for sha256", path, source))?;
+    let mut hasher = Sha256::new();
+    let mut buffer = [0_u8; 8192];
+    loop {
+        let read = file
+            .read(&mut buffer)
+            .map_err(|source| CliError::io("read verifier for sha256", path, source))?;
+        if read == 0 {
+            break;
+        }
+        hasher.update(&buffer[..read]);
+    }
+    Ok(format!("{:x}", hasher.finalize()))
+}
+
 fn load_or_run_verifier_report(
     store_path: &Path,
     engine: &MnemeEngine,
@@ -5628,8 +5849,25 @@ fn load_or_run_verifier_report(
     if let Some(path) = &options.verifier_report_path {
         let text = std::fs::read_to_string(path)
             .map_err(|source| CliError::io("read verifier report", path, source))?;
-        let report = serde_json::from_str(&text)
+        let mut report: VerifierReport = serde_json::from_str(&text)
             .map_err(|source| CliError::json_file("parse", path, source))?;
+        if report.integrity.is_none()
+            && (options.verifier_policy.is_some() || options.verifier_manifest_path.is_some())
+        {
+            let policy = capture_verifier_trust_policy(
+                options.verifier_manifest_path.as_deref(),
+                options.verifier_policy,
+            )?;
+            report.integrity = Some(VerifierIntegrity {
+                name: Some("verifier-report-file".to_owned()),
+                path: Some(path.display().to_string()),
+                sha256: None,
+                manifest_path: policy.manifest_path,
+                policy_mode: policy.mode,
+                trusted: false,
+                warnings: vec!["verifier_report_loaded_without_executable_integrity".to_owned()],
+            });
+        }
         return Ok(Some(report));
     }
     let program = match &options.verifier {
@@ -5649,7 +5887,7 @@ fn load_or_run_verifier_report(
         VerifierOptions::Command { args, .. } => args.clone(),
         VerifierOptions::None => Vec::new(),
     };
-    run_verifier_command(store_path, engine, session_id, &program, &args).map(Some)
+    run_verifier_command(store_path, engine, session_id, &program, &args, options).map(Some)
 }
 
 fn load_or_build_judgment_report(
@@ -5691,6 +5929,7 @@ fn run_verifier_command(
     session_id: &str,
     program: &str,
     args: &[String],
+    options: &EndOptions,
 ) -> Result<VerifierReport, CliError> {
     let snapshot = engine.snapshot();
     let session = snapshot
@@ -5703,6 +5942,17 @@ fn run_verifier_command(
             "session {session_id} has no acceptance contract for verifier command"
         ))
     })?;
+    let policy = capture_verifier_trust_policy(
+        options.verifier_manifest_path.as_deref(),
+        options.verifier_policy,
+    )?;
+    let integrity = build_verifier_integrity(program, &policy)?;
+    if policy.mode == VerifierTrustMode::Strict && !integrity.trusted {
+        return Err(CliError::lifecycle(format!(
+            "strict verifier policy refused untrusted verifier: {}",
+            integrity.path.as_deref().unwrap_or(program)
+        )));
+    }
     let workspace = env::current_dir()
         .map_err(|source| CliError::io("read current dir", Path::new("."), source))?;
     let request = VerifierCommandRequest {
@@ -5738,7 +5988,13 @@ fn run_verifier_command(
             stderr.trim()
         )));
     }
-    serde_json::from_slice(&output.stdout).map_err(CliError::json)
+    let mut report: VerifierReport =
+        serde_json::from_slice(&output.stdout).map_err(CliError::json)?;
+    if report.verifier.is_none() {
+        report.verifier = integrity.name.clone();
+    }
+    report.integrity = Some(integrity);
+    Ok(report)
 }
 
 fn gate_blocks_completion(gate_result: &Option<OutcomeGateResult>) -> bool {

@@ -53,7 +53,8 @@ pub use v1::{
     SessionEndReport, SessionError, SessionMemoryInputMode, SessionRecord, SessionStatus,
     StateMetadata, StateValidationIssue, StateValidationReport, StoreError, StoreErrorKind,
     StoreFileInspection, StoreFileStatus, StoreInspection, StoreRepairReport, StoreRestoreReport,
-    ValidationSeverity, VerifierCriterionResult, VerifierCriterionStatus, VerifierReport,
+    ValidationSeverity, VerifierCriterionResult, VerifierCriterionStatus, VerifierIdentity,
+    VerifierIntegrity, VerifierReport, VerifierTrustMode, VerifierTrustPolicy,
     DEFAULT_CONTEXT_MAX_ITEMS, EXTRACTOR_COMMAND_SCHEMA_VERSION, MNEME_STATE_SCHEMA_VERSION,
 };
 pub use v2::{

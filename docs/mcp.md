@@ -227,6 +227,12 @@ The MCP server does not run subprocesses or LLM judges for the agent. It records
 the proposed evidence, owns the deterministic gate result, and prevents failed
 gated work from being represented as a clean completed handoff.
 
+For CLI/hook verifier commands, Mneme can pin the verifier executable with a
+`mneme.verifier_manifest.v1` hash allowlist and store the trusted SHA-256
+identity on `gate_result`. MCP clients that submit their own
+`verifier_report` should include equivalent `integrity` metadata when operating
+under strict verifier policy.
+
 ## Partial Context Contract
 
 Mneme context is intentionally bounded. `context_pack.metadata` and V2 handoff

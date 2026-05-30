@@ -34,6 +34,7 @@ ACCEPTANCE_PASS="$WORKSPACE/.mneme-test/acceptance-pass.json"
 BEGIN_PASS="$WORKSPACE/.mneme-test/begin-pass.json"
 END_PASS="$WORKSPACE/.mneme-test/end-pass.json"
 STATUS_PASS="$WORKSPACE/.mneme-test/status-pass.json"
+VERIFIER_MANIFEST="$WORKSPACE/.mneme-test/verifiers.json"
 
 "$MNEME_BIN" outcome template --kind rust --include-judgment --task-id template-task --output "$TEMPLATE_ACCEPTANCE" --json > "$TEMPLATE_REPORT"
 grep -q '"command": "outcome.template"' "$TEMPLATE_REPORT"
@@ -106,12 +107,36 @@ cat > "$ACCEPTANCE_PASS" <<'JSON'
 }
 JSON
 
-"$MNEME_BIN" begin "Implement outcome marker" --acceptance "$ACCEPTANCE_PASS" --store "$STORE" --json > "$BEGIN_PASS"
+VERIFIER_HASH="$(python3 - "$ROOT/scripts/mneme-outcome-verifier.py" <<'PY'
+import hashlib
+import sys
+from pathlib import Path
+
+print(hashlib.sha256(Path(sys.argv[1]).read_bytes()).hexdigest())
+PY
+)"
+cat > "$VERIFIER_MANIFEST" <<JSON
+{
+  "schema_version": "mneme.verifier_manifest.v1",
+  "policy": "strict",
+  "verifiers": [
+    {
+      "name": "mneme-outcome-verifier.py",
+      "path": "$ROOT/scripts/mneme-outcome-verifier.py",
+      "sha256": "$VERIFIER_HASH"
+    }
+  ]
+}
+JSON
+
+MNEME_VERIFIER_POLICY=strict MNEME_VERIFIER_MANIFEST="$VERIFIER_MANIFEST" "$MNEME_BIN" begin "Implement outcome marker" --acceptance "$ACCEPTANCE_PASS" --store "$STORE" --json > "$BEGIN_PASS"
 grep -q '"acceptance"' "$BEGIN_PASS"
 printf '%s\n' 'pub fn outcome_marker() {}' >> src/main.rs
-"$MNEME_BIN" end session-001 --summary "Implemented outcome marker" --verifier-command "$ROOT/scripts/mneme-outcome-verifier.py" --store "$STORE" --json > "$END_PASS"
+"$MNEME_BIN" end session-001 --summary "Implemented outcome marker" --verifier-command "$ROOT/scripts/mneme-outcome-verifier.py" --verifier-policy strict --verifier-manifest "$VERIFIER_MANIFEST" --store "$STORE" --json > "$END_PASS"
 grep -q '"status": "passed"' "$END_PASS"
 grep -q '"completed": true' "$END_PASS"
+grep -q '"trusted": true' "$END_PASS"
+grep -q "$VERIFIER_HASH" "$END_PASS"
 "$MNEME_BIN" outcome status session-001 --store "$STORE" --json > "$STATUS_PASS"
 grep -q '"command": "outcome.status"' "$STATUS_PASS"
 grep -q '"status": "passed"' "$STATUS_PASS"
