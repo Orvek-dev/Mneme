@@ -2,6 +2,30 @@
 
 This project follows the spirit of Keep a Changelog.
 
+## [0.70.0] - 2026-05-30
+
+### Added
+
+- Added MVP1 Core Outcome Gate for V1 sessions: `mneme.acceptance.v1` is stored
+  at session begin, external `mneme.verifier.v1` reports are validated at
+  session end, and first-class `session.gate_result` records completion
+  evidence.
+- Added `mneme outcome status <session-id>` for read-only inspection of
+  `passed`, `failed`, `error`, `pending_judgment`, or ungated sessions.
+- Added `scripts/mneme-outcome-verifier.py`, an external deterministic verifier
+  for command, diff_touches, diff_scope, and symbol_present criteria.
+- Added `scripts/outcome-gate-smoke.sh` and release quality-gate coverage for a
+  passing gated session and a non-zero failed-gate path.
+- Added `mneme_v1_outcome_status` to the MCP server so agents can inspect
+  outcome gate results through the local stdio surface.
+
+### Changed
+
+- `mneme end` and `mneme hook end` now exit non-zero after writing JSON when a
+  gated session closes with a non-passed `gate_result`.
+- Documented the outcome gate boundary: external tools propose verification,
+  while `mneme-core` owns validation, audit, and stored completion status.
+
 ## [0.69.0] - 2026-05-29
 
 ### Added

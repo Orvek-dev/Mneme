@@ -33,6 +33,7 @@ Successful `hook begin` output includes:
 - `context_item_count`
 - `omitted_count`
 - `context_claim_ids`
+- `acceptance_enabled`
 - `report`
 
 Successful `hook end` output includes:
@@ -43,7 +44,10 @@ Successful `hook end` output includes:
 - `recoverable: false`
 - `store`
 - `extractor`
+- `verifier`
 - `session_id`
+- `gate_ok`
+- `gate_status`
 - `remembered_event_count`
 - `remembered_claim_count`
 - `remembered_event_ids`
@@ -68,6 +72,10 @@ Failure output includes:
 
 Hook failures exit non-zero after writing JSON. The CLI suppresses duplicate
 stderr for hook failures that were already reported in the JSON envelope.
+When a session has an outcome gate, `hook end` writes the normal end envelope
+with `ok: false`, `gate_ok: false`, and `gate_status` set to `failed`,
+`error`, or `pending_judgment`; it then exits non-zero. The failed session and
+its `gate_result` remain stored for the next agent loop.
 
 ## Error Kinds
 
@@ -90,6 +98,7 @@ cargo run -p mneme-cli -- hook doctor \
   --store /tmp/mneme.json
 
 cargo run -p mneme-cli -- hook begin "Draft setup plan" \
+  --acceptance acceptance.json \
   --query "local-first" \
   --scope private \
   --max-items 3 \
@@ -98,6 +107,7 @@ cargo run -p mneme-cli -- hook begin "Draft setup plan" \
 
 cargo run -p mneme-cli -- hook end session-001 \
   --summary "Prepared a concise setup plan" \
+  --verifier-command scripts/mneme-outcome-verifier.py \
   --remember "user prefers concise setup plans" \
   --store /tmp/mneme.json
 

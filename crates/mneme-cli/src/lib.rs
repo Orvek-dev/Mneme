@@ -10,27 +10,29 @@ use std::env;
 use std::fmt::{Display, Formatter};
 use std::io::{self, Write};
 use std::path::{Path, PathBuf};
+use std::process::{Command, Stdio};
 use std::thread;
 use std::time::Duration;
 
 use mneme_core::{
-    validate_state, BuildStage, ClaimRecord, ClaimStatus, CommandExtractor, CompactionReport,
-    ContextPack, ContextQuery, EngineSnapshot, EventInput, ExtractorError, JsonFileStore,
-    JsonTeamFileStore, MnemeConfig, MnemeEngine, MnemeExtractor, MnemeState, MnemeStore,
-    RuleBasedExtractor, SessionBeginInput, SessionBeginReport, SessionEndInput, SessionEndReport,
-    SessionError, SessionMemoryInputMode, SessionRecord, StateValidationReport, StoreError,
-    StoreErrorKind, StoreFileInspection, StoreFileStatus, StoreInspection, StoreRepairReport,
-    StoreRestoreReport, TeamActor, TeamAdapterManifest, TeamAgentInput, TeamContextPack,
-    TeamContextQuery, TeamFirewallReport, TeamHandoffPackage, TeamMemoryConfig, TeamMemoryEngine,
-    TeamMemoryQualityReport, TeamMemoryRecord, TeamMemoryState, TeamOntologyReport,
-    TeamProjectInput, TeamPromotionCreateInput, TeamPromotionRecord, TeamPromotionReviewInput,
-    TeamPromotionReviewReport, TeamRole, TeamRunBeginInput, TeamRunBeginReport, TeamRunEndInput,
-    TeamRunEndReport, TeamRunHandoffInput, TeamRunNoteInput, TeamRunNoteReport,
-    TeamStateValidationReport, TeamSyncApplyReport, TeamSyncEnvelope, TeamSyncExportInput,
-    TeamUserInput, ValidationSeverity, DEFAULT_CONTEXT_MAX_ITEMS, DEFAULT_TEAM_CONTEXT_MAX_ITEMS,
-    PRODUCT_NAME,
+    validate_state, AcceptanceBaseline, AcceptanceContract, AcceptanceCriterion,
+    AcceptanceCriterionKind, BuildStage, ClaimRecord, ClaimStatus, CommandExtractor,
+    CompactionReport, ContextPack, ContextQuery, EngineSnapshot, EventInput, ExtractorError,
+    JsonFileStore, JsonTeamFileStore, MnemeConfig, MnemeEngine, MnemeExtractor, MnemeState,
+    MnemeStore, OutcomeGateResult, RuleBasedExtractor, SessionBeginInput, SessionBeginReport,
+    SessionEndInput, SessionEndReport, SessionError, SessionMemoryInputMode, SessionRecord,
+    StateValidationReport, StoreError, StoreErrorKind, StoreFileInspection, StoreFileStatus,
+    StoreInspection, StoreRepairReport, StoreRestoreReport, TeamActor, TeamAdapterManifest,
+    TeamAgentInput, TeamContextPack, TeamContextQuery, TeamFirewallReport, TeamHandoffPackage,
+    TeamMemoryConfig, TeamMemoryEngine, TeamMemoryQualityReport, TeamMemoryRecord, TeamMemoryState,
+    TeamOntologyReport, TeamProjectInput, TeamPromotionCreateInput, TeamPromotionRecord,
+    TeamPromotionReviewInput, TeamPromotionReviewReport, TeamRole, TeamRunBeginInput,
+    TeamRunBeginReport, TeamRunEndInput, TeamRunEndReport, TeamRunHandoffInput, TeamRunNoteInput,
+    TeamRunNoteReport, TeamStateValidationReport, TeamSyncApplyReport, TeamSyncEnvelope,
+    TeamSyncExportInput, TeamUserInput, ValidationSeverity, VerifierReport,
+    DEFAULT_CONTEXT_MAX_ITEMS, DEFAULT_TEAM_CONTEXT_MAX_ITEMS, PRODUCT_NAME,
 };
-use serde::Serialize;
+use serde::{Deserialize, Serialize};
 
 const AGENT_HOOK_SCHEMA_VERSION: &str = "mneme.agent_hook.v1";
 const STORE_MUTATION_RETRY_ATTEMPTS: usize = 80;
@@ -242,6 +244,7 @@ fn run_cli_with_writer(
         "snapshot" => run_command_or_help("snapshot", raw_args, writer, run_snapshot),
         "begin" => run_command_or_help("begin", raw_args, writer, run_begin),
         "end" => run_command_or_help("end", raw_args, writer, run_end),
+        "outcome" => run_command_or_help("outcome", raw_args, writer, run_outcome),
         "hook" => run_command_or_help("hook", raw_args, writer, run_agent_hook),
         "mcp" => run_command_or_help("mcp", raw_args, writer, run_mcp),
         "team" => run_command_or_help("team", raw_args, writer, run_team),
@@ -253,7 +256,7 @@ fn run_cli_with_writer(
         "repair" => run_command_or_help("repair", raw_args, writer, run_repair),
         "restore" => run_command_or_help("restore", raw_args, writer, run_restore),
         _ => Err(CliError::invalid_cli(format!(
-            "unknown mneme command: {command}\navailable commands: init, doctor, version, ingest, remember, correct, forget, claims, quality, curate, context, snapshot, begin, end, hook, mcp, team, validate, export, review, import, compact, repair, restore"
+            "unknown mneme command: {command}\navailable commands: init, doctor, version, ingest, remember, correct, forget, claims, quality, curate, context, snapshot, begin, end, outcome, hook, mcp, team, validate, export, review, import, compact, repair, restore"
         ))),
     }
 }
@@ -302,7 +305,7 @@ fn print_help(command: Option<&str>, writer: &mut impl Write) -> Result<(), CliE
         None => MNEME_HELP,
         Some(command) => command_help(command).ok_or_else(|| {
             CliError::invalid_cli(format!(
-                "unknown mneme help topic: {command}\navailable help topics: init, doctor, version, ingest, remember, correct, forget, claims, quality, curate, context, snapshot, begin, end, hook, mcp, team, validate, export, review, import, compact, repair, restore"
+                "unknown mneme help topic: {command}\navailable help topics: init, doctor, version, ingest, remember, correct, forget, claims, quality, curate, context, snapshot, begin, end, outcome, hook, mcp, team, validate, export, review, import, compact, repair, restore"
             ))
         })?,
     };
@@ -326,6 +329,7 @@ fn command_help(command: &str) -> Option<&'static str> {
         "snapshot" => Some(MNEME_SNAPSHOT_HELP),
         "begin" => Some(MNEME_BEGIN_HELP),
         "end" => Some(MNEME_END_HELP),
+        "outcome" => Some(MNEME_OUTCOME_HELP),
         "hook" => Some(MNEME_HOOK_HELP),
         "mcp" => Some(MNEME_MCP_HELP),
         "team" => Some(MNEME_TEAM_HELP),
@@ -361,6 +365,7 @@ Commands:
   snapshot    Print the current store snapshot.
   begin       Start an agent task session and retrieve context.
   end         Close an agent task session and optionally remember claims.
+  outcome     Inspect a session outcome gate result.
   hook        Agent hook JSON contract for begin/end automation.
   mcp         Generate MCP client configuration snippets.
   team        Manage v2 team memory, policy, promotion, and audit.
@@ -384,6 +389,7 @@ Examples:
   mneme curate --store /tmp/mneme.json --json
   mneme context "local-first" --store /tmp/mneme.json --json
   mneme team init --store /tmp/mneme-team.json --json
+  mneme outcome status session-001 --store /tmp/mneme.json --json
   mneme mcp config --client all --json
   mneme team remember "Atlas deploys require rollback notes" --actor alice --scope team --store /tmp/mneme-team.json
   mneme hook begin "Draft setup plan" --query "local-first" --store /tmp/mneme.json
@@ -495,29 +501,46 @@ Print the current store snapshot.
 Example:
   mneme snapshot --store /tmp/mneme.json --json"#;
 
-const MNEME_BEGIN_HELP: &str = r#"Usage: mneme begin <task> [--query <query>] [--scope <scope>]... [--max-items <n>] [--agent <id>] [--store <path>] [--json]
+const MNEME_BEGIN_HELP: &str = r#"Usage: mneme begin <task> [--acceptance <path>] [--query <query>] [--scope <scope>]... [--max-items <n>] [--agent <id>] [--store <path>] [--json]
 
 Start an agent task session and retrieve task-scoped context. Defaults to the
 private scope unless one or more --scope values are provided. Results are capped
-to 8 ranked items by default.
+to 8 ranked items by default. When --acceptance is supplied, Mneme stores a
+mneme.acceptance.v1 contract and captures the git/worktree baseline before the
+agent starts work.
 
 Example:
-  mneme begin "Draft setup plan" --query "local-first" --scope private --max-items 3 --agent codex --store /tmp/mneme.json --json"#;
+  mneme begin "Draft setup plan" --query "local-first" --scope private --max-items 3 --agent codex --store /tmp/mneme.json --json
+  mneme begin "Implement parser" --acceptance acceptance.json --store /tmp/mneme.json --json"#;
 
-const MNEME_END_HELP: &str = r#"Usage: mneme end <session-id> [--summary <text>] [--remember <claim>]... [--agent <id>] [--extractor rule|command] [--extractor-command <program>] [--extractor-arg <arg>]... [--store <path>] [--json]
+const MNEME_END_HELP: &str = r#"Usage: mneme end <session-id> [--summary <text>] [--remember <claim>]... [--verifier-report <path>] [--verifier-command <program>] [--verifier-arg <arg>]... [--agent <id>] [--extractor rule|command] [--extractor-command <program>] [--extractor-arg <arg>]... [--store <path>] [--json]
 
 Close an agent task session and optionally write memory claims. The default
 rule extractor treats --remember values as explicit claims; the command
-extractor receives --remember values as raw memory notes.
+extractor receives --remember values as raw memory notes. If the session has an
+acceptance contract, provide either --verifier-report or --verifier-command so
+the core can store a first-class gate_result. Hook end exits non-zero when that
+gate_result is not passed.
 
 Example:
   mneme end session-001 --summary "Prepared a concise setup plan" --remember "user prefers concise setup plans" --store /tmp/mneme.json --json
-  mneme end session-001 --remember "For future plans, keep summaries direct." --extractor command --extractor-command ./mneme-extractor-wrapper --store /tmp/mneme.json"#;
+  mneme end session-001 --remember "For future plans, keep summaries direct." --extractor command --extractor-command ./mneme-extractor-wrapper --store /tmp/mneme.json
+  mneme end session-001 --summary "Implemented parser" --verifier-command scripts/mneme-outcome-verifier.py --store /tmp/mneme.json --json"#;
+
+const MNEME_OUTCOME_HELP: &str = r#"Usage:
+  mneme outcome status <session-id> [--store <path>] [--json]
+
+Inspect the first-class outcome gate result for a session. This is read-only
+and reports whether the work is completed, failed, errored, pending judgment,
+or has no acceptance gate.
+
+Example:
+  mneme outcome status session-001 --store /tmp/mneme.json --json"#;
 
 const MNEME_HOOK_HELP: &str = r#"Usage:
   mneme hook doctor [--store <path>]
-  mneme hook begin <task> [--query <query>] [--scope <scope>]... [--max-items <n>] [--agent <id>] [--store <path>]
-  mneme hook end <session-id> [--summary <text>] [--remember <claim>]... [--agent <id>] [--extractor rule|command] [--extractor-command <program>] [--extractor-arg <arg>]... [--store <path>]
+  mneme hook begin <task> [--acceptance <path>] [--query <query>] [--scope <scope>]... [--max-items <n>] [--agent <id>] [--store <path>]
+  mneme hook end <session-id> [--summary <text>] [--remember <claim>]... [--verifier-report <path>] [--verifier-command <program>] [--verifier-arg <arg>]... [--agent <id>] [--extractor rule|command] [--extractor-command <program>] [--extractor-arg <arg>]... [--store <path>]
 
 Run agent doctor/begin/end hooks with the stable mneme.agent_hook.v1 JSON envelope.
 Success and failure both write JSON to stdout. Failures exit non-zero.
@@ -939,6 +962,7 @@ struct BeginOptions {
     query: Option<String>,
     allowed_scopes: Vec<String>,
     max_items: Option<usize>,
+    acceptance_path: Option<PathBuf>,
 }
 
 #[derive(Debug, Clone, Default)]
@@ -994,6 +1018,8 @@ struct EndOptions {
     summary: Option<String>,
     remember: Vec<String>,
     extractor: ExtractorOptions,
+    verifier_report_path: Option<PathBuf>,
+    verifier: VerifierOptions,
 }
 
 #[derive(Debug, Clone, Default)]
@@ -1010,6 +1036,25 @@ impl ExtractorOptions {
     fn name(&self) -> &'static str {
         match self {
             Self::Rule => "rule",
+            Self::Command { .. } => "command",
+        }
+    }
+}
+
+#[derive(Debug, Clone, Default)]
+enum VerifierOptions {
+    #[default]
+    None,
+    Command {
+        program: Option<String>,
+        args: Vec<String>,
+    },
+}
+
+impl VerifierOptions {
+    fn name(&self) -> &'static str {
+        match self {
+            Self::None => "none",
             Self::Command { .. } => "command",
         }
     }
@@ -1063,6 +1108,7 @@ struct AgentHookProfileValues {
     mneme_scope: Option<String>,
     mneme_max_items: Option<String>,
     mneme_extractor_command: Option<String>,
+    mneme_verifier_command: Option<String>,
 }
 
 #[derive(Debug, Serialize)]
@@ -1318,6 +1364,8 @@ struct BeginCliReport {
 struct EndCliReport {
     store: String,
     extractor: String,
+    verifier: String,
+    gate_result: Option<OutcomeGateResult>,
     report: SessionEndReport,
 }
 
@@ -1332,6 +1380,7 @@ struct AgentHookBeginReport {
     context_item_count: usize,
     omitted_count: usize,
     context_claim_ids: Vec<String>,
+    acceptance_enabled: bool,
     report: SessionBeginReport,
 }
 
@@ -1343,12 +1392,64 @@ struct AgentHookEndReport {
     recoverable: bool,
     store: String,
     extractor: String,
+    verifier: String,
     session_id: String,
+    gate_ok: Option<bool>,
+    gate_status: Option<String>,
     remembered_event_count: usize,
     remembered_claim_count: usize,
     remembered_event_ids: Vec<String>,
     remembered_claim_ids: Vec<String>,
     report: SessionEndReport,
+}
+
+#[derive(Debug, Serialize)]
+struct OutcomeStatusReport {
+    command: &'static str,
+    store: String,
+    session_id: String,
+    status: String,
+    gate_result: Option<OutcomeGateResult>,
+    session: SessionRecord,
+}
+
+#[derive(Debug, Serialize)]
+struct VerifierCommandRequest<'a> {
+    schema_version: &'static str,
+    store: String,
+    workspace: String,
+    session_id: &'a str,
+    session: &'a SessionRecord,
+    acceptance: &'a AcceptanceContract,
+}
+
+#[derive(Debug, Deserialize)]
+struct RawAcceptanceContract {
+    schema_version: String,
+    #[serde(default)]
+    task_id: Option<String>,
+    #[serde(default)]
+    baseline: AcceptanceBaseline,
+    #[serde(default)]
+    criteria: Vec<RawAcceptanceCriterion>,
+}
+
+#[derive(Debug, Deserialize)]
+struct RawAcceptanceCriterion {
+    id: String,
+    kind: AcceptanceCriterionKind,
+    #[serde(default)]
+    description: Option<String>,
+    #[serde(default)]
+    command: serde_json::Value,
+    #[serde(default)]
+    diff_touches: serde_json::Value,
+    #[serde(default)]
+    diff_scope: serde_json::Value,
+    #[serde(default)]
+    symbol_present: serde_json::Value,
+    #[serde(default)]
+    judgment: serde_json::Value,
 }
 
 #[derive(Debug, Serialize)]
@@ -2039,6 +2140,11 @@ fn run_review(raw_args: Vec<String>, writer: &mut impl Write) -> Result<(), CliE
 fn run_begin(raw_args: Vec<String>, writer: &mut impl Write) -> Result<(), CliError> {
     let (task, options) = parse_begin_args(raw_args)?;
     let store_path = resolve_store_path(&options.common)?;
+    let acceptance = options
+        .acceptance_path
+        .as_deref()
+        .map(load_acceptance_contract)
+        .transpose()?;
     let mut engine = load_engine(&store_path)?;
     let report = engine.begin_session(SessionBeginInput {
         task,
@@ -2047,6 +2153,7 @@ fn run_begin(raw_args: Vec<String>, writer: &mut impl Write) -> Result<(), CliEr
         query: options.query,
         allowed_scopes: effective_allowed_scopes(options.allowed_scopes),
         max_items: effective_max_items(options.max_items),
+        acceptance,
     });
     persist_engine(&store_path, &engine)?;
     let cli_report = BeginCliReport {
@@ -2060,7 +2167,9 @@ fn run_end(raw_args: Vec<String>, writer: &mut impl Write) -> Result<(), CliErro
     let (session_id, options) = parse_end_args(raw_args)?;
     let store_path = resolve_store_path(&options.common)?;
     let extractor_name = options.extractor.name().to_owned();
+    let verifier_name = options.verifier.name().to_owned();
     let mut engine = load_engine(&store_path)?;
+    let verifier_report = load_or_run_verifier_report(&store_path, &engine, &session_id, &options)?;
     let report = end_session_for_cli(
         &mut engine,
         SessionEndInput {
@@ -2069,16 +2178,67 @@ fn run_end(raw_args: Vec<String>, writer: &mut impl Write) -> Result<(), CliErro
             scope: None,
             summary: options.summary,
             remember: options.remember,
+            verifier_report,
         },
         &options.extractor,
     )?;
+    let gate_result = report.session.gate_result.clone();
     persist_engine(&store_path, &engine)?;
+    if gate_blocks_completion(&gate_result) {
+        emit_failed_gate_cli_report(
+            writer,
+            &EndCliReport {
+                store: store_path.display().to_string(),
+                extractor: extractor_name,
+                verifier: verifier_name,
+                gate_result,
+                report,
+            },
+            options.common.json,
+        )?;
+        return Err(CliError::reported(1));
+    }
     let cli_report = EndCliReport {
         store: store_path.display().to_string(),
         extractor: extractor_name,
+        verifier: verifier_name,
+        gate_result,
         report,
     };
     emit_end_report(&cli_report, options.common.json, writer)
+}
+
+fn run_outcome(mut raw_args: Vec<String>, writer: &mut impl Write) -> Result<(), CliError> {
+    if raw_args.first().is_some_and(|arg| arg == "status") {
+        raw_args.remove(0);
+    } else {
+        return Err(CliError::invalid_cli(
+            "usage: mneme outcome status <session-id> [--store <path>] [--json]",
+        ));
+    }
+    let (session_id, options) = parse_outcome_status_args(raw_args)?;
+    let store_path = resolve_store_path(&options)?;
+    let engine = load_engine(&store_path)?;
+    let session = engine
+        .snapshot()
+        .sessions
+        .into_iter()
+        .find(|session| session.id == session_id)
+        .ok_or_else(|| CliError::lifecycle(format!("unknown session: {session_id}")))?;
+    let status = session
+        .gate_result
+        .as_ref()
+        .map(|gate| gate.status.as_str().to_owned())
+        .unwrap_or_else(|| "no_acceptance_gate".to_owned());
+    let report = OutcomeStatusReport {
+        command: "outcome.status",
+        store: store_path.display().to_string(),
+        session_id: session.id.clone(),
+        status,
+        gate_result: session.gate_result.clone(),
+        session,
+    };
+    emit_outcome_status_report(&report, options.json, writer)
 }
 
 fn end_session_for_cli(
@@ -2114,6 +2274,9 @@ fn run_agent_hook(raw_args: Vec<String>, writer: &mut impl Write) -> Result<(), 
     match run_agent_hook_inner(raw_args, writer) {
         Ok(()) => Ok(()),
         Err(error) => {
+            if matches!(error.kind, CliErrorKind::Reported) {
+                return Err(error);
+            }
             emit_agent_hook_error(operation, &error, writer)?;
             Err(CliError::reported(error.exit_code()))
         }
@@ -2163,6 +2326,11 @@ fn run_agent_hook_doctor(raw_args: Vec<String>, writer: &mut impl Write) -> Resu
 fn run_agent_hook_begin(raw_args: Vec<String>, writer: &mut impl Write) -> Result<(), CliError> {
     let (task, options) = parse_begin_args(raw_args)?;
     let store_path = resolve_store_path(&options.common)?;
+    let acceptance = options
+        .acceptance_path
+        .as_deref()
+        .map(load_acceptance_contract)
+        .transpose()?;
     let mut engine = load_engine(&store_path)?;
     let report = engine.begin_session(SessionBeginInput {
         task,
@@ -2171,6 +2339,7 @@ fn run_agent_hook_begin(raw_args: Vec<String>, writer: &mut impl Write) -> Resul
         query: options.query,
         allowed_scopes: effective_allowed_scopes(options.allowed_scopes),
         max_items: effective_max_items(options.max_items),
+        acceptance,
     });
     persist_engine(&store_path, &engine)?;
     let hook_report = AgentHookBeginReport {
@@ -2183,6 +2352,7 @@ fn run_agent_hook_begin(raw_args: Vec<String>, writer: &mut impl Write) -> Resul
         context_item_count: report.context_pack.items.len(),
         omitted_count: report.context_pack.omitted.len(),
         context_claim_ids: report.session.context_claim_ids.clone(),
+        acceptance_enabled: report.session.acceptance.is_some(),
         report,
     };
     write_json(writer, &hook_report)
@@ -2192,7 +2362,9 @@ fn run_agent_hook_end(raw_args: Vec<String>, writer: &mut impl Write) -> Result<
     let (session_id, options) = parse_end_args(raw_args)?;
     let store_path = resolve_store_path(&options.common)?;
     let extractor_name = options.extractor.name().to_owned();
+    let verifier_name = options.verifier.name().to_owned();
     let mut engine = load_engine(&store_path)?;
+    let verifier_report = load_or_run_verifier_report(&store_path, &engine, &session_id, &options)?;
     let report = end_session_for_cli(
         &mut engine,
         SessionEndInput {
@@ -2201,25 +2373,38 @@ fn run_agent_hook_end(raw_args: Vec<String>, writer: &mut impl Write) -> Result<
             scope: None,
             summary: options.summary,
             remember: options.remember,
+            verifier_report,
         },
         &options.extractor,
     )?;
     persist_engine(&store_path, &engine)?;
+    let gate_result = report.session.gate_result.clone();
+    let gate_ok = gate_result.as_ref().map(|gate| gate.completed);
+    let gate_status = gate_result
+        .as_ref()
+        .map(|gate| gate.status.as_str().to_owned());
     let hook_report = AgentHookEndReport {
         schema_version: AGENT_HOOK_SCHEMA_VERSION,
-        ok: true,
+        ok: !gate_blocks_completion(&gate_result),
         operation: "end",
         recoverable: false,
         store: store_path.display().to_string(),
         extractor: extractor_name,
+        verifier: verifier_name,
         session_id: report.session.id.clone(),
+        gate_ok,
+        gate_status,
         remembered_event_count: report.remembered_event_ids.len(),
         remembered_claim_count: report.remembered_claim_ids.len(),
         remembered_event_ids: report.remembered_event_ids.clone(),
         remembered_claim_ids: report.remembered_claim_ids.clone(),
         report,
     };
-    write_json(writer, &hook_report)
+    write_json(writer, &hook_report)?;
+    if !hook_report.ok {
+        return Err(CliError::reported(1));
+    }
+    Ok(())
 }
 
 fn run_mcp(mut raw_args: Vec<String>, writer: &mut impl Write) -> Result<(), CliError> {
@@ -4261,6 +4446,29 @@ fn push_command_arg(options: &mut ExtractorOptions, arg: String) {
     }
 }
 
+fn set_verifier_program(options: &mut VerifierOptions, program: String) {
+    let args = match options {
+        VerifierOptions::Command { args, .. } => std::mem::take(args),
+        VerifierOptions::None => Vec::new(),
+    };
+    *options = VerifierOptions::Command {
+        program: Some(program),
+        args,
+    };
+}
+
+fn push_verifier_arg(options: &mut VerifierOptions, arg: String) {
+    match options {
+        VerifierOptions::Command { args, .. } => args.push(arg),
+        VerifierOptions::None => {
+            *options = VerifierOptions::Command {
+                program: None,
+                args: vec![arg],
+            };
+        }
+    }
+}
+
 fn parse_correct_args(raw_args: Vec<String>) -> Result<(CorrectTarget, EventOptions), CliError> {
     let mut options = EventOptions::default();
     let mut positionals = Vec::new();
@@ -4558,6 +4766,11 @@ fn parse_begin_args(raw_args: Vec<String>) -> Result<(String, BeginOptions), Cli
                     "--max-items",
                 )?)?);
             }
+            "--acceptance" => {
+                idx += 1;
+                options.acceptance_path =
+                    Some(PathBuf::from(required_arg(&raw_args, idx, "--acceptance")?));
+            }
             value if value.starts_with('-') => {
                 return Err(CliError::invalid_cli(format!(
                     "unknown begin option: {value}"
@@ -4569,7 +4782,7 @@ fn parse_begin_args(raw_args: Vec<String>) -> Result<(String, BeginOptions), Cli
     }
     if positionals.len() != 1 {
         return Err(CliError::invalid_cli(
-            "usage: mneme begin <task> [--query <query>] [--scope <scope>]... [--max-items <n>] [--agent <id>] [--store <path>] [--json]",
+            "usage: mneme begin <task> [--acceptance <path>] [--query <query>] [--scope <scope>]... [--max-items <n>] [--agent <id>] [--store <path>] [--json]",
         ));
     }
     Ok((require_nonempty(positionals.remove(0), "task")?, options))
@@ -4658,6 +4871,28 @@ fn parse_end_args(raw_args: Vec<String>) -> Result<(String, EndOptions), CliErro
                     required_arg(&raw_args, idx, "--extractor-arg")?,
                 );
             }
+            "--verifier-report" => {
+                idx += 1;
+                options.verifier_report_path = Some(PathBuf::from(required_arg(
+                    &raw_args,
+                    idx,
+                    "--verifier-report",
+                )?));
+            }
+            "--verifier-command" => {
+                idx += 1;
+                set_verifier_program(
+                    &mut options.verifier,
+                    required_arg(&raw_args, idx, "--verifier-command")?,
+                );
+            }
+            "--verifier-arg" => {
+                idx += 1;
+                push_verifier_arg(
+                    &mut options.verifier,
+                    required_arg(&raw_args, idx, "--verifier-arg")?,
+                );
+            }
             value if value.starts_with('-') => {
                 return Err(CliError::invalid_cli(format!(
                     "unknown end option: {value}"
@@ -4669,12 +4904,42 @@ fn parse_end_args(raw_args: Vec<String>) -> Result<(String, EndOptions), CliErro
     }
     if positionals.len() != 1 {
         return Err(CliError::invalid_cli(
-            "usage: mneme end <session-id> [--summary <text>] [--remember <claim>]... [--agent <id>] [--extractor rule|command] [--extractor-command <program>] [--extractor-arg <arg>]... [--store <path>] [--json]",
+            "usage: mneme end <session-id> [--summary <text>] [--remember <claim>]... [--verifier-report <path>] [--verifier-command <program>] [--verifier-arg <arg>]... [--agent <id>] [--extractor rule|command] [--extractor-command <program>] [--extractor-arg <arg>]... [--store <path>] [--json]",
         ));
     }
     if options.summary.is_none() && options.remember.is_empty() {
         return Err(CliError::invalid_cli(
             "mneme end requires --summary <text> or at least one --remember <claim>",
+        ));
+    }
+    Ok((
+        require_nonempty(positionals.remove(0), "session id")?,
+        options,
+    ))
+}
+
+fn parse_outcome_status_args(raw_args: Vec<String>) -> Result<(String, CommonOptions), CliError> {
+    let mut options = CommonOptions::default();
+    let mut positionals = Vec::new();
+    let mut idx = 0;
+    while idx < raw_args.len() {
+        if parse_common_option(&raw_args, &mut idx, &mut options)? {
+            idx += 1;
+            continue;
+        }
+        match raw_args[idx].as_str() {
+            value if value.starts_with('-') => {
+                return Err(CliError::invalid_cli(format!(
+                    "unknown outcome status option: {value}"
+                )));
+            }
+            value => positionals.push(value.to_owned()),
+        }
+        idx += 1;
+    }
+    if positionals.len() != 1 {
+        return Err(CliError::invalid_cli(
+            "usage: mneme outcome status <session-id> [--store <path>] [--json]",
         ));
     }
     Ok((
@@ -4797,6 +5062,200 @@ fn build_extractor(options: &ExtractorOptions) -> Result<Box<dyn MnemeExtractor>
             Ok(Box::new(CommandExtractor::new(program, args.clone())))
         }
     }
+}
+
+fn load_acceptance_contract(path: &Path) -> Result<AcceptanceContract, CliError> {
+    let text = std::fs::read_to_string(path)
+        .map_err(|source| CliError::io("read acceptance", path, source))?;
+    let raw: RawAcceptanceContract =
+        serde_json::from_str(&text).map_err(|source| CliError::json_file("parse", path, source))?;
+    let mut baseline = raw.baseline;
+    let captured = capture_acceptance_baseline()?;
+    if baseline.git_head.trim().is_empty() {
+        baseline.git_head = captured.git_head;
+    }
+    if baseline.diff_base.trim().is_empty() {
+        baseline.diff_base = captured.diff_base;
+    }
+    if baseline.worktree.trim().is_empty() {
+        baseline.worktree = captured.worktree;
+    }
+    baseline.dirty |= captured.dirty;
+    baseline.warnings.extend(captured.warnings);
+    baseline.warnings.sort();
+    baseline.warnings.dedup();
+    let criteria = raw
+        .criteria
+        .into_iter()
+        .map(|criterion| {
+            let config = criterion_config_for_kind(&criterion);
+            AcceptanceCriterion {
+                id: criterion.id,
+                kind: criterion.kind,
+                description: criterion.description,
+                config,
+            }
+        })
+        .collect();
+    Ok(AcceptanceContract {
+        schema_version: raw.schema_version,
+        task_id: raw.task_id,
+        baseline,
+        criteria,
+    })
+}
+
+fn criterion_config_for_kind(criterion: &RawAcceptanceCriterion) -> serde_json::Value {
+    match criterion.kind {
+        AcceptanceCriterionKind::Command => criterion.command.clone(),
+        AcceptanceCriterionKind::DiffTouches => criterion.diff_touches.clone(),
+        AcceptanceCriterionKind::DiffScope => criterion.diff_scope.clone(),
+        AcceptanceCriterionKind::SymbolPresent => criterion.symbol_present.clone(),
+        AcceptanceCriterionKind::Judgment => criterion.judgment.clone(),
+    }
+}
+
+fn capture_acceptance_baseline() -> Result<AcceptanceBaseline, CliError> {
+    let worktree = env::current_dir()
+        .map_err(|source| CliError::io("read current dir", Path::new("."), source))?;
+    let mut baseline = AcceptanceBaseline {
+        git_head: "unknown".to_owned(),
+        diff_base: "unknown".to_owned(),
+        worktree: worktree.display().to_string(),
+        dirty: false,
+        warnings: Vec::new(),
+    };
+    match run_git_output(&worktree, &["rev-parse", "HEAD"]) {
+        Ok(head) if !head.trim().is_empty() => {
+            baseline.git_head = head.trim().to_owned();
+            baseline.diff_base = baseline.git_head.clone();
+        }
+        _ => baseline.warnings.push("git_head_unavailable".to_owned()),
+    }
+    match run_git_output(&worktree, &["status", "--porcelain"]) {
+        Ok(status) => {
+            baseline.dirty = !status.trim().is_empty();
+            if baseline.dirty {
+                baseline.warnings.push("dirty_worktree_at_begin".to_owned());
+            }
+        }
+        _ => baseline.warnings.push("git_status_unavailable".to_owned()),
+    }
+    Ok(baseline)
+}
+
+fn run_git_output(worktree: &Path, args: &[&str]) -> Result<String, CliError> {
+    let output = Command::new("git")
+        .args(args)
+        .current_dir(worktree)
+        .output()
+        .map_err(|source| CliError::io("run git", worktree, source))?;
+    if !output.status.success() {
+        return Err(CliError::lifecycle(format!(
+            "git {} failed with status {}",
+            args.join(" "),
+            output.status
+        )));
+    }
+    String::from_utf8(output.stdout).map_err(|source| {
+        CliError::lifecycle(format!(
+            "git {} returned non-utf8 output: {source}",
+            args.join(" ")
+        ))
+    })
+}
+
+fn load_or_run_verifier_report(
+    store_path: &Path,
+    engine: &MnemeEngine,
+    session_id: &str,
+    options: &EndOptions,
+) -> Result<Option<VerifierReport>, CliError> {
+    if let Some(path) = &options.verifier_report_path {
+        let text = std::fs::read_to_string(path)
+            .map_err(|source| CliError::io("read verifier report", path, source))?;
+        let report = serde_json::from_str(&text)
+            .map_err(|source| CliError::json_file("parse", path, source))?;
+        return Ok(Some(report));
+    }
+    let program = match &options.verifier {
+        VerifierOptions::None => env::var("MNEME_VERIFIER_COMMAND")
+            .ok()
+            .filter(|value| !value.trim().is_empty()),
+        VerifierOptions::Command { program, .. } => program.clone().or_else(|| {
+            env::var("MNEME_VERIFIER_COMMAND")
+                .ok()
+                .filter(|value| !value.trim().is_empty())
+        }),
+    };
+    let Some(program) = program else {
+        return Ok(None);
+    };
+    let args = match &options.verifier {
+        VerifierOptions::Command { args, .. } => args.clone(),
+        VerifierOptions::None => Vec::new(),
+    };
+    run_verifier_command(store_path, engine, session_id, &program, &args).map(Some)
+}
+
+fn run_verifier_command(
+    store_path: &Path,
+    engine: &MnemeEngine,
+    session_id: &str,
+    program: &str,
+    args: &[String],
+) -> Result<VerifierReport, CliError> {
+    let snapshot = engine.snapshot();
+    let session = snapshot
+        .sessions
+        .iter()
+        .find(|session| session.id == session_id)
+        .ok_or_else(|| CliError::lifecycle(format!("unknown session: {session_id}")))?;
+    let acceptance = session.acceptance.as_ref().ok_or_else(|| {
+        CliError::lifecycle(format!(
+            "session {session_id} has no acceptance contract for verifier command"
+        ))
+    })?;
+    let workspace = env::current_dir()
+        .map_err(|source| CliError::io("read current dir", Path::new("."), source))?;
+    let request = VerifierCommandRequest {
+        schema_version: "mneme.verifier_request.v1",
+        store: store_path.display().to_string(),
+        workspace: workspace.display().to_string(),
+        session_id,
+        session,
+        acceptance,
+    };
+    let mut child = Command::new(program)
+        .args(args)
+        .stdin(Stdio::piped())
+        .stdout(Stdio::piped())
+        .stderr(Stdio::piped())
+        .spawn()
+        .map_err(|source| CliError::io("spawn verifier command", Path::new(program), source))?;
+    {
+        let stdin = child
+            .stdin
+            .as_mut()
+            .ok_or_else(|| CliError::lifecycle("verifier command stdin unavailable"))?;
+        serde_json::to_writer(stdin, &request).map_err(CliError::json)?;
+    }
+    let output = child
+        .wait_with_output()
+        .map_err(|source| CliError::io("wait verifier command", Path::new(program), source))?;
+    if !output.status.success() {
+        let stderr = String::from_utf8_lossy(&output.stderr);
+        return Err(CliError::lifecycle(format!(
+            "verifier command failed with status {}: {}",
+            output.status,
+            stderr.trim()
+        )));
+    }
+    serde_json::from_slice(&output.stdout).map_err(CliError::json)
+}
+
+fn gate_blocks_completion(gate_result: &Option<OutcomeGateResult>) -> bool {
+    gate_result.as_ref().is_some_and(|gate| !gate.completed)
 }
 
 fn default_store_path() -> Result<PathBuf, CliError> {
@@ -5034,6 +5493,12 @@ fn inspect_agent_hook_profile(
                 key,
                 &mut inspection.issues,
             ),
+            "MNEME_VERIFIER_COMMAND" => assign_profile_value(
+                &mut inspection.values.mneme_verifier_command,
+                value,
+                key,
+                &mut inspection.issues,
+            ),
             unknown => inspection
                 .issues
                 .push(format!("unknown profile key: {unknown}")),
@@ -5128,6 +5593,17 @@ fn validate_profile_values(
             if !command_path.is_file() {
                 inspection.issues.push(format!(
                     "MNEME_EXTRACTOR_COMMAND is not an executable file: {}",
+                    command_path.display()
+                ));
+            }
+        }
+    }
+    if let Some(command) = &values.mneme_verifier_command {
+        if looks_like_profile_path(command) {
+            let command_path = profile_value_path(command, workspace);
+            if !command_path.is_file() {
+                inspection.issues.push(format!(
+                    "MNEME_VERIFIER_COMMAND is not an executable file: {}",
                     command_path.display()
                 ));
             }
@@ -5416,6 +5892,8 @@ fn render_agent_hook_profile(
             profile.push_str("# MNEME_EXTRACTOR_COMMAND=./mneme-extractor-wrapper\n");
         }
     }
+    profile.push_str("# Optional session-end outcome verifier for gated sessions.\n");
+    profile.push_str("# MNEME_VERIFIER_COMMAND=scripts/mneme-outcome-verifier.py\n");
     Ok(profile)
 }
 
@@ -6367,6 +6845,10 @@ fn emit_doctor_report(
         writeln!(writer, "profile extractor command: {command}")
             .map_err(|source| CliError::io("write", Path::new("<stdout>"), source))?;
     }
+    if let Some(command) = &report.profile.values.mneme_verifier_command {
+        writeln!(writer, "profile verifier command: {command}")
+            .map_err(|source| CliError::io("write", Path::new("<stdout>"), source))?;
+    }
     for issue in &report.profile.issues {
         writeln!(writer, "profile issue: {issue}")
             .map_err(|source| CliError::io("write", Path::new("<stdout>"), source))?;
@@ -6693,12 +7175,42 @@ fn emit_end_report(
     }
     writeln!(
         writer,
-        "mneme: ended session {} from {} (extractor={}, remembered_events={}, remembered_claims={})",
+        "mneme: ended session {} from {} (extractor={}, verifier={}, gate={}, remembered_events={}, remembered_claims={})",
         report.report.session.id,
         report.store,
         report.extractor,
+        report.verifier,
+        report
+            .gate_result
+            .as_ref()
+            .map(|gate| gate.status.as_str())
+            .unwrap_or("none"),
         report.report.remembered_event_ids.len(),
         report.report.remembered_claim_ids.len()
+    )
+    .map_err(|source| CliError::io("write", Path::new("<stdout>"), source))
+}
+
+fn emit_failed_gate_cli_report(
+    writer: &mut impl Write,
+    report: &EndCliReport,
+    json: bool,
+) -> Result<(), CliError> {
+    emit_end_report(report, json, writer)
+}
+
+fn emit_outcome_status_report(
+    report: &OutcomeStatusReport,
+    json: bool,
+    writer: &mut impl Write,
+) -> Result<(), CliError> {
+    if json {
+        return write_json(writer, report);
+    }
+    writeln!(
+        writer,
+        "mneme: outcome {} for {} ({})",
+        report.status, report.session_id, report.store
     )
     .map_err(|source| CliError::io("write", Path::new("<stdout>"), source))
 }

@@ -21,6 +21,8 @@ Environment:
   MNEME_MAX_ITEMS  Optional begin max item count appended when --max-items is absent.
   MNEME_EXTRACTOR_COMMAND
                   Optional command extractor for end --remember notes.
+  MNEME_VERIFIER_COMMAND
+                  Optional outcome verifier for gated hook end sessions.
 
 Options:
   --check-extractor
@@ -67,6 +69,10 @@ apply_config_value() {
     MNEME_EXTRACTOR_COMMAND)
       if [ -z "${MNEME_EXTRACTOR_COMMAND:-}" ]; then MNEME_EXTRACTOR_COMMAND="$value"; fi
       export MNEME_EXTRACTOR_COMMAND
+      ;;
+    MNEME_VERIFIER_COMMAND)
+      if [ -z "${MNEME_VERIFIER_COMMAND:-}" ]; then MNEME_VERIFIER_COMMAND="$value"; fi
+      export MNEME_VERIFIER_COMMAND
       ;;
     *)
       printf '%s\n' "mneme-agent-hook: unknown config key: $key" >&2
@@ -151,6 +157,11 @@ print_runtime_diagnostics() {
   else
     printf '%s\n' "mneme-agent-hook: extractor_command=<unset>"
   fi
+  if [ -n "${MNEME_VERIFIER_COMMAND:-}" ]; then
+    printf 'mneme-agent-hook: verifier_command=%s\n' "$MNEME_VERIFIER_COMMAND"
+  else
+    printf '%s\n' "mneme-agent-hook: verifier_command=<unset>"
+  fi
 }
 
 has_option() {
@@ -212,6 +223,11 @@ with_end_runtime_args() {
       && ! has_option "--extractor-command" "${runtime_args[@]}"; then
       runtime_args+=("--extractor-command" "$MNEME_EXTRACTOR_COMMAND")
     fi
+  fi
+  if [ -n "${MNEME_VERIFIER_COMMAND:-}" ] \
+    && ! has_option "--verifier-report" "${runtime_args[@]}" \
+    && ! has_option "--verifier-command" "${runtime_args[@]}"; then
+    runtime_args+=("--verifier-command" "$MNEME_VERIFIER_COMMAND")
   fi
 }
 

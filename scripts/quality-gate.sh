@@ -28,8 +28,10 @@ python3 -m py_compile scripts/product-review-summary.py
 python3 -m py_compile scripts/product-dogfood-experiment.py
 python3 -m py_compile scripts/product-heldout-gates.py
 python3 -m py_compile scripts/long-horizon-scale-check.py
+python3 -m py_compile scripts/mneme-outcome-verifier.py
 scripts/mneme-mcp-stdio.py --self-test | grep -q '"tool_count": 13'
-cargo run -q -p mneme-mcp -- --self-test | grep -q '"tool_count":44'
+cargo run -q -p mneme-mcp -- --self-test | grep -q '"tool_count":45'
+scripts/outcome-gate-smoke.sh | grep -q 'outcome-gate-smoke: ok'
 scripts/eval-integrity-check.py | grep -q '"ok": true'
 PRODUCT_VALIDATION_CONTRACT="${TMP_ROOT}/mneme-quality-gate-product-validation-contract.json"
 PRODUCT_VALIDATION_DATASET="${TMP_ROOT}/mneme-quality-gate-product-validation-dataset.json"
@@ -143,7 +145,7 @@ MCP_CLIENT_CONTRACT="${TMP_ROOT}/mneme-quality-gate-mcp-client-contract.json"
 MCP_CLIENT_PROTOCOL="${TMP_ROOT}/mneme-quality-gate-mcp-client-protocol.json"
 scripts/mcp-client-continuity-smoke.py --check-contract > "$MCP_CLIENT_CONTRACT"
 grep -q '"command": "mcp-client-continuity-smoke-contract"' "$MCP_CLIENT_CONTRACT"
-grep -q '"expected_tool_count": 44' "$MCP_CLIENT_CONTRACT"
+grep -q '"expected_tool_count": 45' "$MCP_CLIENT_CONTRACT"
 scripts/mcp-client-continuity-smoke.py --protocol-only --no-build > "$MCP_CLIENT_PROTOCOL"
 grep -q '"ok": true' "$MCP_CLIENT_PROTOCOL"
 grep -q '"cross_agent_continuity": "passed"' "$MCP_CLIENT_PROTOCOL"
@@ -269,7 +271,7 @@ INSTALL_BIN="${INSTALL_ROOT}/bin/mneme"
 INSTALL_MCP_BIN="${INSTALL_ROOT}/bin/mneme-mcp"
 test -x "$INSTALL_MCP_BIN"
 "$INSTALL_MCP_BIN" --self-test > "$INSTALL_MCP_SELF_TEST"
-grep -q '"tool_count":44' "$INSTALL_MCP_SELF_TEST"
+grep -q '"tool_count":45' "$INSTALL_MCP_SELF_TEST"
 "$INSTALL_BIN" doctor > "$INSTALL_DOCTOR"
 grep -q 'Mneme local CLI' "$INSTALL_DOCTOR"
 "$INSTALL_BIN" help > "$INSTALL_HELP"
@@ -353,9 +355,13 @@ grep -q "scripts/mneme-agent-hook.sh doctor \[--check-extractor\]" "$MNEME_HELP"
 grep -q -- "--check-extractor" "$MNEME_HELP"
 cargo run -p mneme-cli -- begin --help > "$MNEME_HELP"
 grep -q "Usage: mneme begin" "$MNEME_HELP"
+grep -q -- "--acceptance <path>" "$MNEME_HELP"
+cargo run -p mneme-cli -- outcome --help > "$MNEME_HELP"
+grep -q "mneme outcome status" "$MNEME_HELP"
 cargo run -p mneme-cli -- hook --help > "$MNEME_HELP"
 grep -q "mneme.agent_hook.v1" "$MNEME_HELP"
 grep -q "mneme hook doctor" "$MNEME_HELP"
+grep -q -- "--verifier-command <program>" "$MNEME_HELP"
 cargo run -p mneme-cli -- mcp --help > "$MNEME_HELP"
 grep -q "mneme mcp config" "$MNEME_HELP"
 cargo run -p mneme-cli -- mcp config --client all --json > "$MNEME_HELP"

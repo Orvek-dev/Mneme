@@ -77,6 +77,7 @@ V1 tools:
 - `mneme_v1_forget`
 - `mneme_v1_correct`
 - `mneme_v1_quality`
+- `mneme_v1_outcome_status`
 - `mneme_v1_validate`
 - `mneme_v1_snapshot`
 
@@ -161,7 +162,7 @@ isolated temporary config homes and stores:
 | Direct MCP protocol | Missing end, wrong scope, and secret-context guards | Passed |
 | Codex CLI | Isolated `codex mcp add/list/get` | Passed |
 | Claude Code CLI | Isolated `claude mcp add/list/get`, health connected | Passed |
-| Cursor Agent CLI | Workspace approval and `list-tools` with 44 tools | Passed |
+| Cursor Agent CLI | Workspace approval and `list-tools` with 45 tools | Passed |
 
 This is a client integration smoke test, not an external production benchmark.
 Raw client logs are intentionally not committed because they may include local

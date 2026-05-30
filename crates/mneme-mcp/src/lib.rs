@@ -222,6 +222,7 @@ impl McpServer {
             "mneme_v1_forget" => self.v1_lifecycle(arguments, "forget"),
             "mneme_v1_correct" => self.v1_lifecycle(arguments, "correct"),
             "mneme_v1_quality" => self.v1_quality(),
+            "mneme_v1_outcome_status" => self.v1_outcome_status(arguments),
             "mneme_v1_validate" => self.v1_validate(),
             "mneme_v1_snapshot" => self.v1_snapshot(),
             "mneme_v2_team_init" => self.v2_init(arguments),
@@ -425,6 +426,7 @@ impl McpServer {
             "write_back_ok": finish.get("write_back_ok").cloned().unwrap_or(Value::Bool(false)),
             "remembered_event_count": finish.get("remembered_event_count").cloned().unwrap_or(Value::from(0)),
             "remembered_claim_count": finish.get("remembered_claim_count").cloned().unwrap_or(Value::from(0)),
+            "gate_result": finish.pointer("/report/session/gate_result").cloned().unwrap_or(Value::Null),
             "report": finish.get("report").cloned().unwrap_or(Value::Null),
             "next_recommended_actions": task_finish_next_actions(),
         }))
@@ -535,6 +537,7 @@ impl McpServer {
             query: optional_string(arguments, "query"),
             allowed_scopes: scopes,
             max_items: optional_usize(arguments, "max_items").unwrap_or(DEFAULT_CONTEXT_MAX_ITEMS),
+            acceptance: None,
         });
         self.persist_v1(&engine)?;
         Ok(json!({
@@ -558,6 +561,7 @@ impl McpServer {
                 scope: optional_string(arguments, "scope"),
                 summary: optional_string(arguments, "summary"),
                 remember: optional_string_vec(arguments, "remember").unwrap_or_default(),
+                verifier_report: None,
             })
             .map_err(McpError::tool)?;
         self.persist_v1(&engine)?;
@@ -587,6 +591,7 @@ impl McpServer {
             query: Some(query.clone()),
             allowed_scopes: scopes.clone(),
             max_items: optional_usize(arguments, "max_items").unwrap_or(DEFAULT_CONTEXT_MAX_ITEMS),
+            acceptance: None,
         });
         self.persist_v1(&engine)?;
         Ok(json!({
@@ -619,6 +624,7 @@ impl McpServer {
                 scope: Some(continuity_scope.clone()),
                 summary: optional_string(arguments, "summary"),
                 remember,
+                verifier_report: None,
             })
             .map_err(McpError::tool)?;
         self.persist_v1(&engine)?;
@@ -783,6 +789,31 @@ impl McpServer {
             "active_count": active_count,
             "blocked_secret_count": blocked_secret_count,
             "session_count": snapshot.sessions.len(),
+        }))
+    }
+
+    fn v1_outcome_status(&self, arguments: &Map<String, Value>) -> Result<Value, McpError> {
+        let engine = self.load_v1_engine()?;
+        let session_id = required_string(arguments, "session_id")?;
+        let session = engine
+            .snapshot()
+            .sessions
+            .into_iter()
+            .find(|session| session.id == session_id)
+            .ok_or_else(|| McpError::tool(format!("unknown session: {session_id}")))?;
+        let status = session
+            .gate_result
+            .as_ref()
+            .map(|gate| gate.status.as_str().to_owned())
+            .unwrap_or_else(|| "no_acceptance_gate".to_owned());
+        Ok(json!({
+            "command": "v1.outcome.status",
+            "schema_version": "mneme.v1_outcome_status.v1",
+            "store": self.config.v1_store.display().to_string(),
+            "session_id": session.id,
+            "status": status,
+            "gate_result": session.gate_result,
+            "next_recommended_actions": outcome_status_next_actions(),
         }))
     }
 
@@ -1443,8 +1474,17 @@ fn task_start_next_actions() -> Vec<&'static str> {
 fn task_finish_next_actions() -> Vec<&'static str> {
     vec![
         "If another agent will continue, call mneme_prepare_handoff.",
+        "If the session used an outcome gate, inspect mneme_v1_outcome_status before treating the work as done.",
         "Do not store secrets, raw credentials, or private local paths.",
         "Use the same lineage and scope for follow-up work.",
+    ]
+}
+
+fn outcome_status_next_actions() -> Vec<&'static str> {
+    vec![
+        "Treat passed gate_result as completed work evidence.",
+        "If status is failed or error, continue from the failed criterion evidence before handoff.",
+        "If status is pending_judgment, request an external verdict before closing the task.",
     ]
 }
 
@@ -1655,6 +1695,7 @@ fn tool_annotations(name: &'static str) -> ToolAnnotations {
             | "mneme_agent_guide"
             | "mneme_v1_context"
             | "mneme_v1_quality"
+            | "mneme_v1_outcome_status"
             | "mneme_v1_validate"
             | "mneme_v1_snapshot"
             | "mneme_v1_continuity_handoff"
@@ -1685,6 +1726,7 @@ fn tool_annotations(name: &'static str) -> ToolAnnotations {
             | "mneme_agent_guide"
             | "mneme_v1_context"
             | "mneme_v1_quality"
+            | "mneme_v1_outcome_status"
             | "mneme_v1_validate"
             | "mneme_v1_snapshot"
             | "mneme_v2_team_context"
@@ -1723,6 +1765,7 @@ fn tool_title(name: &str) -> &'static str {
         "mneme_v1_backfill_context" => "V1 Backfill Context",
         "mneme_v1_forget" => "V1 Forget",
         "mneme_v1_correct" => "V1 Correct",
+        "mneme_v1_outcome_status" => "V1 Outcome Status",
         "mneme_v2_team_init" => "V2 Team Init",
         "mneme_v2_user_add" => "V2 User Add",
         "mneme_v2_agent_add" => "V2 Agent Add",
@@ -1992,6 +2035,11 @@ fn personal_tools() -> Vec<ToolDefinition> {
             "mneme_v1_quality",
             "Summarize V1 personal-memory quality counters before trusting or publishing memory state.",
             object_schema(&[], Vec::new()),
+        ),
+        tool_definition(
+            "mneme_v1_outcome_status",
+            "Inspect the first-class V1 outcome gate result for a session. Use before treating gated work as completed.",
+            object_schema(&["session_id"], vec![("session_id", string_schema())]),
         ),
         tool_definition(
             "mneme_v1_validate",

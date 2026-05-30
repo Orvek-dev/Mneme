@@ -251,6 +251,7 @@ fn run_with_optional_persistence(
             query: agent_flow.begin.query.clone(),
             allowed_scopes: effective_allowed_scopes(&agent_flow.begin.allowed_scopes),
             max_items: mneme_core::DEFAULT_CONTEXT_MAX_ITEMS,
+            acceptance: None,
         });
         if let Some(end) = &agent_flow.end {
             let input = SessionEndInput {
@@ -259,6 +260,7 @@ fn run_with_optional_persistence(
                 scope: None,
                 summary: end.summary.clone(),
                 remember: end.remember.clone(),
+                verifier_report: None,
             };
             let result = match end.extractor {
                 AgentEndExtractor::Rule => engine.end_session(input),

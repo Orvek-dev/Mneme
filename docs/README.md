@@ -18,7 +18,8 @@ examples/mcp-client-smoke/ public-safe client smoke summary shape
 
 Start here:
 
-- [Mneme v1](v1/README.md) for the usable personal-memory runtime.
+- [Mneme v1](v1/README.md) for the usable personal-memory runtime and
+  [Outcome Gate](v1/outcome-gate.md) for task completion evidence.
 - [Mneme v2](v2/README.md) for the usable local team-memory policy core and
   connector-ready workflow.
 - [Mneme MCP](mcp.md) for connecting V1/V2 memory tools to MCP-capable coding

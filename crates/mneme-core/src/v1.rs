@@ -17,6 +17,9 @@ use serde::{Deserialize, Serialize};
 
 const STORE_LOCK_STALE_SECONDS: u64 = 60 * 60;
 const PARTIAL_CONTEXT_WARNING: &str = "Mneme returned scoped, ranked memory, not the full conversation transcript. Treat this as partial context and verify decisions against cited source events.";
+const ACCEPTANCE_CONTRACT_SCHEMA_VERSION: &str = "mneme.acceptance.v1";
+const VERIFIER_REPORT_SCHEMA_VERSION: &str = "mneme.verifier.v1";
+const OUTCOME_GATE_RESULT_SCHEMA_VERSION: &str = "mneme.gate_result.v1";
 
 /// Current persisted state schema version for v1 local stores.
 pub const MNEME_STATE_SCHEMA_VERSION: u32 = 2;
@@ -469,6 +472,8 @@ impl MnemeEngine {
                 .iter()
                 .map(|item| item.claim_id.clone())
                 .collect(),
+            acceptance: input.acceptance,
+            gate_result: None,
             summary: None,
             memory_event_ids: Vec::new(),
         };
@@ -553,9 +558,13 @@ impl MnemeEngine {
         }
 
         let session = &mut self.sessions[position];
+        let gate_result =
+            evaluate_outcome_gate(&session.acceptance, input.verifier_report.as_ref())
+                .map_err(SessionError::new)?;
         session.status = SessionStatus::Closed;
         session.ended_at_unix_seconds = Some(unix_timestamp());
         session.summary = input.summary;
+        session.gate_result = gate_result;
         session
             .memory_event_ids
             .extend(remembered_event_ids.iter().cloned());
@@ -563,6 +572,12 @@ impl MnemeEngine {
             kind: AuditKind::SessionEnd,
             target_id: session.id.clone(),
         });
+        if session.gate_result.is_some() {
+            self.audit.push(AuditRecord {
+                kind: AuditKind::OutcomeGate,
+                target_id: session.id.clone(),
+            });
+        }
 
         Ok(SessionEndReport {
             session: session.clone(),
@@ -600,6 +615,8 @@ impl MnemeEngine {
             ended_at_unix_seconds: Some(now),
             context_query: "backfilled previous context".to_owned(),
             context_claim_ids: Vec::new(),
+            acceptance: None,
+            gate_result: None,
             summary: Some(summary),
             memory_event_ids: Vec::new(),
         };
@@ -1132,6 +1149,9 @@ pub struct SessionBeginInput {
     /// Maximum number of context items returned at session begin.
     #[serde(default = "default_context_max_items")]
     pub max_items: usize,
+    /// Optional deterministic acceptance contract for the task outcome gate.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub acceptance: Option<AcceptanceContract>,
 }
 
 /// Input used to end an agent session.
@@ -1148,6 +1168,210 @@ pub struct SessionEndInput {
     pub summary: Option<String>,
     /// Claims or natural-language memory notes to record at session end.
     pub remember: Vec<String>,
+    /// Optional external verifier report. The core validates and owns the gate result.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub verifier_report: Option<VerifierReport>,
+}
+
+/// Acceptance contract stored at session begin.
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct AcceptanceContract {
+    /// Contract schema identifier.
+    pub schema_version: String,
+    /// Optional task identifier shared with verifier reports.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub task_id: Option<String>,
+    /// Baseline captured by the CLI or caller before agent work starts.
+    #[serde(default)]
+    pub baseline: AcceptanceBaseline,
+    /// Deterministic outcome criteria owned by this session.
+    #[serde(default)]
+    pub criteria: Vec<AcceptanceCriterion>,
+}
+
+/// Baseline evidence recorded before agent work.
+#[derive(Debug, Clone, Default, Serialize, Deserialize)]
+pub struct AcceptanceBaseline {
+    /// Git HEAD at task begin, or `unknown` when unavailable.
+    #[serde(default)]
+    pub git_head: String,
+    /// Diff base used by verifier commands.
+    #[serde(default)]
+    pub diff_base: String,
+    /// Worktree path where the task began.
+    #[serde(default)]
+    pub worktree: String,
+    /// True when the worktree already had uncommitted changes at begin.
+    #[serde(default)]
+    pub dirty: bool,
+    /// Non-fatal baseline warnings, for example `git_unavailable`.
+    #[serde(default)]
+    pub warnings: Vec<String>,
+}
+
+/// One deterministic acceptance criterion.
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct AcceptanceCriterion {
+    /// Stable criterion id used by verifier results.
+    pub id: String,
+    /// Criterion kind: command, diff_touches, diff_scope, symbol_present, or judgment.
+    pub kind: AcceptanceCriterionKind,
+    /// Optional human-readable description.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub description: Option<String>,
+    /// Kind-specific criterion configuration preserved for external verifiers.
+    #[serde(default, skip_serializing_if = "serde_json::Value::is_null")]
+    pub config: serde_json::Value,
+}
+
+/// Supported MVP1 acceptance criterion kinds.
+#[derive(Debug, Clone, Copy, Eq, PartialEq, Serialize, Deserialize)]
+#[serde(rename_all = "snake_case")]
+pub enum AcceptanceCriterionKind {
+    /// External verifier runs argv and expects the configured exit status.
+    Command,
+    /// External verifier checks that expected files changed.
+    DiffTouches,
+    /// External verifier checks that changed files stayed inside allowed scope.
+    DiffScope,
+    /// External verifier checks that a symbol exists in a file.
+    SymbolPresent,
+    /// External human/model judgment is required. MVP1 records this as pending.
+    Judgment,
+}
+
+impl AcceptanceCriterionKind {
+    const fn as_str(self) -> &'static str {
+        match self {
+            Self::Command => "command",
+            Self::DiffTouches => "diff_touches",
+            Self::DiffScope => "diff_scope",
+            Self::SymbolPresent => "symbol_present",
+            Self::Judgment => "judgment",
+        }
+    }
+}
+
+/// External verifier report proposed to the core at session end.
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct VerifierReport {
+    /// Verifier schema identifier.
+    pub schema_version: String,
+    /// Optional task id; when both sides set one, it must match the acceptance contract.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub task_id: Option<String>,
+    /// Verifier implementation name.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub verifier: Option<String>,
+    /// One result per non-judgment criterion.
+    #[serde(default)]
+    pub results: Vec<VerifierCriterionResult>,
+}
+
+/// Result for one acceptance criterion.
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct VerifierCriterionResult {
+    /// Criterion id from the acceptance contract.
+    pub id: String,
+    /// Criterion result status.
+    pub status: VerifierCriterionStatus,
+    /// Short public-safe evidence. The core truncates and redacts before storing.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub evidence: Option<String>,
+}
+
+/// External verifier result status.
+#[derive(Debug, Clone, Copy, Eq, PartialEq, Serialize, Deserialize)]
+#[serde(rename_all = "snake_case")]
+pub enum VerifierCriterionStatus {
+    /// Criterion passed.
+    Pass,
+    /// Criterion failed.
+    Fail,
+    /// Verifier could not evaluate the criterion.
+    Error,
+}
+
+impl VerifierCriterionStatus {
+    /// Stable status string.
+    #[must_use]
+    pub const fn as_str(self) -> &'static str {
+        match self {
+            Self::Pass => "pass",
+            Self::Fail => "fail",
+            Self::Error => "error",
+        }
+    }
+}
+
+/// First-class outcome gate result stored on the session.
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct OutcomeGateResult {
+    /// Gate result schema identifier.
+    pub schema_version: String,
+    /// Aggregate gate status.
+    pub status: OutcomeGateStatus,
+    /// True only when every non-judgment criterion passed and no judgment is pending.
+    pub passed: bool,
+    /// True only when the session is allowed to be treated as completed work.
+    pub completed: bool,
+    /// Unix timestamp when the core evaluated the gate.
+    pub evaluated_at_unix_seconds: u64,
+    /// Number of acceptance criteria.
+    pub criterion_count: usize,
+    /// Passed criterion ids.
+    pub passed_criterion_ids: Vec<String>,
+    /// Failed criterion ids.
+    pub failed_criterion_ids: Vec<String>,
+    /// Errored criterion ids.
+    pub errored_criterion_ids: Vec<String>,
+    /// Criteria waiting for external judgment.
+    pub pending_criterion_ids: Vec<String>,
+    /// Contract violations found by the core.
+    pub contract_violations: Vec<String>,
+    /// Redacted and truncated verifier evidence.
+    pub evidence: Vec<OutcomeGateEvidence>,
+    /// Baseline warnings carried into the result.
+    pub warnings: Vec<String>,
+}
+
+/// Aggregate outcome gate status.
+#[derive(Debug, Clone, Copy, Eq, PartialEq, Serialize, Deserialize)]
+#[serde(rename_all = "snake_case")]
+pub enum OutcomeGateStatus {
+    /// All deterministic criteria passed.
+    Passed,
+    /// At least one criterion failed.
+    Failed,
+    /// The verifier contract was invalid or a criterion errored.
+    Error,
+    /// At least one judgment criterion still needs external verdict input.
+    PendingJudgment,
+}
+
+impl OutcomeGateStatus {
+    /// Stable status string.
+    #[must_use]
+    pub const fn as_str(self) -> &'static str {
+        match self {
+            Self::Passed => "passed",
+            Self::Failed => "failed",
+            Self::Error => "error",
+            Self::PendingJudgment => "pending_judgment",
+        }
+    }
+}
+
+/// Sanitized verifier evidence persisted in a session result.
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct OutcomeGateEvidence {
+    /// Criterion id.
+    pub id: String,
+    /// Criterion status.
+    pub status: VerifierCriterionStatus,
+    /// Public-safe evidence text.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub evidence: Option<String>,
 }
 
 /// Input used to backfill earlier context that was not captured live.
@@ -1221,6 +1445,12 @@ pub struct SessionRecord {
     pub context_query: String,
     /// Claim IDs returned to the agent at begin time.
     pub context_claim_ids: Vec<String>,
+    /// Optional acceptance contract captured at session begin.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub acceptance: Option<AcceptanceContract>,
+    /// Optional outcome gate result captured at session end.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub gate_result: Option<OutcomeGateResult>,
     /// Optional agent-provided task summary.
     pub summary: Option<String>,
     /// Event IDs written by `end_session`.
@@ -1289,6 +1519,163 @@ impl fmt::Display for SessionError {
 }
 
 impl std::error::Error for SessionError {}
+
+fn evaluate_outcome_gate(
+    acceptance: &Option<AcceptanceContract>,
+    verifier_report: Option<&VerifierReport>,
+) -> Result<Option<OutcomeGateResult>, String> {
+    let Some(contract) = acceptance else {
+        return Ok(None);
+    };
+
+    let mut violations = Vec::new();
+    if contract.schema_version != ACCEPTANCE_CONTRACT_SCHEMA_VERSION {
+        violations.push(format!(
+            "acceptance schema_version must be {ACCEPTANCE_CONTRACT_SCHEMA_VERSION}, got {}",
+            contract.schema_version
+        ));
+    }
+    if contract.criteria.is_empty() {
+        violations.push("acceptance criteria cannot be empty".to_owned());
+    }
+
+    let mut criterion_ids = BTreeSet::new();
+    let mut judgment_ids = BTreeSet::new();
+    for criterion in &contract.criteria {
+        if criterion.id.trim().is_empty() {
+            violations.push("acceptance criterion id cannot be empty".to_owned());
+            continue;
+        }
+        if !criterion_ids.insert(criterion.id.clone()) {
+            violations.push(format!(
+                "duplicate acceptance criterion id: {}",
+                criterion.id
+            ));
+        }
+        if criterion.kind == AcceptanceCriterionKind::Judgment {
+            judgment_ids.insert(criterion.id.clone());
+        }
+    }
+
+    let mut passed = Vec::new();
+    let mut failed = Vec::new();
+    let mut errored = Vec::new();
+    let mut pending = judgment_ids.iter().cloned().collect::<Vec<_>>();
+    let mut evidence = Vec::new();
+    let mut seen_results = BTreeSet::new();
+
+    if let Some(report) = verifier_report {
+        if report.schema_version != VERIFIER_REPORT_SCHEMA_VERSION {
+            violations.push(format!(
+                "verifier schema_version must be {VERIFIER_REPORT_SCHEMA_VERSION}, got {}",
+                report.schema_version
+            ));
+        }
+        if let (Some(expected), Some(actual)) = (&contract.task_id, &report.task_id) {
+            if expected != actual {
+                violations.push(format!(
+                    "verifier task_id mismatch: expected {expected}, got {actual}"
+                ));
+            }
+        }
+        for result in &report.results {
+            if result.id.trim().is_empty() {
+                violations.push("verifier result id cannot be empty".to_owned());
+                continue;
+            }
+            if !seen_results.insert(result.id.clone()) {
+                violations.push(format!("duplicate verifier result id: {}", result.id));
+            }
+            if !criterion_ids.contains(&result.id) {
+                violations.push(format!("unknown verifier result id: {}", result.id));
+                continue;
+            }
+            if judgment_ids.contains(&result.id) {
+                violations.push(format!(
+                    "judgment criterion {} cannot be satisfied by MVP1 verifier",
+                    result.id
+                ));
+                continue;
+            }
+            match result.status {
+                VerifierCriterionStatus::Pass => passed.push(result.id.clone()),
+                VerifierCriterionStatus::Fail => failed.push(result.id.clone()),
+                VerifierCriterionStatus::Error => errored.push(result.id.clone()),
+            }
+            evidence.push(OutcomeGateEvidence {
+                id: result.id.clone(),
+                status: result.status,
+                evidence: result.evidence.as_deref().map(sanitize_gate_evidence),
+            });
+        }
+    }
+
+    for criterion in &contract.criteria {
+        if criterion.kind != AcceptanceCriterionKind::Judgment
+            && !seen_results.contains(&criterion.id)
+        {
+            violations.push(format!(
+                "missing verifier result for {} criterion {}",
+                criterion.kind.as_str(),
+                criterion.id
+            ));
+            errored.push(criterion.id.clone());
+        }
+    }
+
+    passed.sort();
+    passed.dedup();
+    failed.sort();
+    failed.dedup();
+    errored.sort();
+    errored.dedup();
+    pending.sort();
+    pending.dedup();
+    violations.sort();
+    violations.dedup();
+
+    let status = if !violations.is_empty() || !errored.is_empty() {
+        OutcomeGateStatus::Error
+    } else if !failed.is_empty() {
+        OutcomeGateStatus::Failed
+    } else if !pending.is_empty() {
+        OutcomeGateStatus::PendingJudgment
+    } else {
+        OutcomeGateStatus::Passed
+    };
+
+    Ok(Some(OutcomeGateResult {
+        schema_version: OUTCOME_GATE_RESULT_SCHEMA_VERSION.to_owned(),
+        status,
+        passed: status == OutcomeGateStatus::Passed,
+        completed: status == OutcomeGateStatus::Passed,
+        evaluated_at_unix_seconds: unix_timestamp(),
+        criterion_count: contract.criteria.len(),
+        passed_criterion_ids: passed,
+        failed_criterion_ids: failed,
+        errored_criterion_ids: errored,
+        pending_criterion_ids: pending,
+        contract_violations: violations,
+        evidence,
+        warnings: contract.baseline.warnings.clone(),
+    }))
+}
+
+fn sanitize_gate_evidence(text: &str) -> String {
+    const MAX_EVIDENCE_CHARS: usize = 2000;
+    if looks_like_secret(text) {
+        return "[redacted:blocked_secret]".to_owned();
+    }
+    let mut sanitized = text.replace('\0', " ");
+    if sanitized.chars().count() > MAX_EVIDENCE_CHARS {
+        sanitized = sanitized
+            .chars()
+            .take(MAX_EVIDENCE_CHARS)
+            .collect::<String>();
+        sanitized.push_str("...[truncated]");
+    }
+    sanitized
+}
 
 /// Storage port for loading and saving v1 personal-memory state.
 pub trait MnemeStore {
@@ -2079,6 +2466,8 @@ pub enum AuditKind {
     SessionBegin,
     /// Agent session end operation.
     SessionEnd,
+    /// Outcome gate evaluation operation.
+    OutcomeGate,
 }
 
 impl AuditKind {
@@ -2094,6 +2483,7 @@ impl AuditKind {
             Self::StateCompact => "state.compact",
             Self::SessionBegin => "session.begin",
             Self::SessionEnd => "session.end",
+            Self::OutcomeGate => "outcome.gate",
         }
     }
 }
@@ -3915,6 +4305,7 @@ mod tests {
             query: Some("local-first".to_owned()),
             allowed_scopes: vec!["private".to_owned()],
             max_items: DEFAULT_CONTEXT_MAX_ITEMS,
+            acceptance: None,
         });
         assert_eq!(begin.session.id, "session-001");
         assert_eq!(begin.session.status, SessionStatus::Active);
@@ -3927,6 +4318,7 @@ mod tests {
             scope: None,
             summary: Some("Prepared a concise setup plan".to_owned()),
             remember: vec!["user prefers concise setup plans".to_owned()],
+            verifier_report: None,
         })?;
         let context = engine.build_context_pack("concise setup");
         let snapshot = engine.snapshot();
@@ -3947,6 +4339,109 @@ mod tests {
             .audit
             .iter()
             .any(|event| event.kind == AuditKind::SessionEnd));
+        Ok(())
+    }
+
+    #[test]
+    fn agent_session_outcome_gate_records_passed_result() -> Result<(), Box<dyn std::error::Error>>
+    {
+        let mut engine = MnemeEngine::new(MnemeConfig::default());
+        let begin = engine.begin_session(SessionBeginInput {
+            task: "Implement outcome gate".to_owned(),
+            lineage_id: None,
+            actor_agent_id: Some("codex".to_owned()),
+            query: None,
+            allowed_scopes: vec!["private".to_owned()],
+            max_items: DEFAULT_CONTEXT_MAX_ITEMS,
+            acceptance: Some(AcceptanceContract {
+                schema_version: "mneme.acceptance.v1".to_owned(),
+                task_id: Some("task-outcome".to_owned()),
+                baseline: AcceptanceBaseline {
+                    git_head: "abc123".to_owned(),
+                    diff_base: "abc123".to_owned(),
+                    worktree: "/tmp/mneme".to_owned(),
+                    dirty: false,
+                    warnings: Vec::new(),
+                },
+                criteria: vec![AcceptanceCriterion {
+                    id: "build".to_owned(),
+                    kind: AcceptanceCriterionKind::Command,
+                    description: None,
+                    config: serde_json::json!({"argv": ["cargo", "test"]}),
+                }],
+            }),
+        });
+
+        let end = engine.end_session(SessionEndInput {
+            session_id: begin.session.id,
+            actor_agent_id: Some("codex".to_owned()),
+            scope: None,
+            summary: Some("Implemented and tested outcome gate".to_owned()),
+            remember: Vec::new(),
+            verifier_report: Some(VerifierReport {
+                schema_version: "mneme.verifier.v1".to_owned(),
+                task_id: Some("task-outcome".to_owned()),
+                verifier: Some("unit-test".to_owned()),
+                results: vec![VerifierCriterionResult {
+                    id: "build".to_owned(),
+                    status: VerifierCriterionStatus::Pass,
+                    evidence: Some("cargo test exited 0".to_owned()),
+                }],
+            }),
+        })?;
+
+        let gate = end.session.gate_result.expect("gate result");
+        assert_eq!(gate.status, OutcomeGateStatus::Passed);
+        assert!(gate.completed);
+        assert_eq!(gate.passed_criterion_ids, vec!["build"]);
+        assert!(engine
+            .snapshot()
+            .audit
+            .iter()
+            .any(|event| event.kind == AuditKind::OutcomeGate));
+        Ok(())
+    }
+
+    #[test]
+    fn agent_session_outcome_gate_errors_on_contract_violation(
+    ) -> Result<(), Box<dyn std::error::Error>> {
+        let mut engine = MnemeEngine::new(MnemeConfig::default());
+        let begin = engine.begin_session(SessionBeginInput {
+            task: "Implement outcome gate".to_owned(),
+            lineage_id: None,
+            actor_agent_id: Some("codex".to_owned()),
+            query: None,
+            allowed_scopes: vec!["private".to_owned()],
+            max_items: DEFAULT_CONTEXT_MAX_ITEMS,
+            acceptance: Some(AcceptanceContract {
+                schema_version: "mneme.acceptance.v1".to_owned(),
+                task_id: None,
+                baseline: AcceptanceBaseline::default(),
+                criteria: vec![AcceptanceCriterion {
+                    id: "build".to_owned(),
+                    kind: AcceptanceCriterionKind::Command,
+                    description: None,
+                    config: serde_json::json!({"argv": ["cargo", "test"]}),
+                }],
+            }),
+        });
+
+        let end = engine.end_session(SessionEndInput {
+            session_id: begin.session.id,
+            actor_agent_id: Some("codex".to_owned()),
+            scope: None,
+            summary: Some("Finished without verifier".to_owned()),
+            remember: Vec::new(),
+            verifier_report: None,
+        })?;
+
+        let gate = end.session.gate_result.expect("gate result");
+        assert_eq!(gate.status, OutcomeGateStatus::Error);
+        assert!(!gate.completed);
+        assert!(gate
+            .contract_violations
+            .iter()
+            .any(|violation| violation.contains("missing verifier result")));
         Ok(())
     }
 
@@ -3979,6 +4474,7 @@ mod tests {
             query: None,
             allowed_scopes: vec!["private".to_owned()],
             max_items: DEFAULT_CONTEXT_MAX_ITEMS,
+            acceptance: None,
         });
 
         let end = engine.end_session_with_extractor(
@@ -3988,6 +4484,7 @@ mod tests {
                 scope: None,
                 summary: Some("Prepared the planning doc".to_owned()),
                 remember: vec!["For future planning docs, keep explanations direct.".to_owned()],
+                verifier_report: None,
             },
             &RawMemoryExtractor,
             SessionMemoryInputMode::RawEvent,
@@ -4022,6 +4519,7 @@ mod tests {
             query: Some("release notes".to_owned()),
             allowed_scopes: vec!["private".to_owned()],
             max_items: DEFAULT_CONTEXT_MAX_ITEMS,
+            acceptance: None,
         });
         assert!(denied.context_pack.items.is_empty());
         assert!(denied
@@ -4037,6 +4535,7 @@ mod tests {
             query: Some("release notes".to_owned()),
             allowed_scopes: vec!["team".to_owned()],
             max_items: DEFAULT_CONTEXT_MAX_ITEMS,
+            acceptance: None,
         });
         assert_eq!(allowed.context_pack.items.len(), 1);
         assert_eq!(allowed.session.context_claim_ids, vec!["claim-001"]);
@@ -4052,6 +4551,7 @@ mod tests {
             scope: None,
             summary: Some("nothing happened".to_owned()),
             remember: Vec::new(),
+            verifier_report: None,
         });
 
         assert!(result.is_err());

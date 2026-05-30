@@ -38,6 +38,7 @@ Supported keys:
 - `MNEME_SCOPE`
 - `MNEME_MAX_ITEMS`
 - `MNEME_EXTRACTOR_COMMAND`
+- `MNEME_VERIFIER_COMMAND`
 
 `MNEME_EXTRACTOR_COMMAND` is optional. When set, wrapper `end` calls use
 `--extractor command` for `--remember` notes unless an explicit `--extractor`
@@ -45,6 +46,11 @@ flag is already present.
 `mneme init --extractor-command <program>` writes this key as an active profile
 line; without that option, the generated profile keeps it as a commented
 example.
+
+`MNEME_VERIFIER_COMMAND` is optional. When set, wrapper `end` calls add
+`--verifier-command` unless an explicit verifier report or verifier command is
+already present. Use it only for sessions started with `--acceptance`; ungated
+sessions do not need a verifier.
 
 ## Precedence
 
@@ -75,7 +81,7 @@ for its smoke test and reports whether a profile was loaded without writing to
 the configured project store.
 
 Wrapper doctor output also reports the selected `mneme` source, configured
-store, agent, scope, max item cap, and extractor command. It does not run the
+store, agent, scope, max item cap, extractor command, and verifier command. It does not run the
 configured command extractor by default, even when `MNEME_EXTRACTOR_COMMAND` is
 set. This keeps routine diagnostics no-cost for provider-backed wrappers.
 
