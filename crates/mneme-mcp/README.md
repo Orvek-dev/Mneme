@@ -58,9 +58,12 @@ Recommended agent workflow tools:
 
 - `mneme_mcp_status`
 - `mneme_agent_guide`
-- `mneme_task_start`
-- `mneme_task_finish`
-- `mneme_prepare_handoff`
+- `mneme_task_start` - opens continuity, reads scoped context, and can attach
+  an outcome gate with `acceptance` or `acceptance_kind`
+- `mneme_task_finish` - closes continuity, writes durable memory, and can record
+  a `mneme.verifier.v1` report
+- `mneme_prepare_handoff` - builds a handoff package and reports
+  `handoff_allowed=false` when a referenced session gate is incomplete
 - `mneme_import_previous_context`
 
 V1 tools:
@@ -108,9 +111,10 @@ scripts/mcp-hard-dogfood.py --out-dir /tmp/mneme-mcp-hard-dogfood --force
 ```
 
 Current public-safe MCP coverage includes installation/status checks, V1
-write/read, V1 restart persistence, V1 cross-agent continuity, V2 handoff, V2
-private-scope blocking, citation checks, scope leak checks, secret leak checks,
-hard dogfood corpora, and seeded fault detection.
+write/read, V1 restart persistence, V1 cross-agent continuity, V1
+outcome-gated handoff blocking, V2 handoff, V2 private-scope blocking, citation
+checks, scope leak checks, secret leak checks, hard dogfood corpora, and seeded
+fault detection.
 
 Local-only development dogfood has also exercised 30 scripted V2 MCP handoff
 episodes across `protocol-stdio`, Codex, Claude Code, and Cursor smoke
@@ -164,7 +168,7 @@ isolated temporary config homes and stores:
 | Direct MCP protocol | Missing end, wrong scope, and secret-context guards | Passed |
 | Codex CLI | Isolated `codex mcp add/list/get` | Passed |
 | Claude Code CLI | Isolated `claude mcp add/list/get`, health connected | Passed |
-| Cursor Agent CLI | Workspace approval and `list-tools` with 46 tools | Passed |
+| Cursor Agent CLI | Workspace approval and `list-tools` with 47 tools | Passed |
 
 This is a client integration smoke test, not an external production benchmark.
 Raw client logs are intentionally not committed because they may include local

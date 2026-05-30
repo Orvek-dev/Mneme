@@ -2,6 +2,22 @@
 
 This project follows the spirit of Keep a Changelog.
 
+## [0.73.0] - 2026-05-30
+
+### Added
+
+- Added MCP workflow-level outcome gate support:
+  `mneme_task_start` can attach an inline acceptance contract or starter
+  `acceptance_kind`, `mneme_task_finish` can record a `mneme.verifier.v1`
+  report, and `mneme_prepare_handoff` can guard handoff using `session_id`.
+- Added protocol smoke coverage that proves a failed MCP-gated session returns
+  `completion_ok=false`, `handoff_allowed=false`, and blocks clean handoff.
+
+### Changed
+
+- Updated MCP and V1 outcome-gate docs to describe the agent-facing
+  start/finish/handoff loop without claiming Mneme runs verifiers itself.
+
 ## [0.72.0] - 2026-05-30
 
 ### Added

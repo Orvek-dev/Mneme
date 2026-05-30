@@ -66,9 +66,12 @@ Most agents should start with the high-level workflow tools:
 
 - `mneme_mcp_status`: verify server, stores, and continuity contract;
 - `mneme_agent_guide`: ask which Mneme tool should come next;
-- `mneme_task_start`: read partial cited context and open a continuity session;
-- `mneme_task_finish`: close the session and write durable non-secret memory;
-- `mneme_prepare_handoff`: package cited context for the next sequential agent;
+- `mneme_task_start`: read partial cited context, open a continuity session,
+  and optionally attach an outcome gate;
+- `mneme_task_finish`: close the session, write durable non-secret memory, and
+  optionally record verifier evidence;
+- `mneme_prepare_handoff`: package cited context for the next sequential agent
+  and report whether gated handoff is allowed;
 - `mneme_import_previous_context`: backfill public-safe prior context summaries.
 
 V1 tools cover personal memory:
@@ -77,8 +80,9 @@ V1 tools cover personal memory:
 - retrieve cited context;
 - begin and end task sessions;
 - begin, end, and hand off continuity sessions with explicit lineage/scope;
-- generate V1 outcome acceptance templates, inspect gate status, and apply
-  external reviewer verdicts for pending judgment gates;
+- generate V1 outcome acceptance templates, attach workflow-level outcome
+  gates, inspect gate status, and apply external reviewer verdicts for pending
+  judgment gates;
 - correct, forget, validate, quality-check, and snapshot the store.
 
 V2 tools cover team handoff memory:
@@ -112,7 +116,7 @@ Current MCP readiness checks include:
 | V1 remember/context | Personal memory can be written and retrieved through MCP. |
 | V1 session restart | Stored personal memory survives a new server instance. |
 | V1 cross-agent continuity | Agent A writes back scoped memory, the MCP server restarts, and Agent B retrieves it through the same lineage/scope. |
-| MCP agent usability | High-level task start/finish/handoff tools return next actions and preserve the continuity loop. |
+| MCP agent usability | High-level task start/finish/handoff tools return next actions, preserve the continuity loop, and block completion handoff when an attached outcome gate failed. |
 | V2 team handoff | Team context, handoff package, sync checksum, firewall, and audit are reachable. |
 | V2 private-scope block | A second actor cannot read private memory through context, handoff, ontology, or sync paths. |
 | citations and leaks | Context keeps citations while scope and secret leak counters remain zero. |
@@ -199,6 +203,29 @@ which agent clients are installed:
 ```sh
 scripts/mcp-client-continuity-smoke.py --protocol-only
 ```
+
+## Outcome-Gated MCP Flow
+
+MCP agents can use the same outcome gate boundary as the CLI without making
+Mneme a test runner:
+
+```text
+mneme_task_start(..., acceptance or acceptance_kind)
+  -> Mneme stores the acceptance contract on the session
+
+external verifier runs outside Mneme
+  -> command, diff, symbol, or reviewer tooling produces mneme.verifier.v1
+
+mneme_task_finish(..., verifier_report)
+  -> Mneme records gate_result and returns completion_ok / handoff_allowed
+
+mneme_prepare_handoff(..., session_id)
+  -> returns handoff_allowed=false when the session gate did not complete
+```
+
+The MCP server does not run subprocesses or LLM judges for the agent. It records
+the proposed evidence, owns the deterministic gate result, and prevents failed
+gated work from being represented as a clean completed handoff.
 
 ## Partial Context Contract
 

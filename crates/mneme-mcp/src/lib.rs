@@ -5,14 +5,16 @@ use std::fmt::{Display, Formatter};
 use std::path::{Path, PathBuf};
 
 use mneme_core::{
-    validate_state, validate_team_state, ClaimStatus, ContextQuery, EventInput, JsonFileStore,
-    JsonTeamFileStore, MnemeConfig, MnemeEngine, OutcomeJudgmentCriterionResult,
-    OutcomeJudgmentReport, OutcomeJudgmentVerdict, SessionBackfillInput, SessionBeginInput,
-    SessionEndInput, StoreError, TeamActor, TeamAgentInput, TeamContextQuery, TeamMemoryConfig,
-    TeamMemoryEngine, TeamProjectInput, TeamPromotionCreateInput, TeamPromotionReviewInput,
-    TeamRememberInput, TeamRole, TeamRunBeginInput, TeamRunEndInput, TeamRunHandoffInput,
-    TeamRunNoteInput, TeamSyncEnvelope, TeamSyncExportInput, TeamUserInput,
-    DEFAULT_CONTEXT_MAX_ITEMS, DEFAULT_TEAM_CONTEXT_MAX_ITEMS,
+    validate_acceptance_contract, validate_state, validate_team_state, AcceptanceBaseline,
+    AcceptanceContract, AcceptanceCriterion, AcceptanceCriterionKind, ClaimStatus, ContextQuery,
+    EventInput, JsonFileStore, JsonTeamFileStore, MnemeConfig, MnemeEngine, OutcomeGateResult,
+    OutcomeJudgmentCriterionResult, OutcomeJudgmentReport, OutcomeJudgmentVerdict,
+    SessionBackfillInput, SessionBeginInput, SessionEndInput, StoreError, TeamActor,
+    TeamAgentInput, TeamContextQuery, TeamMemoryConfig, TeamMemoryEngine, TeamProjectInput,
+    TeamPromotionCreateInput, TeamPromotionReviewInput, TeamRememberInput, TeamRole,
+    TeamRunBeginInput, TeamRunEndInput, TeamRunHandoffInput, TeamRunNoteInput, TeamSyncEnvelope,
+    TeamSyncExportInput, TeamUserInput, VerifierReport, DEFAULT_CONTEXT_MAX_ITEMS,
+    DEFAULT_TEAM_CONTEXT_MAX_ITEMS,
 };
 use serde::Serialize;
 use serde_json::{json, Map, Value};
@@ -410,6 +412,7 @@ impl McpServer {
             "continuity_scope": begin.get("continuity_scope").cloned().unwrap_or(Value::Null),
             "partial_context": begin.get("partial_context").cloned().unwrap_or(Value::Bool(true)),
             "not_full_transcript": begin.get("not_full_transcript").cloned().unwrap_or(Value::Bool(true)),
+            "acceptance_enabled": begin.get("acceptance_enabled").cloned().unwrap_or(Value::Bool(false)),
             "warning": begin.get("warning").cloned().unwrap_or(Value::Null),
             "handoff": handoff,
             "report": begin.get("report").cloned().unwrap_or(Value::Null),
@@ -427,6 +430,8 @@ impl McpServer {
             "lineage_id": finish.get("lineage_id").cloned().unwrap_or(Value::Null),
             "continuity_scope": finish.get("continuity_scope").cloned().unwrap_or(Value::Null),
             "write_back_ok": finish.get("write_back_ok").cloned().unwrap_or(Value::Bool(false)),
+            "completion_ok": finish.get("completion_ok").cloned().unwrap_or(Value::Bool(true)),
+            "handoff_allowed": finish.get("handoff_allowed").cloned().unwrap_or(Value::Bool(true)),
             "remembered_event_count": finish.get("remembered_event_count").cloned().unwrap_or(Value::from(0)),
             "remembered_claim_count": finish.get("remembered_claim_count").cloned().unwrap_or(Value::from(0)),
             "gate_result": finish.pointer("/report/session/gate_result").cloned().unwrap_or(Value::Null),
@@ -448,6 +453,9 @@ impl McpServer {
             "warning": handoff.get("warning").cloned().unwrap_or(Value::Null),
             "source_session_count": handoff.get("source_session_count").cloned().unwrap_or(Value::from(0)),
             "context_item_count": handoff.get("context_item_count").cloned().unwrap_or(Value::from(0)),
+            "handoff_allowed": handoff.get("handoff_allowed").cloned().unwrap_or(Value::Bool(true)),
+            "handoff_blocked_reason": handoff.get("handoff_blocked_reason").cloned().unwrap_or(Value::Null),
+            "gate_result": handoff.get("gate_result").cloned().unwrap_or(Value::Null),
             "source_sessions": handoff.get("source_sessions").cloned().unwrap_or(Value::Array(Vec::new())),
             "context_pack": handoff.get("context_pack").cloned().unwrap_or(Value::Null),
             "next_recommended_actions": handoff_next_actions(),
@@ -533,6 +541,8 @@ impl McpServer {
         let task = required_string(arguments, "task")?;
         let scopes =
             optional_string_vec(arguments, "scopes").unwrap_or_else(|| vec!["private".to_owned()]);
+        let acceptance = acceptance_from_arguments(arguments)?;
+        let acceptance_enabled = acceptance.is_some();
         let report = engine.begin_session(SessionBeginInput {
             task,
             lineage_id: optional_string(arguments, "lineage"),
@@ -540,13 +550,14 @@ impl McpServer {
             query: optional_string(arguments, "query"),
             allowed_scopes: scopes,
             max_items: optional_usize(arguments, "max_items").unwrap_or(DEFAULT_CONTEXT_MAX_ITEMS),
-            acceptance: None,
+            acceptance,
         });
         self.persist_v1(&engine)?;
         Ok(json!({
             "command": "v1.begin",
             "store": self.config.v1_store.display().to_string(),
             "session_id": report.session.id,
+            "acceptance_enabled": acceptance_enabled,
             "partial_context": report.context_pack.metadata.partial_context,
             "not_full_transcript": report.context_pack.metadata.not_full_transcript,
             "warning": report.context_pack.metadata.warning.clone(),
@@ -557,6 +568,7 @@ impl McpServer {
 
     fn v1_end(&self, arguments: &Map<String, Value>) -> Result<Value, McpError> {
         let mut engine = self.load_v1_engine()?;
+        let verifier_report = verifier_report_from_arguments(arguments)?;
         let report = engine
             .end_session(SessionEndInput {
                 session_id: required_string(arguments, "session_id")?,
@@ -564,13 +576,18 @@ impl McpServer {
                 scope: optional_string(arguments, "scope"),
                 summary: optional_string(arguments, "summary"),
                 remember: optional_string_vec(arguments, "remember").unwrap_or_default(),
-                verifier_report: None,
+                verifier_report,
             })
             .map_err(McpError::tool)?;
+        let gate_result = report.session.gate_result.clone();
+        let completion_ok = gate_allows_completion(&gate_result);
         self.persist_v1(&engine)?;
         Ok(json!({
             "command": "v1.end",
             "store": self.config.v1_store.display().to_string(),
+            "completion_ok": completion_ok,
+            "handoff_allowed": completion_ok,
+            "gate_result": gate_result,
             "report": report,
         }))
     }
@@ -587,6 +604,8 @@ impl McpServer {
                 .as_ref()
                 .map_or_else(|| task.clone(), |lineage| format!("{task} {lineage}"))
         });
+        let acceptance = acceptance_from_arguments(arguments)?;
+        let acceptance_enabled = acceptance.is_some();
         let report = engine.begin_session(SessionBeginInput {
             task,
             lineage_id: lineage_id.clone(),
@@ -594,7 +613,7 @@ impl McpServer {
             query: Some(query.clone()),
             allowed_scopes: scopes.clone(),
             max_items: optional_usize(arguments, "max_items").unwrap_or(DEFAULT_CONTEXT_MAX_ITEMS),
-            acceptance: None,
+            acceptance,
         });
         self.persist_v1(&engine)?;
         Ok(json!({
@@ -606,6 +625,7 @@ impl McpServer {
             "continuity_scope": continuity_scope,
             "allowed_scopes": scopes,
             "read_and_honor_required": true,
+            "acceptance_enabled": acceptance_enabled,
             "partial_context": report.context_pack.metadata.partial_context,
             "not_full_transcript": report.context_pack.metadata.not_full_transcript,
             "warning": report.context_pack.metadata.warning.clone(),
@@ -620,6 +640,7 @@ impl McpServer {
         let mut engine = self.load_v1_engine()?;
         let continuity_scope = continuity_scope(arguments);
         let remember = optional_string_vec(arguments, "remember").unwrap_or_default();
+        let verifier_report = verifier_report_from_arguments(arguments)?;
         let report = engine
             .end_session(SessionEndInput {
                 session_id: required_string(arguments, "session_id")?,
@@ -627,9 +648,11 @@ impl McpServer {
                 scope: Some(continuity_scope.clone()),
                 summary: optional_string(arguments, "summary"),
                 remember,
-                verifier_report: None,
+                verifier_report,
             })
             .map_err(McpError::tool)?;
+        let gate_result = report.session.gate_result.clone();
+        let completion_ok = gate_allows_completion(&gate_result);
         self.persist_v1(&engine)?;
         Ok(json!({
             "command": "v1.continuity.end",
@@ -640,6 +663,9 @@ impl McpServer {
             "continuity_scope": continuity_scope,
             "write_back_required": true,
             "write_back_ok": !report.remembered_claim_ids.is_empty(),
+            "completion_ok": completion_ok,
+            "handoff_allowed": completion_ok,
+            "gate_result": gate_result,
             "remembered_event_count": report.remembered_event_ids.len(),
             "remembered_claim_count": report.remembered_claim_ids.len(),
             "report": report,
@@ -652,6 +678,7 @@ impl McpServer {
         let query = required_string(arguments, "query")?;
         let lineage_id = optional_string(arguments, "lineage");
         let continuity_scope = continuity_scope(arguments);
+        let gate_guard = gate_guard_for_session(&engine, optional_string(arguments, "session_id"))?;
         let scopes = optional_string_vec(arguments, "scopes")
             .unwrap_or_else(|| continuity_allowed_scopes(&continuity_scope));
         let context_pack = engine.build_context_pack_with(
@@ -681,6 +708,9 @@ impl McpServer {
             "query": query,
             "sequential_handoff_required": true,
             "read_and_honor_required": true,
+            "handoff_allowed": gate_guard.allowed,
+            "handoff_blocked_reason": gate_guard.blocked_reason,
+            "gate_result": gate_guard.gate_result,
             "partial_context": context_pack.metadata.partial_context,
             "not_full_transcript": context_pack.metadata.not_full_transcript,
             "warning": context_pack.metadata.warning.clone(),
@@ -1478,6 +1508,166 @@ fn non_empty_string(value: String) -> Option<String> {
     }
 }
 
+#[derive(Debug, Clone)]
+struct HandoffGateGuard {
+    allowed: bool,
+    blocked_reason: Option<String>,
+    gate_result: Option<OutcomeGateResult>,
+}
+
+fn gate_allows_completion(gate_result: &Option<OutcomeGateResult>) -> bool {
+    gate_result.as_ref().map_or(true, |gate| gate.completed)
+}
+
+fn gate_guard_for_session(
+    engine: &MnemeEngine,
+    session_id: Option<String>,
+) -> Result<HandoffGateGuard, McpError> {
+    let Some(session_id) = session_id else {
+        return Ok(HandoffGateGuard {
+            allowed: true,
+            blocked_reason: None,
+            gate_result: None,
+        });
+    };
+    let session = engine
+        .snapshot()
+        .sessions
+        .into_iter()
+        .find(|session| session.id == session_id)
+        .ok_or_else(|| McpError::tool(format!("unknown session: {session_id}")))?;
+    let gate_result = session.gate_result.clone();
+    let allowed = gate_allows_completion(&gate_result);
+    Ok(HandoffGateGuard {
+        allowed,
+        blocked_reason: if allowed {
+            None
+        } else {
+            Some("session outcome gate is not completed".to_owned())
+        },
+        gate_result,
+    })
+}
+
+fn acceptance_from_arguments(
+    arguments: &Map<String, Value>,
+) -> Result<Option<AcceptanceContract>, McpError> {
+    if let Some(value) = arguments.get("acceptance") {
+        return mcp_acceptance_contract(value).map(Some);
+    }
+    let Some(kind) = optional_string(arguments, "acceptance_kind").and_then(non_empty_string)
+    else {
+        return Ok(None);
+    };
+    let task_id = optional_string(arguments, "task_id")
+        .and_then(non_empty_string)
+        .unwrap_or_else(|| format!("{kind}-task"));
+    let include_judgment = optional_bool(arguments, "include_judgment").unwrap_or(false);
+    let value = mcp_acceptance_template(&kind, &task_id, include_judgment)?;
+    mcp_acceptance_contract(&value).map(Some)
+}
+
+fn verifier_report_from_arguments(
+    arguments: &Map<String, Value>,
+) -> Result<Option<VerifierReport>, McpError> {
+    let Some(value) = arguments.get("verifier_report") else {
+        return Ok(None);
+    };
+    let report = serde_json::from_value::<VerifierReport>(value.clone()).map_err(|source| {
+        McpError::invalid_request(format!("invalid verifier_report object: {source}"))
+    })?;
+    Ok(Some(report))
+}
+
+fn mcp_acceptance_contract(value: &Value) -> Result<AcceptanceContract, McpError> {
+    let object = value
+        .as_object()
+        .ok_or_else(|| McpError::invalid_request("acceptance must be a JSON object"))?;
+    let schema_version = object
+        .get("schema_version")
+        .and_then(Value::as_str)
+        .unwrap_or_default()
+        .to_owned();
+    let task_id = object
+        .get("task_id")
+        .and_then(Value::as_str)
+        .map(ToOwned::to_owned);
+    let baseline = object
+        .get("baseline")
+        .cloned()
+        .map(serde_json::from_value::<AcceptanceBaseline>)
+        .transpose()
+        .map_err(|source| {
+            McpError::invalid_request(format!("invalid acceptance baseline: {source}"))
+        })?
+        .unwrap_or_default();
+    let criteria_values = object
+        .get("criteria")
+        .and_then(Value::as_array)
+        .ok_or_else(|| McpError::invalid_request("acceptance criteria must be an array"))?;
+    let mut criteria = Vec::new();
+    for criterion in criteria_values {
+        let criterion_object = criterion.as_object().ok_or_else(|| {
+            McpError::invalid_request("acceptance criterion must be a JSON object")
+        })?;
+        let id = criterion_object
+            .get("id")
+            .and_then(Value::as_str)
+            .unwrap_or_default()
+            .to_owned();
+        let kind_value = criterion_object
+            .get("kind")
+            .cloned()
+            .ok_or_else(|| McpError::invalid_request("acceptance criterion missing kind"))?;
+        let kind =
+            serde_json::from_value::<AcceptanceCriterionKind>(kind_value).map_err(|source| {
+                McpError::invalid_request(format!("invalid acceptance criterion kind: {source}"))
+            })?;
+        let config = criterion_object
+            .get("config")
+            .cloned()
+            .or_else(|| {
+                criterion_object
+                    .get(acceptance_kind_config_key(kind))
+                    .cloned()
+            })
+            .unwrap_or(Value::Null);
+        criteria.push(AcceptanceCriterion {
+            id,
+            kind,
+            description: criterion_object
+                .get("description")
+                .and_then(Value::as_str)
+                .map(ToOwned::to_owned),
+            config,
+        });
+    }
+    let contract = AcceptanceContract {
+        schema_version,
+        task_id,
+        baseline,
+        criteria,
+    };
+    let validation = validate_acceptance_contract(&contract);
+    if !validation.ok {
+        return Err(McpError::invalid_request(format!(
+            "invalid acceptance contract: {}",
+            validation.errors.join("; ")
+        )));
+    }
+    Ok(contract)
+}
+
+const fn acceptance_kind_config_key(kind: AcceptanceCriterionKind) -> &'static str {
+    match kind {
+        AcceptanceCriterionKind::Command => "command",
+        AcceptanceCriterionKind::DiffTouches => "diff_touches",
+        AcceptanceCriterionKind::DiffScope => "diff_scope",
+        AcceptanceCriterionKind::SymbolPresent => "symbol_present",
+        AcceptanceCriterionKind::Judgment => "judgment",
+    }
+}
+
 fn result_response(request_id: Value, result: Value) -> Value {
     json!({"jsonrpc": "2.0", "id": request_id, "result": result})
 }
@@ -1774,6 +1964,8 @@ fn field_description(key: &str) -> &'static str {
         "actor" => "Team user id performing the action, for example alice or reviewer-bob.",
         "admin" => "Optional admin user id to create during team initialization.",
         "agent" => "Agent id making the call, for example codex, claude-code, cursor, planner, or reviewer.",
+        "acceptance" => "Inline mneme.acceptance.v1 object for a gated task. Prefer acceptance_kind for starter templates.",
+        "acceptance_kind" => "Generate and attach a starter outcome gate. Use rust, node, docs, or generic.",
         "apply" => "When false, dry-run only. When true, apply the sync envelope and mutate the store.",
         "approve" => "True to approve a promotion candidate, false to reject it.",
         "claim_id" => "Stable claim id returned by Mneme, such as claim-001.",
@@ -1809,6 +2001,7 @@ fn field_description(key: &str) -> &'static str {
         "text" => "Memory or event text. Store durable non-secret facts only.",
         "trust" => "Trust level for raw events, such as trusted_user, agent_summary, or untrusted_transcript.",
         "user" => "Team user id.",
+        "verifier_report" => "Inline mneme.verifier.v1 report produced by an external verifier. Mneme records it but does not judge it.",
         "workspace" => "Team workspace id for the local V2 store.",
         _ => "Tool argument.",
     }
@@ -1817,6 +2010,7 @@ fn field_description(key: &str) -> &'static str {
 fn field_examples(key: &str) -> Option<Vec<String>> {
     let examples = match key {
         "actor" => vec!["alice", "reviewer-bob"],
+        "acceptance_kind" => vec!["rust", "node", "docs", "generic"],
         "agent" => vec!["codex", "claude-code", "cursor"],
         "lineage" => vec!["issue-42-auth-refactor", "branch:feat/mcp-memory"],
         "kind" => vec!["rust", "node", "docs", "generic"],
@@ -1848,6 +2042,10 @@ fn int_schema() -> Value {
 
 fn string_array_schema() -> Value {
     json!({"type": "array", "items": {"type": "string"}})
+}
+
+fn json_object_schema() -> Value {
+    json!({"type": "object"})
 }
 
 fn tool_definition(
@@ -1991,7 +2189,7 @@ fn personal_workflow_tools() -> Vec<ToolDefinition> {
     vec![
         tool_definition(
             "mneme_task_start",
-            "Preferred task-start tool for agents. It reads partial cited context, opens a continuity session, and can include a handoff package.",
+            "Preferred task-start tool for agents. It reads partial cited context, opens a continuity session, and can attach an outcome gate.",
             object_schema(
                 &["task"],
                 vec![
@@ -2003,12 +2201,16 @@ fn personal_workflow_tools() -> Vec<ToolDefinition> {
                     ("max_items", int_schema()),
                     ("agent", string_schema()),
                     ("include_handoff", bool_schema()),
+                    ("acceptance", json_object_schema()),
+                    ("acceptance_kind", string_schema()),
+                    ("include_judgment", bool_schema()),
+                    ("task_id", string_schema()),
                 ],
             ),
         ),
         tool_definition(
             "mneme_task_finish",
-            "Preferred task-finish tool for agents. It closes the session and writes durable non-secret memory back into the same lineage/scope.",
+            "Preferred task-finish tool for agents. It closes the session, writes durable memory, and records optional outcome verifier evidence.",
             object_schema(
                 &["session_id"],
                 vec![
@@ -2018,6 +2220,7 @@ fn personal_workflow_tools() -> Vec<ToolDefinition> {
                     ("summary", string_schema()),
                     ("remember", string_array_schema()),
                     ("agent", string_schema()),
+                    ("verifier_report", json_object_schema()),
                 ],
             ),
         ),
@@ -2033,6 +2236,7 @@ fn personal_workflow_tools() -> Vec<ToolDefinition> {
                     ("scopes", string_array_schema()),
                     ("max_items", int_schema()),
                     ("agent", string_schema()),
+                    ("session_id", string_schema()),
                 ],
             ),
         ),
@@ -2106,6 +2310,10 @@ fn personal_tools() -> Vec<ToolDefinition> {
                     ("scopes", string_array_schema()),
                     ("max_items", int_schema()),
                     ("agent", string_schema()),
+                    ("acceptance", json_object_schema()),
+                    ("acceptance_kind", string_schema()),
+                    ("include_judgment", bool_schema()),
+                    ("task_id", string_schema()),
                 ],
             ),
         ),
@@ -2120,6 +2328,7 @@ fn personal_tools() -> Vec<ToolDefinition> {
                     ("summary", string_schema()),
                     ("remember", string_array_schema()),
                     ("agent", string_schema()),
+                    ("verifier_report", json_object_schema()),
                 ],
             ),
         ),
@@ -2136,6 +2345,10 @@ fn personal_tools() -> Vec<ToolDefinition> {
                     ("scopes", string_array_schema()),
                     ("max_items", int_schema()),
                     ("agent", string_schema()),
+                    ("acceptance", json_object_schema()),
+                    ("acceptance_kind", string_schema()),
+                    ("include_judgment", bool_schema()),
+                    ("task_id", string_schema()),
                 ],
             ),
         ),
@@ -2151,6 +2364,7 @@ fn personal_tools() -> Vec<ToolDefinition> {
                     ("summary", string_schema()),
                     ("remember", string_array_schema()),
                     ("agent", string_schema()),
+                    ("verifier_report", json_object_schema()),
                 ],
             ),
         ),
@@ -2166,6 +2380,7 @@ fn personal_tools() -> Vec<ToolDefinition> {
                     ("scopes", string_array_schema()),
                     ("max_items", int_schema()),
                     ("agent", string_schema()),
+                    ("session_id", string_schema()),
                 ],
             ),
         ),
@@ -2611,5 +2826,119 @@ mod tests {
             1
         );
         assert_eq!(handoff_content["context_item_count"], 1);
+    }
+
+    #[test]
+    fn task_workflow_records_gate_and_blocks_unfinished_handoff() {
+        let config = McpServerConfig {
+            mode: ServerMode::Personal,
+            v1_store: env::temp_dir().join(format!(
+                "mneme-mcp-gate-test-{}-v1.json",
+                std::process::id()
+            )),
+            team_store: env::temp_dir().join(format!(
+                "mneme-mcp-gate-test-{}-team.json",
+                std::process::id()
+            )),
+            team_workspace_id: "team".to_owned(),
+        };
+        let _ = std::fs::remove_file(&config.v1_store);
+        let _ = std::fs::remove_file(config.v1_store.with_extension("json.bak"));
+        let server = McpServer::new(config);
+        let begin = server.handle_request(json!({
+            "jsonrpc": "2.0",
+            "id": 1,
+            "method": "tools/call",
+            "params": {
+                "name": "mneme_task_start",
+                "arguments": {
+                    "task": "Verify gated MCP workflow",
+                    "agent": "codex",
+                    "lineage": "gate-workflow",
+                    "scope": "project:gate-workflow",
+                    "query": "gated MCP workflow",
+                    "acceptance": {
+                        "schema_version": "mneme.acceptance.v1",
+                        "task_id": "mcp-gate",
+                        "criteria": [
+                            {
+                                "id": "manual-check",
+                                "kind": "command",
+                                "command": {"argv": ["true"], "expect_exit": 0}
+                            }
+                        ]
+                    }
+                }
+            }
+        }));
+        let begin_content = begin
+            .get("result")
+            .and_then(|result| result.get("structuredContent"))
+            .expect("task_start should return structured content");
+        assert_eq!(begin_content["acceptance_enabled"], true);
+        let session_id = begin_content["session_id"]
+            .as_str()
+            .expect("task_start should return session id");
+
+        let finish = server.handle_request(json!({
+            "jsonrpc": "2.0",
+            "id": 2,
+            "method": "tools/call",
+            "params": {
+                "name": "mneme_task_finish",
+                "arguments": {
+                    "session_id": session_id,
+                    "agent": "codex",
+                    "lineage": "gate-workflow",
+                    "scope": "project:gate-workflow",
+                    "summary": "Verifier rejected the gated workflow",
+                    "verifier_report": {
+                        "schema_version": "mneme.verifier.v1",
+                        "task_id": "mcp-gate",
+                        "verifier": "unit-test",
+                        "results": [
+                            {
+                                "id": "manual-check",
+                                "status": "fail",
+                                "evidence": "unit test intentionally rejected completion"
+                            }
+                        ]
+                    }
+                }
+            }
+        }));
+        let finish_content = finish
+            .get("result")
+            .and_then(|result| result.get("structuredContent"))
+            .expect("task_finish should return structured content");
+        assert_eq!(finish_content["completion_ok"], false);
+        assert_eq!(finish_content["handoff_allowed"], false);
+        assert_eq!(finish_content["gate_result"]["status"], "failed");
+
+        let handoff = server.handle_request(json!({
+            "jsonrpc": "2.0",
+            "id": 3,
+            "method": "tools/call",
+            "params": {
+                "name": "mneme_prepare_handoff",
+                "arguments": {
+                    "session_id": session_id,
+                    "agent": "claude-code",
+                    "lineage": "gate-workflow",
+                    "scope": "project:gate-workflow",
+                    "query": "gated MCP workflow"
+                }
+            }
+        }));
+        let handoff_content = handoff
+            .get("result")
+            .and_then(|result| result.get("structuredContent"))
+            .expect("prepare_handoff should return structured content");
+        assert_eq!(handoff_content["handoff_allowed"], false);
+        assert_eq!(
+            handoff_content["handoff_blocked_reason"],
+            "session outcome gate is not completed"
+        );
+        assert_eq!(handoff_content["gate_result"]["status"], "failed");
     }
 }

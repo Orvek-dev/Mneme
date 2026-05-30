@@ -109,6 +109,26 @@ non-zero after writing JSON. The failed session is still stored, including
 public-safe evidence, so a later agent can continue from the failed criterion
 instead of receiving a fake completed handoff.
 
+## MCP Agent Flow
+
+MCP agents should use the high-level workflow tools:
+
+```text
+mneme_task_start(task, query, scope, acceptance or acceptance_kind)
+mneme_task_finish(session_id, summary, remember, verifier_report)
+mneme_prepare_handoff(query, scope, session_id)
+```
+
+`mneme_task_start` stores the same `mneme.acceptance.v1` contract as
+`mneme begin`. `mneme_task_finish` stores the same `mneme.verifier.v1` report as
+the CLI verifier path. `mneme_prepare_handoff` returns `handoff_allowed=false`
+and includes the failed or pending `gate_result` when the referenced
+`session_id` has not completed its gate.
+
+This keeps the agent workflow simple: the client can read one field before
+treating work as done, while Mneme still leaves command execution and judgment
+outside the core.
+
 ## External Judgment Intake
 
 Use `judgment` for criteria that cannot be proven by a deterministic command,
@@ -190,4 +210,6 @@ The smoke creates an isolated git repo, checks template generation and
 validation, rejects a malformed acceptance contract before begin, checks a
 passing gated session, checks `mneme outcome status`, verifies that an
 out-of-scope diff produces a non-zero failed gate, and checks both passing and
-failing external judgment verdicts.
+failing external judgment verdicts. The MCP client smoke additionally checks
+that a failed gated task returns `handoff_allowed=false` before another agent is
+allowed to continue.

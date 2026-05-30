@@ -336,6 +336,72 @@ def run_protocol_checks(binary: Path, work_dir: Path) -> dict[str, Any]:
         if text_in_context(secret, "API_KEY") or text_in_context(secret, "FAKE_TEST_VALUE"):
             raise SmokeFailure("secret-like continuity memory leaked into context")
 
+    gate_store = work_dir / "outcome-gate-v1.json"
+    gate_team = work_dir / "outcome-gate-team.json"
+    with McpClient(binary, gate_store, gate_team) as client:
+        begin = client.tool(
+            "mneme_task_start",
+            {
+                "task": "Verify MCP outcome gate",
+                "agent": "codex",
+                "lineage": "outcome-gate",
+                "scope": "project:outcome-gate",
+                "query": "MCP outcome gate",
+                "acceptance": {
+                    "schema_version": "mneme.acceptance.v1",
+                    "task_id": "mcp-outcome-gate",
+                    "criteria": [
+                        {
+                            "id": "manual-check",
+                            "kind": "command",
+                            "command": {"argv": ["true"], "expect_exit": 0},
+                        }
+                    ],
+                },
+            },
+        )
+        if begin.get("acceptance_enabled") is not True:
+            raise SmokeFailure("MCP task_start did not attach acceptance gate")
+        gated_session_id = begin.get("session_id")
+        finish = client.tool(
+            "mneme_task_finish",
+            {
+                "session_id": gated_session_id,
+                "agent": "codex",
+                "lineage": "outcome-gate",
+                "scope": "project:outcome-gate",
+                "summary": "MCP outcome gate intentionally failed",
+                "verifier_report": {
+                    "schema_version": "mneme.verifier.v1",
+                    "task_id": "mcp-outcome-gate",
+                    "verifier": "mcp-client-continuity-smoke",
+                    "results": [
+                        {
+                            "id": "manual-check",
+                            "status": "fail",
+                            "evidence": "smoke test rejected completion",
+                        }
+                    ],
+                },
+            },
+        )
+        if finish.get("completion_ok") is not False or finish.get("handoff_allowed") is not False:
+            raise SmokeFailure("MCP task_finish did not expose failed gate completion guard")
+        guarded_handoff = client.tool(
+            "mneme_prepare_handoff",
+            {
+                "session_id": gated_session_id,
+                "agent": "claude-code",
+                "lineage": "outcome-gate",
+                "scope": "project:outcome-gate",
+                "query": "MCP outcome gate",
+            },
+        )
+        if guarded_handoff.get("handoff_allowed") is not False:
+            raise SmokeFailure("MCP prepare_handoff did not block unfinished gated handoff")
+        if (guarded_handoff.get("gate_result") or {}).get("status") != "failed":
+            raise SmokeFailure("MCP prepare_handoff did not return failed gate result")
+
     return {
         "ok": True,
         "tool_count": EXPECTED_TOOL_COUNT,
@@ -346,6 +412,7 @@ def run_protocol_checks(binary: Path, work_dir: Path) -> dict[str, Any]:
         "missing_end_write_back_guard": "passed",
         "wrong_scope_guard": "passed",
         "secret_context_guard": "passed",
+        "outcome_gate_handoff_guard": "passed",
     }
 
 
