@@ -77,6 +77,7 @@ V1 tools:
 - `mneme_v1_forget`
 - `mneme_v1_correct`
 - `mneme_v1_quality`
+- `mneme_v1_outcome_template`
 - `mneme_v1_outcome_status`
 - `mneme_v1_outcome_judge`
 - `mneme_v1_validate`

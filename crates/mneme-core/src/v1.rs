@@ -18,6 +18,7 @@ use serde::{Deserialize, Serialize};
 const STORE_LOCK_STALE_SECONDS: u64 = 60 * 60;
 const PARTIAL_CONTEXT_WARNING: &str = "Mneme returned scoped, ranked memory, not the full conversation transcript. Treat this as partial context and verify decisions against cited source events.";
 const ACCEPTANCE_CONTRACT_SCHEMA_VERSION: &str = "mneme.acceptance.v1";
+const ACCEPTANCE_VALIDATION_SCHEMA_VERSION: &str = "mneme.acceptance_validation.v1";
 const VERIFIER_REPORT_SCHEMA_VERSION: &str = "mneme.verifier.v1";
 const JUDGMENT_REPORT_SCHEMA_VERSION: &str = "mneme.judgment.v1";
 const OUTCOME_GATE_RESULT_SCHEMA_VERSION: &str = "mneme.gate_result.v1";
@@ -1260,6 +1261,25 @@ pub struct AcceptanceBaseline {
     pub warnings: Vec<String>,
 }
 
+/// Validation report for an acceptance contract before a gated session starts.
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct AcceptanceValidationReport {
+    /// Validation schema identifier.
+    pub schema_version: String,
+    /// True when the contract can safely be stored on session begin.
+    pub ok: bool,
+    /// Number of criteria in the contract.
+    pub criterion_count: usize,
+    /// Number of deterministic verifier criteria.
+    pub deterministic_criterion_count: usize,
+    /// Number of external judgment criteria.
+    pub judgment_criterion_count: usize,
+    /// Fatal contract errors.
+    pub errors: Vec<String>,
+    /// Non-fatal contract warnings.
+    pub warnings: Vec<String>,
+}
+
 /// One deterministic acceptance criterion.
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct AcceptanceCriterion {
@@ -1630,6 +1650,95 @@ impl fmt::Display for SessionError {
 
 impl std::error::Error for SessionError {}
 
+/// Validates an acceptance contract without mutating engine state.
+#[must_use]
+pub fn validate_acceptance_contract(contract: &AcceptanceContract) -> AcceptanceValidationReport {
+    let mut errors = Vec::new();
+    let mut warnings = contract.baseline.warnings.clone();
+
+    if contract.schema_version != ACCEPTANCE_CONTRACT_SCHEMA_VERSION {
+        errors.push(format!(
+            "acceptance schema_version must be {ACCEPTANCE_CONTRACT_SCHEMA_VERSION}, got {}",
+            contract.schema_version
+        ));
+    }
+    if contract.criteria.is_empty() {
+        errors.push("acceptance criteria cannot be empty".to_owned());
+    }
+
+    let mut criterion_ids = BTreeSet::new();
+    let mut deterministic_count = 0;
+    let mut judgment_count = 0;
+    for criterion in &contract.criteria {
+        if criterion.id.trim().is_empty() {
+            errors.push("acceptance criterion id cannot be empty".to_owned());
+        } else if !criterion_ids.insert(criterion.id.clone()) {
+            errors.push(format!(
+                "duplicate acceptance criterion id: {}",
+                criterion.id
+            ));
+        }
+        match criterion.kind {
+            AcceptanceCriterionKind::Command => {
+                deterministic_count += 1;
+                validate_command_criterion(criterion, &mut errors, &mut warnings);
+            }
+            AcceptanceCriterionKind::DiffTouches => {
+                deterministic_count += 1;
+                validate_string_array_criterion(
+                    criterion,
+                    "paths",
+                    "diff_touches criterion must define non-empty paths",
+                    &mut errors,
+                );
+            }
+            AcceptanceCriterionKind::DiffScope => {
+                deterministic_count += 1;
+                validate_string_array_criterion(
+                    criterion,
+                    "allowed_paths",
+                    "diff_scope criterion must define non-empty allowed_paths",
+                    &mut errors,
+                );
+            }
+            AcceptanceCriterionKind::SymbolPresent => {
+                deterministic_count += 1;
+                validate_required_string_criterion(
+                    criterion,
+                    "path",
+                    "symbol_present criterion must define path",
+                    &mut errors,
+                );
+                validate_required_string_criterion(
+                    criterion,
+                    "symbol",
+                    "symbol_present criterion must define symbol",
+                    &mut errors,
+                );
+            }
+            AcceptanceCriterionKind::Judgment => {
+                judgment_count += 1;
+                validate_judgment_criterion(criterion, &mut errors, &mut warnings);
+            }
+        }
+    }
+
+    errors.sort();
+    errors.dedup();
+    warnings.sort();
+    warnings.dedup();
+
+    AcceptanceValidationReport {
+        schema_version: ACCEPTANCE_VALIDATION_SCHEMA_VERSION.to_owned(),
+        ok: errors.is_empty(),
+        criterion_count: contract.criteria.len(),
+        deterministic_criterion_count: deterministic_count,
+        judgment_criterion_count: judgment_count,
+        errors,
+        warnings,
+    }
+}
+
 fn evaluate_outcome_gate(
     acceptance: &Option<AcceptanceContract>,
     verifier_report: Option<&VerifierReport>,
@@ -1638,16 +1747,8 @@ fn evaluate_outcome_gate(
         return Ok(None);
     };
 
-    let mut violations = Vec::new();
-    if contract.schema_version != ACCEPTANCE_CONTRACT_SCHEMA_VERSION {
-        violations.push(format!(
-            "acceptance schema_version must be {ACCEPTANCE_CONTRACT_SCHEMA_VERSION}, got {}",
-            contract.schema_version
-        ));
-    }
-    if contract.criteria.is_empty() {
-        violations.push("acceptance criteria cannot be empty".to_owned());
-    }
+    let validation = validate_acceptance_contract(contract);
+    let mut violations = validation.errors.clone();
 
     let mut criterion_ids = BTreeSet::new();
     let mut judgment_ids = BTreeSet::new();
@@ -1886,6 +1987,124 @@ fn apply_judgment_to_gate(
         evidence,
         warnings: current_gate.warnings.clone(),
     }
+}
+
+fn validate_command_criterion(
+    criterion: &AcceptanceCriterion,
+    errors: &mut Vec<String>,
+    warnings: &mut Vec<String>,
+) {
+    let Some(config) = criterion.config.as_object() else {
+        errors.push(format!(
+            "command criterion {} must define an object config",
+            criterion.id
+        ));
+        return;
+    };
+    let has_argv = non_empty_string_array(config.get("argv"));
+    let shell_enabled = config
+        .get("shell")
+        .and_then(serde_json::Value::as_bool)
+        .unwrap_or(false);
+    let has_run = config
+        .get("run")
+        .and_then(serde_json::Value::as_str)
+        .is_some_and(|value| !value.trim().is_empty());
+    if !(has_argv || shell_enabled && has_run) {
+        errors.push(format!(
+            "command criterion {} must define argv[] or shell=true with run",
+            criterion.id
+        ));
+    }
+    if shell_enabled {
+        warnings.push(format!(
+            "command criterion {} uses shell=true; prefer argv[] for deterministic verification",
+            criterion.id
+        ));
+    }
+    if let Some(expect_exit) = config.get("expect_exit") {
+        let valid = expect_exit
+            .as_i64()
+            .is_some_and(|value| (0..=255).contains(&value));
+        if !valid {
+            errors.push(format!(
+                "command criterion {} expect_exit must be an integer from 0 to 255",
+                criterion.id
+            ));
+        }
+    }
+}
+
+fn validate_string_array_criterion(
+    criterion: &AcceptanceCriterion,
+    field: &str,
+    message: &str,
+    errors: &mut Vec<String>,
+) {
+    let Some(config) = criterion.config.as_object() else {
+        errors.push(format!("{} for criterion {}", message, criterion.id));
+        return;
+    };
+    if !non_empty_string_array(config.get(field)) {
+        errors.push(format!("{} for criterion {}", message, criterion.id));
+    }
+}
+
+fn validate_required_string_criterion(
+    criterion: &AcceptanceCriterion,
+    field: &str,
+    message: &str,
+    errors: &mut Vec<String>,
+) {
+    let Some(config) = criterion.config.as_object() else {
+        errors.push(format!("{} for criterion {}", message, criterion.id));
+        return;
+    };
+    let valid = config
+        .get(field)
+        .and_then(serde_json::Value::as_str)
+        .is_some_and(|value| !value.trim().is_empty());
+    if !valid {
+        errors.push(format!("{} for criterion {}", message, criterion.id));
+    }
+}
+
+fn validate_judgment_criterion(
+    criterion: &AcceptanceCriterion,
+    errors: &mut Vec<String>,
+    warnings: &mut Vec<String>,
+) {
+    let Some(config) = criterion.config.as_object() else {
+        errors.push(format!(
+            "judgment criterion {} must define an object config",
+            criterion.id
+        ));
+        return;
+    };
+    let has_rubric = config
+        .get("rubric")
+        .and_then(serde_json::Value::as_str)
+        .is_some_and(|value| !value.trim().is_empty());
+    let has_question = config
+        .get("question")
+        .and_then(serde_json::Value::as_str)
+        .is_some_and(|value| !value.trim().is_empty());
+    if !has_rubric && !has_question {
+        warnings.push(format!(
+            "judgment criterion {} should define rubric or question",
+            criterion.id
+        ));
+    }
+}
+
+fn non_empty_string_array(value: Option<&serde_json::Value>) -> bool {
+    let Some(array) = value.and_then(serde_json::Value::as_array) else {
+        return false;
+    };
+    !array.is_empty()
+        && array
+            .iter()
+            .all(|item| item.as_str().is_some_and(|value| !value.trim().is_empty()))
 }
 
 fn sanitize_gate_evidence(text: &str) -> String {
@@ -4820,6 +5039,84 @@ mod tests {
             vec!["human-review"]
         );
         Ok(())
+    }
+
+    #[test]
+    fn acceptance_validation_rejects_invalid_criterion_configs() {
+        let report = validate_acceptance_contract(&AcceptanceContract {
+            schema_version: "mneme.acceptance.v1".to_owned(),
+            task_id: Some("bad-contract".to_owned()),
+            baseline: AcceptanceBaseline::default(),
+            criteria: vec![
+                AcceptanceCriterion {
+                    id: "build".to_owned(),
+                    kind: AcceptanceCriterionKind::Command,
+                    description: None,
+                    config: serde_json::json!({}),
+                },
+                AcceptanceCriterion {
+                    id: "scope".to_owned(),
+                    kind: AcceptanceCriterionKind::DiffScope,
+                    description: None,
+                    config: serde_json::json!({"allowed_paths": []}),
+                },
+                AcceptanceCriterion {
+                    id: "symbol".to_owned(),
+                    kind: AcceptanceCriterionKind::SymbolPresent,
+                    description: None,
+                    config: serde_json::json!({"path": "src/lib.rs"}),
+                },
+            ],
+        });
+
+        assert!(!report.ok);
+        assert_eq!(report.criterion_count, 3);
+        assert!(report
+            .errors
+            .iter()
+            .any(|error| error.contains("must define argv")));
+        assert!(report
+            .errors
+            .iter()
+            .any(|error| error.contains("allowed_paths")));
+        assert!(report
+            .errors
+            .iter()
+            .any(|error| error.contains("must define symbol")));
+    }
+
+    #[test]
+    fn acceptance_validation_accepts_mixed_deterministic_and_judgment_contract() {
+        let report = validate_acceptance_contract(&AcceptanceContract {
+            schema_version: "mneme.acceptance.v1".to_owned(),
+            task_id: Some("good-contract".to_owned()),
+            baseline: AcceptanceBaseline::default(),
+            criteria: vec![
+                AcceptanceCriterion {
+                    id: "tests".to_owned(),
+                    kind: AcceptanceCriterionKind::Command,
+                    description: None,
+                    config: serde_json::json!({"argv": ["cargo", "test"], "expect_exit": 0}),
+                },
+                AcceptanceCriterion {
+                    id: "scope".to_owned(),
+                    kind: AcceptanceCriterionKind::DiffScope,
+                    description: None,
+                    config: serde_json::json!({"allowed_paths": ["crates/mneme-core"]}),
+                },
+                AcceptanceCriterion {
+                    id: "review".to_owned(),
+                    kind: AcceptanceCriterionKind::Judgment,
+                    description: None,
+                    config: serde_json::json!({"rubric": "external reviewer accepts outcome"}),
+                },
+            ],
+        });
+
+        assert!(report.ok);
+        assert_eq!(report.deterministic_criterion_count, 2);
+        assert_eq!(report.judgment_criterion_count, 1);
+        assert!(report.errors.is_empty());
     }
 
     #[test]

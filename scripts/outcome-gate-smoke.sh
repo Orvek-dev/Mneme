@@ -24,10 +24,58 @@ git commit -q -m "initial"
 mkdir -p .mneme-test
 
 STORE="$WORKSPACE/.mneme-test/mneme.json"
+TEMPLATE_REPORT="$WORKSPACE/.mneme-test/template-report.json"
+TEMPLATE_ACCEPTANCE="$WORKSPACE/.mneme-test/template-acceptance.json"
+TEMPLATE_VALIDATE="$WORKSPACE/.mneme-test/template-validate.json"
+BAD_ACCEPTANCE="$WORKSPACE/.mneme-test/bad-acceptance.json"
+BAD_VALIDATE="$WORKSPACE/.mneme-test/bad-validate.json"
+BAD_BEGIN="$WORKSPACE/.mneme-test/bad-begin.json"
 ACCEPTANCE_PASS="$WORKSPACE/.mneme-test/acceptance-pass.json"
 BEGIN_PASS="$WORKSPACE/.mneme-test/begin-pass.json"
 END_PASS="$WORKSPACE/.mneme-test/end-pass.json"
 STATUS_PASS="$WORKSPACE/.mneme-test/status-pass.json"
+
+"$MNEME_BIN" outcome template --kind rust --include-judgment --task-id template-task --output "$TEMPLATE_ACCEPTANCE" --json > "$TEMPLATE_REPORT"
+grep -q '"command": "outcome.template"' "$TEMPLATE_REPORT"
+grep -q '"kind": "rust"' "$TEMPLATE_REPORT"
+grep -q '"ok": true' "$TEMPLATE_REPORT"
+"$MNEME_BIN" outcome validate "$TEMPLATE_ACCEPTANCE" --json > "$TEMPLATE_VALIDATE"
+grep -q '"command": "outcome.validate"' "$TEMPLATE_VALIDATE"
+grep -q '"ok": true' "$TEMPLATE_VALIDATE"
+
+cat > "$BAD_ACCEPTANCE" <<'JSON'
+{
+  "schema_version": "mneme.acceptance.v1",
+  "task_id": "bad-task",
+  "criteria": [
+    {
+      "id": "bad-command",
+      "kind": "command",
+      "command": {}
+    }
+  ]
+}
+JSON
+
+set +e
+"$MNEME_BIN" outcome validate "$BAD_ACCEPTANCE" --json > "$BAD_VALIDATE"
+BAD_VALIDATE_EXIT="$?"
+set -e
+if [ "$BAD_VALIDATE_EXIT" -eq 0 ]; then
+  echo "outcome-gate-smoke: expected invalid acceptance validation to exit non-zero" >&2
+  exit 1
+fi
+grep -q '"ok": false' "$BAD_VALIDATE"
+grep -q 'must define argv' "$BAD_VALIDATE"
+
+set +e
+"$MNEME_BIN" begin "Reject bad gate" --acceptance "$BAD_ACCEPTANCE" --store "$STORE" --json > "$BAD_BEGIN" 2>&1
+BAD_BEGIN_EXIT="$?"
+set -e
+if [ "$BAD_BEGIN_EXIT" -eq 0 ]; then
+  echo "outcome-gate-smoke: expected begin with invalid acceptance to exit non-zero" >&2
+  exit 1
+fi
 
 cat > "$ACCEPTANCE_PASS" <<'JSON'
 {

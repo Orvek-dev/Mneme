@@ -223,6 +223,7 @@ impl McpServer {
             "mneme_v1_forget" => self.v1_lifecycle(arguments, "forget"),
             "mneme_v1_correct" => self.v1_lifecycle(arguments, "correct"),
             "mneme_v1_quality" => self.v1_quality(),
+            "mneme_v1_outcome_template" => self.v1_outcome_template(arguments),
             "mneme_v1_outcome_status" => self.v1_outcome_status(arguments),
             "mneme_v1_outcome_judge" => self.v1_outcome_judge(arguments),
             "mneme_v1_validate" => self.v1_validate(),
@@ -816,6 +817,28 @@ impl McpServer {
             "status": status,
             "gate_result": session.gate_result,
             "next_recommended_actions": outcome_status_next_actions(),
+        }))
+    }
+
+    fn v1_outcome_template(&self, arguments: &Map<String, Value>) -> Result<Value, McpError> {
+        let kind = optional_string(arguments, "kind")
+            .and_then(non_empty_string)
+            .unwrap_or_else(|| "rust".to_owned());
+        let task_id = optional_string(arguments, "task_id")
+            .and_then(non_empty_string)
+            .unwrap_or_else(|| format!("{kind}-task"));
+        let include_judgment = optional_bool(arguments, "include_judgment").unwrap_or(false);
+        let acceptance = mcp_acceptance_template(&kind, &task_id, include_judgment)?;
+        Ok(json!({
+            "command": "v1.outcome.template",
+            "schema_version": "mneme.v1_outcome_template.v1",
+            "kind": kind,
+            "acceptance": acceptance,
+            "next_recommended_actions": vec![
+                "Save the acceptance object as acceptance.json before starting the gated task.",
+                "Run mneme outcome validate acceptance.json or use mneme begin --acceptance to reject malformed criteria.",
+                "Pass the same acceptance file to mneme begin or hook begin before implementation starts.",
+            ],
         }))
     }
 
@@ -1521,6 +1544,111 @@ fn outcome_status_next_actions() -> Vec<&'static str> {
     ]
 }
 
+fn mcp_acceptance_template(
+    kind: &str,
+    task_id: &str,
+    include_judgment: bool,
+) -> Result<Value, McpError> {
+    let mut criteria = match kind {
+        "rust" => vec![
+            json!({
+                "id": "cargo-test",
+                "kind": "command",
+                "description": "Rust tests must pass.",
+                "command": {"argv": ["cargo", "test", "--workspace", "--all-targets"], "expect_exit": 0}
+            }),
+            json!({
+                "id": "cargo-clippy",
+                "kind": "command",
+                "description": "Rust clippy must pass with warnings denied.",
+                "command": {"argv": ["cargo", "clippy", "--workspace", "--all-targets", "--", "-D", "warnings"], "expect_exit": 0}
+            }),
+            json!({
+                "id": "source-or-docs-changed",
+                "kind": "diff_touches",
+                "description": "The task should touch source, tests, scripts, or docs.",
+                "diff_touches": {"paths": ["crates", "src", "tests", "scripts", "docs"]}
+            }),
+            json!({
+                "id": "repo-scope",
+                "kind": "diff_scope",
+                "description": "Changes stay inside public repository implementation and docs.",
+                "diff_scope": {"allowed_paths": ["crates", "src", "tests", "scripts", "docs", "README.md", "CHANGELOG.md", "Cargo.toml", "Cargo.lock"]}
+            }),
+        ],
+        "node" | "npm" | "javascript" => vec![
+            json!({
+                "id": "npm-test",
+                "kind": "command",
+                "description": "Node test script must pass.",
+                "command": {"argv": ["npm", "test"], "expect_exit": 0}
+            }),
+            json!({
+                "id": "npm-build",
+                "kind": "command",
+                "description": "Node build script must pass.",
+                "command": {"argv": ["npm", "run", "build"], "expect_exit": 0}
+            }),
+            json!({
+                "id": "app-or-docs-changed",
+                "kind": "diff_touches",
+                "diff_touches": {"paths": ["src", "app", "lib", "docs", "README.md", "package.json"]}
+            }),
+            json!({
+                "id": "repo-scope",
+                "kind": "diff_scope",
+                "diff_scope": {"allowed_paths": ["src", "app", "lib", "tests", "docs", "README.md", "package.json", "package-lock.json", "pnpm-lock.yaml", "yarn.lock"]}
+            }),
+        ],
+        "docs" | "documentation" => vec![
+            json!({
+                "id": "docs-changed",
+                "kind": "diff_touches",
+                "description": "The task should touch docs or README content.",
+                "diff_touches": {"paths": ["docs", "README.md", "CHANGELOG.md"]}
+            }),
+            json!({
+                "id": "docs-scope",
+                "kind": "diff_scope",
+                "description": "Documentation-only task should stay inside docs and top-level docs files.",
+                "diff_scope": {"allowed_paths": ["docs", "README.md", "CHANGELOG.md"]}
+            }),
+        ],
+        "generic" => vec![
+            json!({
+                "id": "expected-files-changed",
+                "kind": "diff_touches",
+                "description": "Replace paths with the files or directories this task must modify.",
+                "diff_touches": {"paths": ["CHANGE_ME"]}
+            }),
+            json!({
+                "id": "allowed-scope",
+                "kind": "diff_scope",
+                "description": "Replace allowed_paths with the safe task boundary.",
+                "diff_scope": {"allowed_paths": ["CHANGE_ME"]}
+            }),
+        ],
+        _ => {
+            return Err(McpError::invalid_request(format!(
+                "unknown outcome template kind: {kind}; expected rust, node, docs, or generic"
+            )))
+        }
+    };
+    if include_judgment {
+        criteria.push(json!({
+            "id": "external-review",
+            "kind": "judgment",
+            "description": "External reviewer accepts the outcome.",
+            "judgment": {"rubric": "Reviewer confirms the result satisfies the user-visible task goal."}
+        }));
+    }
+    Ok(json!({
+        "schema_version": "mneme.acceptance.v1",
+        "task_id": task_id,
+        "criteria": criteria
+    }))
+}
+
 fn handoff_next_actions() -> Vec<&'static str> {
     vec![
         "Pass the handoff package to the next agent as partial cited context.",
@@ -1651,7 +1779,9 @@ fn field_description(key: &str) -> &'static str {
         "claim_id" => "Stable claim id returned by Mneme, such as claim-001.",
         "envelope" => "Connector-safe V2 sync envelope previously exported by Mneme.",
         "include_handoff" => "When true, task_start also builds a handoff/context package before opening the session.",
+        "include_judgment" => "When true, include a pending external review criterion in the generated acceptance contract.",
         "include_projects" => "Include connector-safe project metadata in the sync export when policy allows it.",
+        "kind" => "Outcome template kind. Use rust, node, docs, or generic.",
         "lineage" => "Stable task lineage shared across sessions. Use an issue id, branch name, or task slug.",
         "max_items" => "Maximum context items to return. Keep small unless the agent explicitly needs more context.",
         "memory_id" => "V2 memory id to promote, review, or inspect.",
@@ -1675,6 +1805,7 @@ fn field_description(key: &str) -> &'static str {
         "summary" => "Concise public-safe summary of completed work. Do not include secrets or raw transcripts.",
         "target_agent" => "Agent id to revoke.",
         "task" => "Concrete task the agent is starting or backfilling.",
+        "task_id" => "Stable outcome task id stored in an acceptance or judgment report.",
         "text" => "Memory or event text. Store durable non-secret facts only.",
         "trust" => "Trust level for raw events, such as trusted_user, agent_summary, or untrusted_transcript.",
         "user" => "Team user id.",
@@ -1688,6 +1819,7 @@ fn field_examples(key: &str) -> Option<Vec<String>> {
         "actor" => vec!["alice", "reviewer-bob"],
         "agent" => vec!["codex", "claude-code", "cursor"],
         "lineage" => vec!["issue-42-auth-refactor", "branch:feat/mcp-memory"],
+        "kind" => vec!["rust", "node", "docs", "generic"],
         "query" => vec![
             "release checklist evidence",
             "continuity smoke before release",
@@ -1738,6 +1870,7 @@ fn tool_annotations(name: &'static str) -> ToolAnnotations {
             | "mneme_agent_guide"
             | "mneme_v1_context"
             | "mneme_v1_quality"
+            | "mneme_v1_outcome_template"
             | "mneme_v1_outcome_status"
             | "mneme_v1_validate"
             | "mneme_v1_snapshot"
@@ -1769,6 +1902,7 @@ fn tool_annotations(name: &'static str) -> ToolAnnotations {
             | "mneme_agent_guide"
             | "mneme_v1_context"
             | "mneme_v1_quality"
+            | "mneme_v1_outcome_template"
             | "mneme_v1_outcome_status"
             | "mneme_v1_validate"
             | "mneme_v1_snapshot"
@@ -1808,6 +1942,7 @@ fn tool_title(name: &str) -> &'static str {
         "mneme_v1_backfill_context" => "V1 Backfill Context",
         "mneme_v1_forget" => "V1 Forget",
         "mneme_v1_correct" => "V1 Correct",
+        "mneme_v1_outcome_template" => "V1 Outcome Template",
         "mneme_v1_outcome_status" => "V1 Outcome Status",
         "mneme_v2_team_init" => "V2 Team Init",
         "mneme_v2_user_add" => "V2 User Add",
@@ -2078,6 +2213,18 @@ fn personal_tools() -> Vec<ToolDefinition> {
             "mneme_v1_quality",
             "Summarize V1 personal-memory quality counters before trusting or publishing memory state.",
             object_schema(&[], Vec::new()),
+        ),
+        tool_definition(
+            "mneme_v1_outcome_template",
+            "Generate a starter mneme.acceptance.v1 contract for V1 outcome gates. Use before begin when an agent needs concrete completion evidence.",
+            object_schema(
+                &[],
+                vec![
+                    ("kind", string_schema()),
+                    ("task_id", string_schema()),
+                    ("include_judgment", bool_schema()),
+                ],
+            ),
         ),
         tool_definition(
             "mneme_v1_outcome_status",

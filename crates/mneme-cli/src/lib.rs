@@ -15,23 +15,24 @@ use std::thread;
 use std::time::Duration;
 
 use mneme_core::{
-    validate_state, AcceptanceBaseline, AcceptanceContract, AcceptanceCriterion,
-    AcceptanceCriterionKind, BuildStage, ClaimRecord, ClaimStatus, CommandExtractor,
-    CompactionReport, ContextPack, ContextQuery, EngineSnapshot, EventInput, ExtractorError,
-    JsonFileStore, JsonTeamFileStore, MnemeConfig, MnemeEngine, MnemeExtractor, MnemeState,
-    MnemeStore, OutcomeGateResult, OutcomeJudgmentCriterionResult, OutcomeJudgmentReport,
-    OutcomeJudgmentVerdict, RuleBasedExtractor, SessionBeginInput, SessionBeginReport,
-    SessionEndInput, SessionEndReport, SessionError, SessionMemoryInputMode, SessionRecord,
-    StateValidationReport, StoreError, StoreErrorKind, StoreFileInspection, StoreFileStatus,
-    StoreInspection, StoreRepairReport, StoreRestoreReport, TeamActor, TeamAdapterManifest,
-    TeamAgentInput, TeamContextPack, TeamContextQuery, TeamFirewallReport, TeamHandoffPackage,
-    TeamMemoryConfig, TeamMemoryEngine, TeamMemoryQualityReport, TeamMemoryRecord, TeamMemoryState,
-    TeamOntologyReport, TeamProjectInput, TeamPromotionCreateInput, TeamPromotionRecord,
-    TeamPromotionReviewInput, TeamPromotionReviewReport, TeamRole, TeamRunBeginInput,
-    TeamRunBeginReport, TeamRunEndInput, TeamRunEndReport, TeamRunHandoffInput, TeamRunNoteInput,
-    TeamRunNoteReport, TeamStateValidationReport, TeamSyncApplyReport, TeamSyncEnvelope,
-    TeamSyncExportInput, TeamUserInput, ValidationSeverity, VerifierReport,
-    DEFAULT_CONTEXT_MAX_ITEMS, DEFAULT_TEAM_CONTEXT_MAX_ITEMS, PRODUCT_NAME,
+    validate_acceptance_contract, validate_state, AcceptanceBaseline, AcceptanceContract,
+    AcceptanceCriterion, AcceptanceCriterionKind, AcceptanceValidationReport, BuildStage,
+    ClaimRecord, ClaimStatus, CommandExtractor, CompactionReport, ContextPack, ContextQuery,
+    EngineSnapshot, EventInput, ExtractorError, JsonFileStore, JsonTeamFileStore, MnemeConfig,
+    MnemeEngine, MnemeExtractor, MnemeState, MnemeStore, OutcomeGateResult,
+    OutcomeJudgmentCriterionResult, OutcomeJudgmentReport, OutcomeJudgmentVerdict,
+    RuleBasedExtractor, SessionBeginInput, SessionBeginReport, SessionEndInput, SessionEndReport,
+    SessionError, SessionMemoryInputMode, SessionRecord, StateValidationReport, StoreError,
+    StoreErrorKind, StoreFileInspection, StoreFileStatus, StoreInspection, StoreRepairReport,
+    StoreRestoreReport, TeamActor, TeamAdapterManifest, TeamAgentInput, TeamContextPack,
+    TeamContextQuery, TeamFirewallReport, TeamHandoffPackage, TeamMemoryConfig, TeamMemoryEngine,
+    TeamMemoryQualityReport, TeamMemoryRecord, TeamMemoryState, TeamOntologyReport,
+    TeamProjectInput, TeamPromotionCreateInput, TeamPromotionRecord, TeamPromotionReviewInput,
+    TeamPromotionReviewReport, TeamRole, TeamRunBeginInput, TeamRunBeginReport, TeamRunEndInput,
+    TeamRunEndReport, TeamRunHandoffInput, TeamRunNoteInput, TeamRunNoteReport,
+    TeamStateValidationReport, TeamSyncApplyReport, TeamSyncEnvelope, TeamSyncExportInput,
+    TeamUserInput, ValidationSeverity, VerifierReport, DEFAULT_CONTEXT_MAX_ITEMS,
+    DEFAULT_TEAM_CONTEXT_MAX_ITEMS, PRODUCT_NAME,
 };
 use serde::{Deserialize, Serialize};
 
@@ -366,7 +367,7 @@ Commands:
   snapshot    Print the current store snapshot.
   begin       Start an agent task session and retrieve context.
   end         Close an agent task session and optionally remember claims.
-  outcome     Inspect a session outcome gate result.
+  outcome     Author, validate, inspect, or judge outcome gates.
   hook        Agent hook JSON contract for begin/end automation.
   mcp         Generate MCP client configuration snippets.
   team        Manage v2 team memory, policy, promotion, and audit.
@@ -390,6 +391,8 @@ Examples:
   mneme curate --store /tmp/mneme.json --json
   mneme context "local-first" --store /tmp/mneme.json --json
   mneme team init --store /tmp/mneme-team.json --json
+  mneme outcome template --kind rust --include-judgment --output acceptance.json
+  mneme outcome validate acceptance.json --json
   mneme outcome status session-001 --store /tmp/mneme.json --json
   mneme outcome judge session-001 --id ux-review --verdict pass --reviewer lee --store /tmp/mneme.json --json
   mneme mcp config --client all --json
@@ -530,16 +533,22 @@ Example:
   mneme end session-001 --summary "Implemented parser" --verifier-command scripts/mneme-outcome-verifier.py --store /tmp/mneme.json --json"#;
 
 const MNEME_OUTCOME_HELP: &str = r#"Usage:
+  mneme outcome template [--kind rust|node|docs|generic] [--task-id <id>] [--include-judgment] [--output <path>] [--json]
+  mneme outcome validate <acceptance.json> [--json]
   mneme outcome status <session-id> [--store <path>] [--json]
   mneme outcome judge <session-id> [--judgment-report <path> | --id <criterion-id> --verdict pass|fail] [--evidence <text>] [--reviewer <id>] [--task-id <id>] [--store <path>] [--json]
 
-Inspect or resolve the first-class outcome gate result for a session.
-`status` is read-only. `judge` applies an external human/model verdict to a
-pending judgment criterion. Mneme validates and stores the verdict, but does not
-perform the subjective judgment itself. If the updated gate is not completed,
-`judge` writes output and exits non-zero.
+Author, validate, inspect, or resolve first-class outcome gates.
+`template` writes a starter mneme.acceptance.v1 contract for common task types.
+`validate` checks the contract shape before a session starts. `status` is
+read-only. `judge` applies an external human/model verdict to a pending
+judgment criterion. Mneme validates and stores the verdict, but does not perform
+the subjective judgment itself. If the updated gate is not completed, `judge`
+writes output and exits non-zero.
 
 Example:
+  mneme outcome template --kind rust --include-judgment --output acceptance.json
+  mneme outcome validate acceptance.json --json
   mneme outcome status session-001 --store /tmp/mneme.json --json
   mneme outcome judge session-001 --id ux-review --verdict pass --evidence "Reviewer accepted the UX" --reviewer lee --store /tmp/mneme.json --json"#;
 
@@ -1039,6 +1048,46 @@ struct OutcomeJudgeOptions {
     evidence: Option<String>,
 }
 
+#[derive(Debug, Clone)]
+struct OutcomeTemplateOptions {
+    json: bool,
+    kind: OutcomeTemplateKind,
+    task_id: Option<String>,
+    output_path: Option<PathBuf>,
+    include_judgment: bool,
+}
+
+impl Default for OutcomeTemplateOptions {
+    fn default() -> Self {
+        Self {
+            json: false,
+            kind: OutcomeTemplateKind::Rust,
+            task_id: None,
+            output_path: None,
+            include_judgment: false,
+        }
+    }
+}
+
+#[derive(Debug, Clone, Copy, Eq, PartialEq)]
+enum OutcomeTemplateKind {
+    Rust,
+    Node,
+    Docs,
+    Generic,
+}
+
+impl OutcomeTemplateKind {
+    const fn as_str(self) -> &'static str {
+        match self {
+            Self::Rust => "rust",
+            Self::Node => "node",
+            Self::Docs => "docs",
+            Self::Generic => "generic",
+        }
+    }
+}
+
 #[derive(Debug, Clone, Default)]
 enum ExtractorOptions {
     #[default]
@@ -1439,6 +1488,22 @@ struct OutcomeJudgeCliReport {
     completed: bool,
     gate_result: OutcomeGateResult,
     session: SessionRecord,
+}
+
+#[derive(Debug, Serialize)]
+struct OutcomeValidateCliReport {
+    command: &'static str,
+    path: String,
+    validation: AcceptanceValidationReport,
+}
+
+#[derive(Debug, Serialize)]
+struct OutcomeTemplateCliReport {
+    command: &'static str,
+    kind: &'static str,
+    path: Option<String>,
+    validation: AcceptanceValidationReport,
+    acceptance: serde_json::Value,
 }
 
 #[derive(Debug, Serialize)]
@@ -2173,6 +2238,9 @@ fn run_begin(raw_args: Vec<String>, writer: &mut impl Write) -> Result<(), CliEr
         .as_deref()
         .map(load_acceptance_contract)
         .transpose()?;
+    if let Some(contract) = acceptance.as_ref() {
+        ensure_acceptance_valid(contract)?;
+    }
     let mut engine = load_engine(&store_path)?;
     let report = engine.begin_session(SessionBeginInput {
         task,
@@ -2237,6 +2305,45 @@ fn run_end(raw_args: Vec<String>, writer: &mut impl Write) -> Result<(), CliErro
 }
 
 fn run_outcome(mut raw_args: Vec<String>, writer: &mut impl Write) -> Result<(), CliError> {
+    if raw_args.first().is_some_and(|arg| arg == "template") {
+        raw_args.remove(0);
+        let options = parse_outcome_template_args(raw_args)?;
+        let acceptance = build_acceptance_template(&options);
+        let contract = acceptance_template_to_contract(&acceptance)?;
+        let validation = validate_acceptance_contract(&contract);
+        let path = if let Some(path) = &options.output_path {
+            let text = serde_json::to_string_pretty(&acceptance).map_err(CliError::json)?;
+            std::fs::write(path, format!("{text}\n"))
+                .map_err(|source| CliError::io("write outcome template", path, source))?;
+            Some(path.display().to_string())
+        } else {
+            None
+        };
+        let report = OutcomeTemplateCliReport {
+            command: "outcome.template",
+            kind: options.kind.as_str(),
+            path,
+            validation,
+            acceptance,
+        };
+        return emit_outcome_template_report(&report, options.json, writer);
+    }
+    if raw_args.first().is_some_and(|arg| arg == "validate") {
+        raw_args.remove(0);
+        let (path, options) = parse_outcome_validate_args(raw_args)?;
+        let contract = load_acceptance_contract(&path)?;
+        let validation = validate_acceptance_contract(&contract);
+        let report = OutcomeValidateCliReport {
+            command: "outcome.validate",
+            path: path.display().to_string(),
+            validation,
+        };
+        emit_outcome_validate_report(&report, options.json, writer)?;
+        if !report.validation.ok {
+            return Err(CliError::reported(1));
+        }
+        return Ok(());
+    }
     if raw_args.first().is_some_and(|arg| arg == "status") {
         raw_args.remove(0);
         let (session_id, options) = parse_outcome_status_args(raw_args)?;
@@ -2290,7 +2397,7 @@ fn run_outcome(mut raw_args: Vec<String>, writer: &mut impl Write) -> Result<(),
         return Ok(());
     }
     Err(CliError::invalid_cli(
-        "usage: mneme outcome <status|judge> ...",
+        "usage: mneme outcome <template|validate|status|judge> ...",
     ))
 }
 
@@ -2384,6 +2491,9 @@ fn run_agent_hook_begin(raw_args: Vec<String>, writer: &mut impl Write) -> Resul
         .as_deref()
         .map(load_acceptance_contract)
         .transpose()?;
+    if let Some(contract) = acceptance.as_ref() {
+        ensure_acceptance_valid(contract)?;
+    }
     let mut engine = load_engine(&store_path)?;
     let report = engine.begin_session(SessionBeginInput {
         task,
@@ -5001,6 +5111,84 @@ fn parse_outcome_status_args(raw_args: Vec<String>) -> Result<(String, CommonOpt
     ))
 }
 
+fn parse_outcome_validate_args(
+    raw_args: Vec<String>,
+) -> Result<(PathBuf, CommonOptions), CliError> {
+    let mut options = CommonOptions::default();
+    let mut positionals = Vec::new();
+    let mut idx = 0;
+    while idx < raw_args.len() {
+        if parse_common_option(&raw_args, &mut idx, &mut options)? {
+            idx += 1;
+            continue;
+        }
+        match raw_args[idx].as_str() {
+            value if value.starts_with('-') => {
+                return Err(CliError::invalid_cli(format!(
+                    "unknown outcome validate option: {value}"
+                )));
+            }
+            value => positionals.push(value.to_owned()),
+        }
+        idx += 1;
+    }
+    if positionals.len() != 1 {
+        return Err(CliError::invalid_cli(
+            "usage: mneme outcome validate <acceptance.json> [--json]",
+        ));
+    }
+    Ok((PathBuf::from(positionals.remove(0)), options))
+}
+
+fn parse_outcome_template_args(raw_args: Vec<String>) -> Result<OutcomeTemplateOptions, CliError> {
+    let mut options = OutcomeTemplateOptions::default();
+    let mut idx = 0;
+    while idx < raw_args.len() {
+        match raw_args[idx].as_str() {
+            "--json" => options.json = true,
+            "--kind" => {
+                idx += 1;
+                options.kind =
+                    parse_outcome_template_kind(required_arg(&raw_args, idx, "--kind")?)?;
+            }
+            "--task-id" => {
+                idx += 1;
+                options.task_id = Some(required_arg(&raw_args, idx, "--task-id")?);
+            }
+            "--output" => {
+                idx += 1;
+                options.output_path =
+                    Some(PathBuf::from(required_arg(&raw_args, idx, "--output")?));
+            }
+            "--include-judgment" => options.include_judgment = true,
+            value if value.starts_with('-') => {
+                return Err(CliError::invalid_cli(format!(
+                    "unknown outcome template option: {value}"
+                )));
+            }
+            value => {
+                return Err(CliError::invalid_cli(format!(
+                    "unexpected outcome template argument: {value}"
+                )));
+            }
+        }
+        idx += 1;
+    }
+    Ok(options)
+}
+
+fn parse_outcome_template_kind(value: String) -> Result<OutcomeTemplateKind, CliError> {
+    match value.as_str() {
+        "rust" => Ok(OutcomeTemplateKind::Rust),
+        "node" | "npm" | "javascript" => Ok(OutcomeTemplateKind::Node),
+        "docs" | "documentation" => Ok(OutcomeTemplateKind::Docs),
+        "generic" => Ok(OutcomeTemplateKind::Generic),
+        _ => Err(CliError::invalid_cli(format!(
+            "unknown outcome template kind: {value}\navailable kinds: rust, node, docs, generic"
+        ))),
+    }
+}
+
 fn parse_outcome_judge_args(
     raw_args: Vec<String>,
 ) -> Result<(String, OutcomeJudgeOptions), CliError> {
@@ -5231,6 +5419,143 @@ fn load_acceptance_contract(path: &Path) -> Result<AcceptanceContract, CliError>
         task_id: raw.task_id,
         baseline,
         criteria,
+    })
+}
+
+fn ensure_acceptance_valid(contract: &AcceptanceContract) -> Result<(), CliError> {
+    let report = validate_acceptance_contract(contract);
+    if report.ok {
+        return Ok(());
+    }
+    Err(CliError::invalid_cli(format!(
+        "invalid acceptance contract: {}",
+        report.errors.join("; ")
+    )))
+}
+
+fn acceptance_template_to_contract(
+    value: &serde_json::Value,
+) -> Result<AcceptanceContract, CliError> {
+    let raw: RawAcceptanceContract =
+        serde_json::from_value(value.clone()).map_err(CliError::json)?;
+    let criteria = raw
+        .criteria
+        .into_iter()
+        .map(|criterion| {
+            let config = criterion_config_for_kind(&criterion);
+            AcceptanceCriterion {
+                id: criterion.id,
+                kind: criterion.kind,
+                description: criterion.description,
+                config,
+            }
+        })
+        .collect();
+    Ok(AcceptanceContract {
+        schema_version: raw.schema_version,
+        task_id: raw.task_id,
+        baseline: raw.baseline,
+        criteria,
+    })
+}
+
+fn build_acceptance_template(options: &OutcomeTemplateOptions) -> serde_json::Value {
+    let task_id = options
+        .task_id
+        .clone()
+        .unwrap_or_else(|| format!("{}-task", options.kind.as_str()));
+    let mut criteria = match options.kind {
+        OutcomeTemplateKind::Rust => vec![
+            serde_json::json!({
+                "id": "cargo-test",
+                "kind": "command",
+                "description": "Rust tests must pass.",
+                "command": {"argv": ["cargo", "test", "--workspace", "--all-targets"], "expect_exit": 0}
+            }),
+            serde_json::json!({
+                "id": "cargo-clippy",
+                "kind": "command",
+                "description": "Rust clippy must pass with warnings denied.",
+                "command": {"argv": ["cargo", "clippy", "--workspace", "--all-targets", "--", "-D", "warnings"], "expect_exit": 0}
+            }),
+            serde_json::json!({
+                "id": "source-or-docs-changed",
+                "kind": "diff_touches",
+                "description": "The task should touch source, tests, scripts, or docs.",
+                "diff_touches": {"paths": ["crates", "src", "tests", "scripts", "docs"]}
+            }),
+            serde_json::json!({
+                "id": "repo-scope",
+                "kind": "diff_scope",
+                "description": "Changes stay inside public repository implementation and docs.",
+                "diff_scope": {"allowed_paths": ["crates", "src", "tests", "scripts", "docs", "README.md", "CHANGELOG.md", "Cargo.toml", "Cargo.lock"]}
+            }),
+        ],
+        OutcomeTemplateKind::Node => vec![
+            serde_json::json!({
+                "id": "npm-test",
+                "kind": "command",
+                "description": "Node test script must pass.",
+                "command": {"argv": ["npm", "test"], "expect_exit": 0}
+            }),
+            serde_json::json!({
+                "id": "npm-build",
+                "kind": "command",
+                "description": "Node build script must pass.",
+                "command": {"argv": ["npm", "run", "build"], "expect_exit": 0}
+            }),
+            serde_json::json!({
+                "id": "app-or-docs-changed",
+                "kind": "diff_touches",
+                "diff_touches": {"paths": ["src", "app", "lib", "docs", "README.md", "package.json"]}
+            }),
+            serde_json::json!({
+                "id": "repo-scope",
+                "kind": "diff_scope",
+                "diff_scope": {"allowed_paths": ["src", "app", "lib", "tests", "docs", "README.md", "package.json", "package-lock.json", "pnpm-lock.yaml", "yarn.lock"]}
+            }),
+        ],
+        OutcomeTemplateKind::Docs => vec![
+            serde_json::json!({
+                "id": "docs-changed",
+                "kind": "diff_touches",
+                "description": "The task should touch docs or README content.",
+                "diff_touches": {"paths": ["docs", "README.md", "CHANGELOG.md"]}
+            }),
+            serde_json::json!({
+                "id": "docs-scope",
+                "kind": "diff_scope",
+                "description": "Documentation-only task should stay inside docs and top-level docs files.",
+                "diff_scope": {"allowed_paths": ["docs", "README.md", "CHANGELOG.md"]}
+            }),
+        ],
+        OutcomeTemplateKind::Generic => vec![
+            serde_json::json!({
+                "id": "expected-files-changed",
+                "kind": "diff_touches",
+                "description": "Replace paths with the files or directories this task must modify.",
+                "diff_touches": {"paths": ["CHANGE_ME"]}
+            }),
+            serde_json::json!({
+                "id": "allowed-scope",
+                "kind": "diff_scope",
+                "description": "Replace allowed_paths with the safe task boundary.",
+                "diff_scope": {"allowed_paths": ["CHANGE_ME"]}
+            }),
+        ],
+    };
+    if options.include_judgment {
+        criteria.push(serde_json::json!({
+            "id": "external-review",
+            "kind": "judgment",
+            "description": "External reviewer accepts the outcome.",
+            "judgment": {"rubric": "Reviewer confirms the result satisfies the user-visible task goal."}
+        }));
+    }
+    serde_json::json!({
+        "schema_version": "mneme.acceptance.v1",
+        "task_id": task_id,
+        "criteria": criteria
     })
 }
 
@@ -7375,6 +7700,60 @@ fn emit_outcome_status_report(
         report.status, report.session_id, report.store
     )
     .map_err(|source| CliError::io("write", Path::new("<stdout>"), source))
+}
+
+fn emit_outcome_validate_report(
+    report: &OutcomeValidateCliReport,
+    json: bool,
+    writer: &mut impl Write,
+) -> Result<(), CliError> {
+    if json {
+        return write_json(writer, report);
+    }
+    writeln!(
+        writer,
+        "mneme: outcome acceptance {} for {} (criteria={}, errors={}, warnings={})",
+        if report.validation.ok {
+            "valid"
+        } else {
+            "invalid"
+        },
+        report.path,
+        report.validation.criterion_count,
+        report.validation.errors.len(),
+        report.validation.warnings.len()
+    )
+    .map_err(|source| CliError::io("write", Path::new("<stdout>"), source))?;
+    for error in &report.validation.errors {
+        writeln!(writer, "error: {error}")
+            .map_err(|source| CliError::io("write", Path::new("<stdout>"), source))?;
+    }
+    for warning in &report.validation.warnings {
+        writeln!(writer, "warning: {warning}")
+            .map_err(|source| CliError::io("write", Path::new("<stdout>"), source))?;
+    }
+    Ok(())
+}
+
+fn emit_outcome_template_report(
+    report: &OutcomeTemplateCliReport,
+    json: bool,
+    writer: &mut impl Write,
+) -> Result<(), CliError> {
+    if json {
+        return write_json(writer, report);
+    }
+    if let Some(path) = &report.path {
+        return writeln!(
+            writer,
+            "mneme: wrote outcome template {path} (kind={}, valid={})",
+            report.kind, report.validation.ok
+        )
+        .map_err(|source| CliError::io("write", Path::new("<stdout>"), source));
+    }
+    let text = serde_json::to_string_pretty(&report.acceptance).map_err(CliError::json)?;
+    writeln!(writer, "{text}")
+        .map_err(|source| CliError::io("write", Path::new("<stdout>"), source))
 }
 
 fn emit_outcome_judge_report(

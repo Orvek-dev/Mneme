@@ -2,6 +2,25 @@
 
 This project follows the spirit of Keep a Changelog.
 
+## [0.72.0] - 2026-05-30
+
+### Added
+
+- Added V1 outcome acceptance validation so malformed `mneme.acceptance.v1`
+  contracts are rejected before `begin` stores a gated session.
+- Added `mneme outcome template` and `mneme outcome validate` for public-safe
+  acceptance authoring across Rust, Node, docs, and generic task shapes.
+- Added `mneme_v1_outcome_template` to the MCP server so agents can request a
+  starter outcome contract before opening a gated task.
+
+### Changed
+
+- `evaluate_outcome_gate` now carries acceptance validation errors into the
+  stored gate result when invalid contracts reach the core API boundary.
+- Extended outcome smoke coverage to validate generated templates, reject an
+  invalid command criterion, and prove invalid acceptance is blocked before
+  session begin.
+
 ## [0.71.0] - 2026-05-30
 
 ### Added

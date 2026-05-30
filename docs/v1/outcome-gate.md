@@ -24,6 +24,21 @@ validates and records the verdict.
 
 ## Acceptance Contract
 
+Start from a template when possible:
+
+```sh
+mneme outcome template \
+  --kind rust \
+  --include-judgment \
+  --output acceptance.json
+
+mneme outcome validate acceptance.json --json
+```
+
+`mneme begin --acceptance` also validates the same contract before storing a
+session. Invalid criteria are rejected up front, so malformed gates cannot be
+silently recorded as active work.
+
 Pass an acceptance contract at begin:
 
 ```json
@@ -171,6 +186,8 @@ cargo build -p mneme-cli
 scripts/outcome-gate-smoke.sh
 ```
 
-The smoke creates an isolated git repo, checks a passing gated session, checks
-`mneme outcome status`, verifies that an out-of-scope diff produces a non-zero
-failed gate, and checks both passing and failing external judgment verdicts.
+The smoke creates an isolated git repo, checks template generation and
+validation, rejects a malformed acceptance contract before begin, checks a
+passing gated session, checks `mneme outcome status`, verifies that an
+out-of-scope diff produces a non-zero failed gate, and checks both passing and
+failing external judgment verdicts.
